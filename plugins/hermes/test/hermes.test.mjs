@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseOutput, pluginDir, readPluginMeta, tempHome } from "../../../scripts/lib/plugin-test.mjs";
 
 const DIR = pluginDir(import.meta.url);
@@ -178,7 +179,7 @@ test("нет ~/.hermes → ok без событий", () => {
 });
 
 test("costCheck и median", async () => {
-  const { costCheck, median } = await import(PLUGIN);
+  const { costCheck, median } = await import(pathToFileURL(PLUGIN).href);
   assert.equal(median([3, 1, 2]), 2);
   assert.equal(median([1, 2, 3, 4]), 2.5);
   const s = (xs) => xs.map((tokens) => ({ tokens }));

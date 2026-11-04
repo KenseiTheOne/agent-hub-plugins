@@ -6,13 +6,13 @@ import { chmodSync, cpSync, existsSync, mkdirSync, realpathSync, mkdtempSync, re
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseOutput, pluginDir } from "../../../scripts/lib/plugin-test.mjs";
 
 const DIR = pluginDir(import.meta.url);
 const FILE = join(DIR, "night-runner.30s.mjs");
 const FIX = join(DIR, "fixtures");
-const N = await import(FILE);
+const N = await import(pathToFileURL(FILE).href);
 
 const NOW = "2026-11-04T10:00:00Z";
 const STATE = ".claude/task-runs/night";
@@ -483,7 +483,7 @@ test("night-runner, действие run: проект задачи — по п�
   const w = world();
   const log = join(w.home, "..", "node.log");
   try {
-    const N = await import(FILE);
+    const N = await import(pathToFileURL(FILE).href);
     const dirs = { runnerDir: join(w.home, "Projects/IT/night-runner"), stateDir: join(w.home, STATE), home: w.home };
     assert.deepEqual(N.taskRef("ccc333", dirs), { ref: "game:ccc333" });
     assert.deepEqual(N.taskRef("9", dirs), { ref: "web:9" }, "раздел «Web» — проект web по title");

@@ -7,12 +7,13 @@ import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseOutput, pluginDir, readPluginMeta, tempHome, testEnv } from "../../../scripts/lib/plugin-test.mjs";
 
 const DIR = pluginDir(import.meta.url);
 const PLUGIN = join(DIR, "clickup.2m.mjs");
 const FIX = join(DIR, "fixtures");
-const mod = await import(PLUGIN);
+const mod = await import(pathToFileURL(PLUGIN).href);
 const TOKEN = "pk_synthetic_test_token_0001";
 const fix = (n) => JSON.parse(readFileSync(join(FIX, n), "utf8"));
 
