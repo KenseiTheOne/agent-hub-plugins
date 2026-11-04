@@ -1,0 +1,49 @@
+# Метка «permissions» на PR, где выросли права плагина (тогда нужен второй ревьюер).
+#
+# Запускается после ci через workflow_run: код PR здесь НЕ извлекается и не исполняется — читается только
+# артефакт perms/perms.json ({pr, grew}) как данные, номер PR сверяется с head_sha запуска. Артефакт делает
+# job perms в ci.yml скриптами базовой ветки, не исполняя код PR (см. комментарий там).
+
+name: perms-label
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Метка по диффу прав
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p perms
+          if ! gh run download "$RUN_ID" -R "$REPO" -n perms -D perms; then
+            echo "артефакта perms нет — метку не трогаем"
+            exit 0
+          fi
+          pr=$(jq -r '.pr' perms/perms.json)
+          grew=$(jq -r '.grew' perms/perms.json)
+          [[ "$pr" =~ ^[0-9]+$ ]] || { echo "номер PR не число"; exit 1; }
+          [[ "$grew" == "true" || "$grew" == "false" ]] || { echo "grew не bool"; exit 1; }
+          head=$(gh pr view "$pr" -R "$REPO" --json headRefOid -q .headRefOid)
+          [[ "$head" == "$HEAD_SHA" ]] || { echo "PR $pr не от этого запуска"; exit 1; }
+          if [[ "$grew" == "true" ]]; then
+            gh pr edit "$pr" -R "$REPO" --add-label permissions
+          else
+            gh pr edit "$pr" -R "$REPO" --remove-label permissions || true
+          fi

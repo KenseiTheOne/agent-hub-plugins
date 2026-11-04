@@ -1,0 +1,16 @@
+{
+  "pid": 0,
+  "kind": "multiplexer",
+  "argv": ["/synthetic/python", "-m", "hermes_cli.main", "gateway"],
+  "start_time": 1793109678.0,
+  "hermes_home": "/synthetic/.hermes",
+  "gateway_state": "running",
+  "exit_reason": null,
+  "restart_requested": false,
+  "active_agents": 0,
+  "platforms": {},
+  "session_store": { "status": "ok" },
+  "updated_at": "2026-11-04T13:35:23.000000+00:00",
+  "served_profiles": ["default", "demo-bot"],
+  "active_work": null
+}

@@ -1,0 +1,135 @@
+# CI реестра плагинов.
+#
+# PR: только чтение — без секретов, без pull_request_target, токен contents: read, persist-credentials: false.
+#     Проверка на macOS и Windows: тесты реестра + scripts/check.sh с диффом прав относительно базы PR.
+#     Рост прав для метки считает ОТДЕЛЬНЫЙ job perms: он берёт scripts/ из базовой ветки, файлы PR
+#     извлекает в соседний каталог и читает их только как данные (check.mjs --perms-only) — ни плагины,
+#     ни их тесты, ни скрипты PR в этом job не исполняются. В job check код PR исполняется (тесты плагинов),
+#     поэтому оттуда в метку ничего не идёт. Артефакт «perms» читает perms-label.yml, не трогая код PR.
+# push в main: то же + job sign — сборка index.json, подпись ключом из environment «registry-signing»,
+#     публикация ассетами релиза «index».
+#
+# Действия закреплены тегом major-версии; при публикации репы владелец закрепляет их по SHA коммита.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Тесты реестра
+        run: env -u NODE_OPTIONS node --test 'test/*.test.mjs'
+
+      - name: Проверка плагинов
+        env:
+          # имя базовой ветки — через env, не подстановкой в скрипт
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.base_ref || '' }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            scripts/check.sh --base "origin/$BASE_REF" --report check-report.json
+          else
+            scripts/check.sh --report check-report.json
+          fi
+
+  perms:
+    name: perms (рост прав, без кода PR)
+    if: github.event_name == 'pull_request'
+    needs: []
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Скрипты — из базовой ветки (уже прошли ревью); их и исполняем.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      # Файлы PR — только данные: отсюда ничего не запускается.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Дифф прав (скрипты базы над файлами PR)
+        working-directory: base
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          env -u NODE_OPTIONS node scripts/check.mjs --perms-only --root ../pr --base-dir . --report ../perms-report.json || true
+          env -u NODE_OPTIONS node scripts/perms-artifact.mjs ../perms-report.json "$PR_NUMBER" ../perms
+
+      - name: Артефакт perms
+        uses: actions/upload-artifact@v4
+        with:
+          name: perms
+          path: perms/perms.json
+          retention-days: 7
+
+  sign:
+    name: sign index.json
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 10
+    # Секрет INDEX_SIGNING_KEY живёт только в этом environment (защищён: только ветка main, ревьюер — владелец).
+    environment: registry-signing
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Сборка и подпись index.json
+        env:
+          INDEX_SIGNING_KEY: ${{ secrets.INDEX_SIGNING_KEY }}
+        run: env -u NODE_OPTIONS node scripts/build-index.mjs --out dist --flat-archives --sign-key-env INDEX_SIGNING_KEY
+
+      - name: Публикация (релиз «index»)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view index >/dev/null 2>&1 || gh release create index --title "index" --notes "Каталог плагинов Agent Hub (собирается CI)" --latest=false
+          gh release upload index dist/* --clobber

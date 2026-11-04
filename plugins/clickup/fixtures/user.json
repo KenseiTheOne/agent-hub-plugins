@@ -1,0 +1,1 @@
+{ "user": { "id": 1000001, "username": "Synthetic User", "email": "synthetic@example.invalid", "color": "#7b68ee", "profilePicture": null, "initials": "SU", "week_start_day": 1, "global_font_support": true, "timezone": "Europe/Berlin" } }

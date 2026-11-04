@@ -1,0 +1,14 @@
+{
+  "name": "agent-hub-plugins",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Реестр плагинов Agent Hub: монорепа, CI, подписанный index.json",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "check": "bash scripts/check.sh",
+    "build-index": "node scripts/build-index.mjs",
+    "test": "node --test 'test/*.test.mjs'"
+  }
+}

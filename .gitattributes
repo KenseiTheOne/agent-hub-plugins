@@ -1,0 +1,3 @@
+# LF везде: sha256 копий в scripts/vendor/ (VENDOR.json) и архивов плагинов не должны зависеть от ОС checkout-а
+* text=auto eol=lf
+*.tar.gz binary

@@ -1,0 +1,27 @@
+{
+  "schema": 2,
+  "state_dir": "~/.claude/task-runs/night",
+  "schedule": { "start": "04:30", "grace_min": 45, "window_hours": 5, "min_remaining_min": 45, "max_wait_for_reset_min": 240 },
+  "usage": { "stop_five_hour_pct": 90, "skip_seven_day_pct": 80, "share_five_hour_below_pct": 15, "night_share_pct": 30, "stop_seven_day_pct": 85 },
+  "task_timeout_min": 120,
+  "projects": [
+    {
+      "id": "game",
+      "title": "Game",
+      "enabled": true,
+      "repo": "owner/game",
+      "main_checkout": "~/Projects/Game",
+      "profile": { "type": "unity", "project_path": "Client/Game", "playmode": true },
+      "tracker": { "kind": "clickup", "query": { "assignees": ["100"], "statuses": ["to do"] } }
+    },
+    {
+      "id": "web",
+      "title": "Web",
+      "enabled": true,
+      "main_checkout": "~/Projects/Web",
+      "worktree": "~/Projects/Web-nightly",
+      "profile": { "type": "generic" },
+      "tracker": { "kind": "github-issues" }
+    }
+  ]
+}

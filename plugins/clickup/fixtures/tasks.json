@@ -1,0 +1,26 @@
+{
+  "tasks": [
+    {
+      "id": "86aaa0001", "custom_id": null, "name": "Синтетика: починить экран загрузки", "text_content": "СИНТЕТИЧЕСКОЕ-ОПИСАНИЕ-НЕ-ВЫВОДИТЬ",
+      "description": "СИНТЕТИЧЕСКОЕ-ОПИСАНИЕ-НЕ-ВЫВОДИТЬ",
+      "status": { "status": "in progress", "color": "#5f55ee", "type": "custom", "orderindex": 2 },
+      "date_created": "1793000000000", "date_updated": "1793700000000", "due_date": null,
+      "assignees": [ { "id": 1000001, "username": "Synthetic User" } ],
+      "list": { "id": "8000001", "name": "Синтетический список" }, "url": "https://app.clickup.com/t/86aaa0001"
+    },
+    {
+      "id": "86aaa0002", "custom_id": "SYN-42", "name": "Синтетика: ночная задача", "text_content": "СИНТЕТИЧЕСКОЕ-ОПИСАНИЕ-НЕ-ВЫВОДИТЬ",
+      "status": { "status": "review", "color": "#f8ae00", "type": "custom" },
+      "date_created": "1793000000000", "date_updated": "1793600000000", "due_date": "1700000000000",
+      "list": { "id": "8000001", "name": "Синтетический список" }, "url": "https://app.clickup.com/t/86aaa0002"
+    },
+    {
+      "id": "86aaa0003", "custom_id": null, "name": "Синтетика: в сессии | с чертой", "status": { "status": "to do", "color": "#87909e", "type": "open" },
+      "date_updated": "1793500000000", "list": { "id": "8000002", "name": "Другой список" }, "url": "https://app.clickup.com/t/86aaa0003"
+    },
+    {
+      "id": "86aaa0004", "custom_id": null, "name": "Синтетика: без связи", "status": { "status": "to do", "color": "#87909e", "type": "open" },
+      "date_updated": "1793400000000", "url": "javascript:alert(1)"
+    }
+  ]
+}
