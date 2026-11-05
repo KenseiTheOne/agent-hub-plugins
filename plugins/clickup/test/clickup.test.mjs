@@ -131,7 +131,7 @@ test("нет токена → unknown, ни одного запроса", async 
   try {
     const { parsed } = await run({ ...env, AGENTHUB_CLICKUP_API_BASE: d.base });
     assert.equal(parsed.status, "unknown");
-    assert.match(parsed.header[0].title, /нет токена/);
+    assert.match(parsed.header[0].title, /не подключён — нужен токен/);
     assert.equal(d.log.length, 0);
   } finally {
     await d.close();
@@ -161,12 +161,12 @@ test("тикеты на пользователя, ссылки open.url, свя�
     assert.ok(t1 >= 0);
     assert.equal(items[t1].href, "https://app.clickup.com/t/86aaa0001");
     assert.match(text, /\/ticket: шаг review \(fix\) · точно/);
-    assert.match(text, /сессия «синт-тикет»: ветка fix\/86aaa0001-loading как в RUN\.md · сильно/);
+    assert.match(text, /сессия «синт-тикет»: ветка fix\/86aaa0001-loading как в RUN\.md · вероятно/);
     const focus = items.find((i) => i.effect && i.effect.startsWith("cmux.focus"));
     assert.equal(focus.effect, `cmux.focus ${SURF} workspaceId=${WS}`, "связь с сессией ведёт во вкладку");
     assert.match(text, /SYN-42 Синтетика: ночная задача — review/);
     assert.match(text, /ночь: PR открыт, 03\.11 · точно/);
-    assert.match(text, /сессия 00000000: ветка feature\/86aaa0003-session · сильно/);
+    assert.match(text, /сессия 00000000: ветка feature\/86aaa0003-session · вероятно/);
     assert.ok(!text.includes("dead-86aaa0004"), "мёртвая сессия не связывается");
     assert.ok(text.includes("в сессии ¦ с чертой"), "черта в названии не ломает разбор");
     const t4 = items.find((i) => i.title.startsWith("86aaa0004 "));

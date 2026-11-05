@@ -103,7 +103,9 @@ test("gateway молчит: процесса нет при свежем пуль
   try {
     const { parsed, text } = run(home);
     assert.ok(parsed.events.includes("gateway-silent"));
-    assert.match(text, /процесса нет/);
+    assert.match(text, /^Hermes не отвечает: служба не запущена \| status=error tile="\d проблем/);
+    assert.match(text, /--Подробности \| details=true\n----служба gateway, процесс \d+/);
+    assert.match(text, /--Запускается каждый день в 22:00/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -167,11 +169,12 @@ test("порча схемы executions.db → source-broken", () => {
   }
 });
 
-test("нет ~/.hermes → ok без событий", () => {
+test("нет ~/.hermes → unknown «Hermes не установлен» без событий", () => {
   const home = tempHome("ah-herm-");
   try {
     const { parsed } = run(home);
-    assert.equal(parsed.status, "ok");
+    assert.equal(parsed.status, "unknown");
+    assert.equal(parsed.header[0].title, "Hermes не установлен");
     assert.deepEqual(parsed.events, []);
   } finally {
     rmSync(home, { recursive: true, force: true });

@@ -41,7 +41,8 @@ scripts/check.sh --base origin/main          # как в CI, с диффом п�
 node scripts/build-index.mjs --out /tmp/idx  # посмотреть, что попадёт в индекс (без подписи)
 ```
 
-Нужен Node ≥ 22. Подробности — [CONTRIBUTING.md](CONTRIBUTING.md).
+Нужен Node ≥ 22. Подробности — [CONTRIBUTING.md](CONTRIBUTING.md). Язык вывода — из `AGENTHUB_LANG=ru|en`
+(хаб передаёт его плагину; без перевода плагин показывается как есть), переводы метаданных — теги с `lang="en"`.
 
 ## Вендоринг разборщиков ядра
 

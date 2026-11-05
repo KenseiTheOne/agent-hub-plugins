@@ -43,6 +43,9 @@ export function buildIndex({ root = ROOT, out = join(ROOT, "dist"), generatedAt 
       version: info.meta.version,
       title: info.meta.title,
       desc: info.meta.desc,
+      // переводы названия, описания и «зачем» у прав (теги с lang="xx", у действий — title-xx): менеджер хаба
+      // показывает их на языке хаба; сами права (ключи) от перевода не зависят
+      ...i18nOf(info.meta),
       author: info.meta.author,
       platforms: info.meta.platforms,
       type: info.meta.type,
@@ -102,4 +105,19 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.error(e.message);
     process.exit(1);
   }
+}
+
+function i18nOf(meta) {
+  const out = {};
+  for (const [lang, v] of Object.entries(meta.i18n || {})) {
+    const e = {};
+    if (v.title) e.title = v.title;
+    if (v.desc) e.desc = v.desc;
+    if (v.why && Object.keys(v.why).length) e.why = { ...v.why };
+    if (Object.keys(e).length) out[lang] = e;
+  }
+  for (const a of meta.actions || []) {
+    for (const [lang, v] of Object.entries(a.i18n || {})) if (v?.title) (((out[lang] ||= {}).actions ||= {})[a.id] = v.title);
+  }
+  return Object.keys(out).length ? { i18n: out } : {};
 }

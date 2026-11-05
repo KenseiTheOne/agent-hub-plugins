@@ -1,17 +1,32 @@
 #!/usr/bin/env node
 // <agenthub.title>ClickUp</agenthub.title>
-// <agenthub.version>1.0.1</agenthub.version>
-// <agenthub.desc>Тикеты ClickUp на пользователя и их связь с работой агентов (ночь, /ticket, сессии). Только чтение.</agenthub.desc>
-// <agenthub.author.github>kensei</agenthub.author.github>
+// <agenthub.version>1.1.0</agenthub.version>
+// <agenthub.desc>Ваши тикеты ClickUp и какие из них сейчас в работе у агентов (ночь, /ticket, сессии). Только чтение</agenthub.desc>
+// <agenthub.desc lang="en">Your ClickUp tickets and which ones agents are working on (night, /ticket, sessions). Read-only</agenthub.desc>
+// <agenthub.status value="ok" label="Тикеты загружены">Список тикетов свежий</agenthub.status>
+// <agenthub.status value="ok" lang="en" label="Tickets loaded">The ticket list is up to date</agenthub.status>
+// <agenthub.status value="error" label="Токен не принят">ClickUp отклонил токен или хаб не пустил запрос</agenthub.status>
+// <agenthub.status value="error" lang="en" label="Token rejected">ClickUp rejected the token or the hub blocked a request</agenthub.status>
+// <agenthub.status value="unknown" label="Не подключён или нет связи">Нет токена ClickUp или ClickUp не отвечает</agenthub.status>
+// <agenthub.status value="unknown" lang="en" label="Not connected / offline">No ClickUp token, or ClickUp isn't responding</agenthub.status>
+// <agenthub.author.name>Kensei</agenthub.author.name>
+// <agenthub.author.github>KenseiTheOne</agenthub.author.github>
 // <agenthub.platforms>macos,windows</agenthub.platforms>
-// <agenthub.secrets>clickup.token — персональный токен ClickUp, только чтение тикетов</agenthub.secrets>
-// <agenthub.net>api.clickup.com — REST v2, только GET из белого списка путей</agenthub.net>
-// <agenthub.fsRead>~/.claude/task-runs — RUN.md /ticket и попытки ночи (связь тикет ↔ работа)</agenthub.fsRead>
-// <agenthub.fsRead>~/.claude/sessions/*.json — живые сессии и их каталоги (без *.key)</agenthub.fsRead>
-// <agenthub.fsRead>.git/HEAD каталогов сессий — текущая ветка</agenthub.fsRead>
-// <agenthub.fsRead>~/.cmuxterm/claude-hook-sessions.json — вкладка cmux связанной сессии (только идентификаторы)</agenthub.fsRead>
+// <agenthub.secrets>clickup.token — ваш личный токен ClickUp: только чтобы читать тикеты</agenthub.secrets>
+// <agenthub.secrets lang="en">clickup.token — your personal ClickUp token: only to read tickets</agenthub.secrets>
+// <agenthub.net>api.clickup.com — запросы к ClickUp только на чтение и только по заранее заданному списку адресов</agenthub.net>
+// <agenthub.net lang="en">api.clickup.com — read-only requests to ClickUp, only to a fixed list of addresses</agenthub.net>
+// <agenthub.fsRead>~/.claude/task-runs — какие тикеты сейчас делают агенты (ночь и /ticket)</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.claude/task-runs — which tickets agents are working on (night runs and /ticket)</agenthub.fsRead>
+// <agenthub.fsRead>~/.claude/sessions/*.json — в каких папках идут сессии, чтобы связать их с тикетами (ключи сессий не открываются)</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.claude/sessions/*.json — which folders sessions run in, to link them to tickets (session keys are never opened)</agenthub.fsRead>
+// <agenthub.fsRead>.git/HEAD каталогов сессий — ветка сессии: по ней видно номер тикета</agenthub.fsRead>
+// <agenthub.fsRead lang="en">.git/HEAD каталогов сессий — the session's branch: it shows the ticket number</agenthub.fsRead>
+// <agenthub.fsRead>~/.cmuxterm/claude-hook-sessions.json — вкладка cmux сессии — для кнопки «Перейти»</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.cmuxterm/claude-hook-sessions.json — the session's cmux tab — for the Switch to tab button</agenthub.fsRead>
 // <agenthub.effects>open.url,cmux.focus</agenthub.effects>
 // <agenthub.push key="auth-failed">ClickUp: токен не принят</agenthub.push>
+// <agenthub.push key="auth-failed" lang="en">ClickUp: token rejected</agenthub.push>
 //
 // Только GET и только пути из белого списка (ALLOWED_PATHS); записей в ClickUp нет и быть не может.
 // Токен — из секрета clickup.token (ядро кладёт его в AGENTHUB_SECRET_CLICKUP_TOKEN); в вывод, кэш и журнал
@@ -69,16 +84,32 @@ function line(title, params = {}) {
     .map(([k, v]) => `${k}=${/^[\w.:/+#-]+$/.test(String(v)) ? v : q(v)}`);
   return ps.length ? `${title} | ${ps.join(" ")}` : title;
 }
+// Язык — AGENTHUB_LANG (ru | en) от ядра; без переменной — ru.
+export function envLang() {
+  return process.env.AGENTHUB_LANG === "en" ? "en" : "ru";
+}
+let LANG = envLang();
+export function setLang(l) {
+  LANG = l === "en" ? "en" : "ru";
+}
+const EN = () => LANG === "en";
+const tr = (ru, en) => (EN() ? en : ru);
+const LOC = () => (EN() ? "en-US" : "ru-RU");
+// Степень связи тикета с работой — код; подпись на языке.
+export const CONFIDENCE = { certain: ["точно", "certain"], likely: ["вероятно", "likely"], possible: ["возможно", "possible"] };
+const confText = (c) => (CONFIDENCE[c] ? CONFIDENCE[c][EN() ? 1 : 0] : c);
 function fmtTime(ms, now) {
   const d = new Date(ms);
-  const hm = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-  return d.toDateString() === new Date(now).toDateString() ? hm : `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })} ${hm}`;
+  const hm = d.toLocaleTimeString(LOC(), { hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toDateString() === new Date(now).toDateString() ? hm : `${d.toLocaleDateString(LOC(), EN() ? { month: "short", day: "numeric" } : { day: "2-digit", month: "2-digit" })} ${hm}`;
 }
 function fmtDate(ms, nowMs = Date.now()) {
   const d = new Date(ms);
   const sameYear = d.getFullYear() === new Date(nowMs).getFullYear();
+  if (EN()) return d.toLocaleDateString("en-US", sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
   return d.toLocaleDateString("ru-RU", sameYear ? { day: "2-digit", month: "2-digit" } : { day: "2-digit", month: "2-digit", year: "numeric" });
 }
+const plEn = (n, one, other) => (n === 1 ? one : other);
 function plural(n, one, few, many) {
   const m10 = n % 10;
   const m100 = n % 100;
@@ -363,13 +394,14 @@ function within(dir, root) {
   return dir === r || dir.startsWith(r + "/");
 }
 function nightDate(s) {
-  return /^\d{8}$/.test(s || "") ? `${s.slice(6, 8)}.${s.slice(4, 6)}` : s || "";
+  if (!/^\d{8}$/.test(s || "")) return s || "";
+  return EN() ? `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(s.slice(4, 6)) - 1]} ${Number(s.slice(6, 8))}` : `${s.slice(6, 8)}.${s.slice(4, 6)}`;
 }
 function sessionLabel(s) {
-  return s.name ? `«${clean(s.name, 40)}»` : s.sessionId.slice(0, 8);
+  return s.name ? tr(`«${clean(s.name, 40)}»`, `"${clean(s.name, 40)}"`) : s.sessionId.slice(0, 8);
 }
 
-// → [{ kind: night|ticket|session, confidence: точно|сильно|возможно, text, sessionId? }]
+// → [{ kind: night|ticket|session, confidence: certain|likely|possible, text, sessionId? }]
 export function linksFor(task, work) {
   const ids = [task.id, task.customId].filter(Boolean).map((x) => x.toLowerCase());
   const links = [];
@@ -380,25 +412,25 @@ export function linksFor(task, work) {
   const att = ids.map((id) => work.attempts.get(id)).find(Boolean);
   const nightDay = ids.map((id) => work.nightDirs.get(id)).find(Boolean);
   const nightRun = uniqRuns.find((r) => r.night);
-  if (att) links.push({ kind: "night", confidence: "точно", text: `ночь: ${clean(att.outcome || "попытка", 60)}${att.date ? `, ${nightDate(att.date)}` : ""}` });
-  else if (nightRun) links.push({ kind: "night", confidence: "точно", text: `ночь: ${clean(nightRun.outcome || nightRun.lastStep || "прогон", 60)}${nightRun.branch ? `, ветка ${clean(nightRun.branch, 60)}` : ""}` });
-  else if (nightDay) links.push({ kind: "night", confidence: "точно", text: `ночь: прогон ${nightDate(nightDay)}` });
+  if (att) links.push({ kind: "night", confidence: "certain", text: `${tr("ночь", "night")}: ${clean(att.outcome || tr("попытка", "attempt"), 60)}${att.date ? `, ${nightDate(att.date)}` : ""}` });
+  else if (nightRun) links.push({ kind: "night", confidence: "certain", text: `${tr("ночь", "night")}: ${clean(nightRun.outcome || nightRun.lastStep || tr("прогон", "run"), 60)}${nightRun.branch ? tr(`, ветка ${clean(nightRun.branch, 60)}`, `, branch ${clean(nightRun.branch, 60)}`) : ""}` });
+  else if (nightDay) links.push({ kind: "night", confidence: "certain", text: tr(`ночь: прогон ${nightDate(nightDay)}`, `night: run ${nightDate(nightDay)}`) });
   // дневной /ticket
   const day = uniqRuns.find((r) => !r.night);
   if (day) {
-    const what = day.outcome || (day.lastStep ? `шаг ${day.lastStep}` : day.status || "прогон");
-    links.push({ kind: "ticket", confidence: "точно", text: `/ticket: ${clean(what, 60)}${day.mode ? ` (${clean(day.mode, 20)})` : ""}` });
+    const what = day.outcome || (day.lastStep ? tr(`шаг ${day.lastStep}`, `step ${day.lastStep}`) : day.status || tr("прогон", "run"));
+    links.push({ kind: "ticket", confidence: "certain", text: `/ticket: ${clean(what, 60)}${day.mode ? ` (${clean(day.mode, 20)})` : ""}` });
     const sid = day.session_id && /^[\w-]{8,64}$/.test(day.session_id) ? day.session_id : null;
     const exact = sid && work.sessions.find((s) => s.sessionId === sid);
     if (exact) {
-      links.push({ kind: "session", confidence: "точно", sessionId: exact.sessionId, surface: exact.surface, text: `сессия ${sessionLabel(exact)} (из RUN.md)` });
+      links.push({ kind: "session", confidence: "certain", sessionId: exact.sessionId, surface: exact.surface, text: tr(`сессия ${sessionLabel(exact)} (из RUN.md)`, `session ${sessionLabel(exact)} (from RUN.md)`) });
       seenSessions.add(exact.sessionId);
     }
     const root = day.worktree && isAbsolute(day.worktree.split(/\s/)[0]) ? day.worktree.split(/\s/)[0] : day.repo_root;
     for (const s of work.sessions) {
       if (seenSessions.has(s.sessionId) || !within(s.cwd, root)) continue;
       if (day.branch && s.branch && s.branch === day.branch.split(/\s/)[0]) {
-        links.push({ kind: "session", confidence: "сильно", sessionId: s.sessionId, surface: s.surface, text: `сессия ${sessionLabel(s)}: ветка ${clean(s.branch, 60)} как в RUN.md` });
+        links.push({ kind: "session", confidence: "likely", sessionId: s.sessionId, surface: s.surface, text: tr(`сессия ${sessionLabel(s)}: ветка ${clean(s.branch, 60)} как в RUN.md`, `session ${sessionLabel(s)}: branch ${clean(s.branch, 60)} as in RUN.md`) });
         seenSessions.add(s.sessionId);
       }
     }
@@ -408,14 +440,14 @@ export function linksFor(task, work) {
     if (seenSessions.has(s.sessionId)) continue;
     const hit = ids.find((id) => (s.branch && idRe(id).test(s.branch)) || idRe(id).test(s.cwd));
     if (hit) {
-      links.push({ kind: "session", confidence: "сильно", sessionId: s.sessionId, surface: s.surface, text: `сессия ${sessionLabel(s)}: ${s.branch && idRe(hit).test(s.branch) ? `ветка ${clean(s.branch, 60)}` : "каталог"}` });
+      links.push({ kind: "session", confidence: "likely", sessionId: s.sessionId, surface: s.surface, text: `${tr("сессия", "session")} ${sessionLabel(s)}: ${s.branch && idRe(hit).test(s.branch) ? tr(`ветка ${clean(s.branch, 60)}`, `branch ${clean(s.branch, 60)}`) : tr("каталог", "folder")}` });
       seenSessions.add(s.sessionId);
     }
   }
   if (day && !links.some((l) => l.kind === "session")) {
     const root = day.repo_root;
     const s = work.sessions.find((x) => within(x.cwd, root));
-    if (s && now() - day.mtimeMs < 6 * 3600_000) links.push({ kind: "session", confidence: "возможно", sessionId: s.sessionId, surface: s.surface, text: `сессия ${sessionLabel(s)} в том же репо` });
+    if (s && now() - day.mtimeMs < 6 * 3600_000) links.push({ kind: "session", confidence: "possible", sessionId: s.sessionId, surface: s.surface, text: tr(`сессия ${sessionLabel(s)} в том же репо`, `session ${sessionLabel(s)} in the same repo`) });
   }
   return links;
 }
@@ -493,34 +525,41 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
   return r;
 }
 
-export function render(r, { nowMs = Date.now(), limit = r.limit || 15 } = {}) {
+// Шапка отвечает на «подключён ли ClickUp и что в работе». tile= — число тикетов для плитки.
+export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LANG } = {}) {
+  setLang(lang);
   const out = [];
   if (r.tokenMissing) {
-    out.push(line("ClickUp: нет токена", { status: "unknown", sfimage: "key.slash" }));
+    out.push(line(tr("ClickUp не подключён — нужен токен", "ClickUp isn't connected — a token is needed"), { status: "unknown", tile: "—", sfimage: "key.slash" }));
     out.push("---");
-    out.push(line("Токен заводит пользователь: секрет clickup.token (Keychain agent-hub.clickup)", { color: "gray" }));
+    out.push(line(tr("Как подключить", "How to connect"), { color: "gray" }));
+    out.push(line(tr("--Заведите персональный токен ClickUp (Settings → Apps) и сохраните его в связке ключей как секрет clickup.token (сервис agent-hub.clickup)", "--Create a personal ClickUp token (Settings → Apps) and save it in the keychain as the clickup.token secret (service agent-hub.clickup)"), { color: "gray" }));
     return out.join("\n");
   }
   let status = "ok";
   const notes = [];
+  let problem = null;
   if (r.error) {
     if (r.error.kind === "auth") {
       status = "error";
-      notes.push(line(`Токен не принят (HTTP ${r.error.status})`, { color: "red", event: "auth-failed" }));
+      problem = tr("ClickUp не принял токен — обновите его", "ClickUp rejected the token — update it");
+      notes.push(line(tr(`Токен не принят (HTTP ${r.error.status})`, `Token rejected (HTTP ${r.error.status})`), { color: "red", event: "auth-failed" }));
     } else if (r.error.kind === "shape") {
       status = "unknown";
-      notes.push(line("Ответ ClickUp не разобран", { color: "orange", event: "source-broken" }));
+      problem = tr("ClickUp: не получилось загрузить тикеты", "ClickUp: couldn't load tickets");
+      notes.push(line(tr("Ответ ClickUp не разобран", "Couldn't parse ClickUp's response"), { color: "orange", event: "source-broken" }));
       if (r.error.reason) notes.push(line(`--${clean(r.error.reason, 80)}`, { color: "gray" }));
     } else if (r.error.kind === "rate") {
-      notes.push(line(`Лимит запросов ClickUp (429), пауза до ${fmtTime(r.pausedUntil, nowMs)}`, { color: "orange" }));
+      notes.push(line(tr(`Лимит запросов ClickUp (429), пауза до ${fmtTime(r.pausedUntil, nowMs)}`, `ClickUp rate limit (429), pausing until ${fmtTime(r.pausedUntil, nowMs)}`), { color: "orange" }));
     } else if (r.error.kind === "denied") {
       status = "error";
-      notes.push(line("Запрос вне белого списка отклонён", { color: "red" }));
+      problem = tr("Хаб не пустил запрос к ClickUp: адрес не в списке разрешённых", "The hub blocked a ClickUp request: address not allowed");
+      notes.push(line(problem, { color: "red" }));
     } else {
-      notes.push(line(`Нет связи с ClickUp${r.error.status ? ` (HTTP ${r.error.status})` : r.error.reason ? ` (${clean(r.error.reason, 20)})` : ""}`, { color: "orange" }));
+      notes.push(line(tr(`Нет связи с ClickUp${r.error.status ? ` (HTTP ${r.error.status})` : r.error.reason ? ` (${clean(r.error.reason, 20)})` : ""}`, `Can't reach ClickUp${r.error.status ? ` (HTTP ${r.error.status})` : r.error.reason ? ` (${clean(r.error.reason, 20)})` : ""}`), { color: "orange" }));
     }
   } else if (r.pausedUntil) {
-    notes.push(line(`Пауза до ${fmtTime(r.pausedUntil, nowMs)}: бережём лимит запросов`, { color: "gray" }));
+    notes.push(line(tr(`Пауза до ${fmtTime(r.pausedUntil, nowMs)}: бережём лимит запросов`, `Paused until ${fmtTime(r.pausedUntil, nowMs)} to save the rate limit`), { color: "gray" }));
   }
   const stale = !r.fetchedAt || nowMs - r.fetchedAt > STALE_MS;
   if (stale && status === "ok" && (r.error || r.pausedUntil)) status = "unknown";
@@ -529,29 +568,30 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15 } = {}) {
   const linked = (t) => (r.links.get(t.id) || []).length;
   tasks.sort((a, b) => (linked(b) > 0) - (linked(a) > 0) || (b.updatedMs || 0) - (a.updatedMs || 0));
   const working = tasks.filter((t) => (r.links.get(t.id) || []).some((l) => l.kind === "session" || l.kind === "ticket")).length;
-  const title = `ClickUp: ${tasks.length} ${plural(tasks.length, "тикет", "тикета", "тикетов")}${working ? `, в работе ${working}` : ""}`;
-  out.push(line(title, { status, sfimage: "checklist" }));
+  const n = tasks.length;
+  const title = problem || (EN() ? `ClickUp: ${n} ${plEn(n, "ticket", "tickets")}${working ? `, ${working} in progress` : ""}` : `ClickUp: ${n} ${plural(n, "тикет", "тикета", "тикетов")}${working ? `, в работе ${working}` : ""}`);
+  out.push(line(title, { status, tile: String(n), sfimage: "checklist" }));
   out.push("---");
   out.push(...notes);
   if (notes.length) out.push("---");
-  if (!tasks.length) out.push(line(r.fetchedAt ? "Открытых тикетов нет" : "Тикеты ещё не загружены", { color: "gray" }));
+  if (!tasks.length) out.push(line(r.fetchedAt ? tr("Открытых тикетов нет", "No open tickets") : tr("Тикеты ещё не загружены", "Tickets not loaded yet"), { color: "gray" }));
   for (const t of tasks.slice(0, limit)) {
     const ref = t.customId || t.id;
     out.push(line(`${clean(ref, 30)} ${clean(t.name, 80)} — ${clean(t.status, 30)}`, { href: t.url, color: t.statusColor }));
     for (const l of r.links.get(t.id) || []) {
-      const params = l.confidence === "возможно" ? { color: "gray" } : {};
+      const params = l.confidence === "possible" ? { color: "gray" } : {};
       // строка связи с сессией — сразу переход во вкладку (cmux.focus; ядро сверит вкладку со своими фактами)
       if (l.surface) params.effect = `cmux.focus ${l.surface.surfaceId} workspaceId=${l.surface.workspaceId}`;
-      out.push(line(`--${l.text} · ${l.confidence}`, params));
+      out.push(line(`--${l.text} · ${confText(l.confidence)}`, params));
     }
-    if (t.list) out.push(line(`--Список: ${clean(t.list, 60)}`, { color: "gray" }));
-    if (t.dueMs) out.push(line(`--Срок: ${fmtDate(t.dueMs, nowMs)}`, t.dueMs < nowMs ? { color: "red" } : { color: "gray" }));
+    if (t.list) out.push(line(tr(`--Список: ${clean(t.list, 60)}`, `--List: ${clean(t.list, 60)}`), { color: "gray" }));
+    if (t.dueMs) out.push(line(tr(`--Срок: ${fmtDate(t.dueMs, nowMs)}`, `--Due: ${fmtDate(t.dueMs, nowMs)}`), t.dueMs < nowMs ? { color: "red" } : { color: "gray" }));
   }
-  if (tasks.length > limit) out.push(line(`…и ещё ${tasks.length - limit}`, { color: "gray" }));
+  if (tasks.length > limit) out.push(line(tr(`…и ещё ${tasks.length - limit}`, `…and ${tasks.length - limit} more`), { color: "gray" }));
   out.push("---");
   const parts = [];
-  if (r.fetchedAt) parts.push(`обновлено ${fmtTime(r.fetchedAt, nowMs)}`);
-  if (r.rate && r.rate.remaining !== null) parts.push(`лимит API: осталось ${r.rate.remaining}`);
+  if (r.fetchedAt) parts.push(tr(`обновлено ${fmtTime(r.fetchedAt, nowMs)}`, `updated ${fmtTime(r.fetchedAt, nowMs)}`));
+  if (r.rate && r.rate.remaining !== null) parts.push(tr(`лимит API: осталось ${r.rate.remaining}`, `API limit: ${r.rate.remaining} left`));
   if (parts.length) out.push(line(parts.join(" · "), { color: "gray" }));
   return out.join("\n");
 }
@@ -563,7 +603,7 @@ async function main() {
     const r = await collect({ nowMs });
     text = render(r, { nowMs });
   } catch (e) {
-    text = [line("ClickUp: ошибка", { status: "unknown", event: "source-broken" }), "---", line(clean(e.message), { color: "gray" })].join("\n");
+    text = [line(tr("ClickUp: не получилось загрузить тикеты", "ClickUp: couldn't load tickets"), { status: "unknown", event: "source-broken" }), "---", line(clean(e.message), { color: "gray" })].join("\n");
   }
   process.stdout.write(text + "\n");
 }

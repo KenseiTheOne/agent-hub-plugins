@@ -134,3 +134,50 @@ test("keygen: пишет ключ 0600 во временный каталог и
     cleanup(dir);
   }
 });
+
+test("переводы в индексе: название, описание и «зачем» у прав (lang=\"en\"); права (ключи) от перевода не зависят", () => {
+  const root = makeRegistry({
+    hello: {
+      "hello.5m.mjs": pluginSource({
+        extra: ['// <agenthub.title lang="en">Hi</agenthub.title>', '// <agenthub.fsRead lang="en">~/.config/hello/state.json — show the state</agenthub.fsRead>'],
+      }),
+      "README.md": README,
+    },
+  });
+  const out = tempDir("ahp-out-");
+  try {
+    const hello = buildIndex({ root, out, generatedAt: "2026-11-04T10:00:00.000Z" }).index.plugins[0];
+    assert.deepEqual(hello.i18n, { en: { title: "Hi", why: { "~/.config/hello/state.json": "show the state" } } });
+    assert.deepEqual(hello.permissions.fsRead, [{ what: "~/.config/hello/state.json", why: "показать состояние" }]);
+  } finally {
+    cleanup(root);
+    cleanup(out);
+  }
+});
+
+test("официальные плагины: у каждого права есть английское «зачем», у каждого действия — title-en", () => {
+  const out = tempDir("ahp-out-");
+  try {
+    const { index } = buildIndex({ out, generatedAt: "2026-11-04T10:00:00.000Z" });
+    for (const p of index.plugins) {
+      const en = p.i18n?.en || {};
+      for (const k of ["fsRead", "fsWrite", "exec", "secrets", "net"]) {
+        for (const e of p.permissions[k] || []) assert.ok(en.why?.[e.what], `${p.id}: ${k} ${e.what} — нет lang="en"`);
+      }
+      for (const a of p.permissions.actions || []) assert.ok(en.actions?.[a.id], `${p.id}: действие ${a.id} без title-en`);
+    }
+  } finally {
+    cleanup(out);
+  }
+});
+
+test("официальные плагины: автор — имя Kensei и логин KenseiTheOne (в индексе — оба)", () => {
+  const out = tempDir("ahp-out-");
+  try {
+    const { index } = buildIndex({ out, generatedAt: "2026-11-04T10:00:00.000Z" });
+    assert.ok(index.plugins.length >= 3);
+    for (const p of index.plugins) assert.deepEqual(p.author, { name: "Kensei", github: "KenseiTheOne" }, p.id);
+  } finally {
+    cleanup(out);
+  }
+});

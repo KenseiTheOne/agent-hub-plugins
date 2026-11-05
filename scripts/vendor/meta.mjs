@@ -11,6 +11,7 @@ import { loadNative } from "./native.mjs";
 export const XATTR_NAME = "com.kensei.agenthub.meta";
 export const LEVELS = ["immediate", "confirm", "confirm-cost"];
 const UNIT_MS = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+const LANG_RE = /^[a-z]{2}$/;
 const IGNORED_EXT = new Set(["md", "txt", "json", "lock", "log", "orig", "bak", "swp"]);
 
 // Многозначные теги (повторяются → массив).
@@ -94,6 +95,13 @@ export function parsePushRule(attrs, label) {
   return out;
 }
 
+const STATUS_VALUES = ["ok", "unknown", "wait", "block", "error"];
+function parseStatusTag(attrs, value) {
+  if (!STATUS_VALUES.includes(attrs.value)) return `status: value ждём ${STATUS_VALUES.join("|")}`;
+  if (!attrs.label) return `status ${attrs.value}: нет label`;
+  return { value: attrs.value, label: attrs.label.slice(0, 40), hint: value ? value.slice(0, 200) : null };
+}
+
 // Разбор тегов из текста. Возвращает { meta, warnings }.
 export function parseMetaText(text) {
   const warnings = [];
@@ -114,14 +122,44 @@ export function parseMetaText(text) {
     effects: [],
     actions: [],
     push: [],
+    // Свои ярлыки статусов: <agenthub.status value="wait" label="Квота на исходе">пояснение</agenthub.status>
+    // → { wait: { label, hint } }. Оболочка показывает label на плитке и в карточке, пояснение — подсказкой;
+    // статуса без ярлыка — общая таблица оболочки.
+    statuses: {},
     extra: {},
+    // Переводы (AGENTHUB_LANG): { en: { title, desc, why: { <что>: <зачем> } } }. Теги с lang="xx" — вариант
+    // на языке xx; без lang — язык плагина по умолчанию. Действия — атрибуты title-xx / cost-xx (action.i18n).
+    i18n: {},
   };
+  const loc = (lang) => (meta.i18n[lang] ||= {});
   const re = /<agenthub\.([A-Za-z][\w.]*)((?:\s+[^>]*)?)>([\s\S]*?)<\/agenthub\.\1>/g;
   let m;
   while ((m = re.exec(text))) {
     const tag = m[1];
     const attrs = parseAttrs(m[2] || "");
     const value = unescapeXml(m[3].replace(/\s*\n\s*(?:#|\/\/|--|;)?\s*/g, " ").trim());
+    const lang = attrs.lang !== undefined && tag !== "action" ? attrs.lang : null;
+    if (lang !== null) {
+      if (!LANG_RE.test(lang)) {
+        warnings.push(`${tag}: lang ждём двухбуквенный код (ru, en), а не «${lang.slice(0, 10)}»`);
+        continue;
+      }
+      if (tag === "title" || tag === "desc") loc(lang)[tag] = value;
+      else if (tag === "status") {
+        const st = parseStatusTag(attrs, value);
+        if (typeof st === "string") warnings.push(st);
+        else (loc(lang).statuses ||= {})[st.value] = { label: st.label, hint: st.hint };
+      }
+      else if (tag === "push") {
+        const r = meta.push.find((x) => x.key === attrs.key);
+        if (r) (r.labels ||= {})[lang] = value.slice(0, 80);
+        else warnings.push(`push ${attrs.key || "?"} lang=${lang}: сначала правило без lang`);
+      } else if (MULTI.has(tag)) {
+        const { what, why } = splitWhy(value);
+        if (why) (loc(lang).why ||= {})[what] = why;
+      } else warnings.push(`${tag}: lang у этого тега не поддерживается`);
+      continue;
+    }
     if (tag === "action") {
       const id = attrs.id;
       const level = attrs.level || "confirm";
@@ -149,13 +187,22 @@ export function parseMetaText(text) {
           continue;
         }
       }
-      meta.actions.push({ id, level, command: value, title: attrs.title || null, cost: attrs.cost || null, ...(arg ? { arg } : {}) });
+      const i18n = {};
+      for (const [k, v] of Object.entries(attrs)) {
+        const lm = /^(title|cost)-([a-z]{2})$/.exec(k);
+        if (lm && v) (i18n[lm[2]] ||= {})[lm[1]] = v;
+      }
+      meta.actions.push({ id, level, command: value, title: attrs.title || null, cost: attrs.cost || null, ...(arg ? { arg } : {}), ...(Object.keys(i18n).length ? { i18n } : {}) });
     } else if (tag === "push") {
       const r = parsePushRule(attrs, value);
       if (typeof r === "string") warnings.push(`push: ${r}`);
       else if (meta.push.some((x) => x.key === r.key)) warnings.push(`push ${r.key}: повтор ключа`);
       else if (meta.push.length >= 32) warnings.push("push: больше 32 правил");
       else meta.push.push(r);
+    } else if (tag === "status") {
+      const st = parseStatusTag(attrs, value);
+      if (typeof st === "string") warnings.push(st);
+      else meta.statuses[st.value] = { label: st.label, hint: st.hint };
     } else if (tag.startsWith("author.")) {
       meta.author[tag.slice(7)] = value;
     } else if (tag === "type") {

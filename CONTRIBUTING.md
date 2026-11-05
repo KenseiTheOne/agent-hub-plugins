@@ -28,12 +28,15 @@ plugins/<id>/
 
 ```
 # <agenthub.title>Мой плагин</agenthub.title>  <agenthub.version>1.0.0</agenthub.version>
-# <agenthub.author.github>login</agenthub.author.github>  <agenthub.platforms>macos,windows</agenthub.platforms>
+# <agenthub.author.name>Имя</agenthub.author.name>  <agenthub.author.github>login</agenthub.author.github>
+# <agenthub.platforms>macos,windows</agenthub.platforms>
 # <agenthub.fsRead>~/.config/tool/state.json — показать состояние</agenthub.fsRead>
 # <agenthub.net>api.example.com — статус сервиса</agenthub.net>
 # <agenthub.effects>open.url</agenthub.effects>
 ```
 
+- Автор: `author.github` обязателен (логин GitHub — менеджер плагинов делает из него ссылку на профиль),
+  `author.name` — как подписываться в карточке каталога (показывается первым; без него — логин).
 - Каждое право (`fsRead`, `fsWrite`, `exec`, `secrets`, `net`) — с пояснением после ` — `: его видит
   пользователь в окне прав.
 - Запрещено объявлять и упоминать в коде: `~/.claude/projects` (текст переписки), `*.key`, `.env`,
@@ -41,6 +44,50 @@ plugins/<id>/
   (`~/.claude`, `~/.claude/*`, `~/.claude/sessions` целиком).
 - Рост прав в обновлении (новое право, новый effect) виден в PR как дифф и требует второго ревьюера; у
   пользователя обновление не применится, пока он снова не согласится.
+
+## Данные хаба
+
+- Квота подписки Claude — из кэша хаба, а не из чужих кэшей (kensei-statusline и т.п.): служба ядра `usage` раз в
+  3 мин пишет `<home>/Cache/usage.json`, и хаб передаёт путь в `AGENTHUB_USAGE_FILE` — **только встроенным и
+  официальным** плагинам (сообществу и `Plugins/local` переменной нет). Формат: `{version: 1, fetched_at,
+  checked_at, error, rows: [{kind, group, percent, severity, resets_at, scope?: {model: {display_name}}, label?}]}`;
+  `fetched_at`/`checked_at` — секунды эпохи, `error` — код (`no-token`, `token-expired`, `http-429`, `network`, …)
+  или `null`. Токенов в файле нет. При ошибке служба оставляет строки прошлого успеха: строку, чей `resets_at` уже
+  прошёл, не учитывайте (неделя сброшена), а возраст данных берите из `fetched_at`. Нет переменной — служба выключена или хаб старый: покажите «квота
+  недоступна», не ищите файл сами. Право объявляйте так:
+  `<agenthub.fsRead>$AGENTHUB_USAGE_FILE — зачем</agenthub.fsRead>`. В тестах кладите синтетический файл и
+  передавайте путь в `AGENTHUB_USAGE_FILE` (пример — `plugins/night-runner/test`).
+
+## Язык и понятный вывод
+
+- Хаб передаёт плагину `AGENTHUB_LANG=ru|en` — язык, выбранный в приложении (Настройки → Язык: Системный /
+  Русский / English). При смене языка хаб перезапускает плагин. Плагин без перевода показывается как есть.
+- Переводы метаданных — тот же тег с `lang="xx"` (тег без `lang` — язык плагина по умолчанию):
+  ```
+  # <agenthub.title>Мой плагин</agenthub.title>
+  # <agenthub.title lang="en">My plugin</agenthub.title>
+  # <agenthub.desc lang="en">What it shows, in one line</agenthub.desc>
+  # <agenthub.fsRead lang="en">~/.config/tool/state.json — show the state</agenthub.fsRead>   (только пояснение)
+  # <agenthub.status value="wait" label="Сервис тормозит">пояснение</agenthub.status>
+  # <agenthub.status value="wait" lang="en" label="Service is slow">explanation</agenthub.status>
+  ```
+  У действия — атрибуты `title-en`, `cost-en`; у правила push — повтор `<agenthub.push key="…" lang="en">`.
+  `build-index.mjs` переносит в индекс (`i18n`) переводы названия, описания, «зачем» у прав (`why`) и названий
+  действий (`actions`); окно прав в хабе показывает их на языке хаба. У официального плагина у каждого права и
+  действия должен быть английский вариант (тест `build-index.test.mjs`). Сами права (что читается, что
+  запускается) от перевода не зависят: вариант с `lang` прав не добавляет. «Зачем» пишите для человека — какую
+  кнопку или строку это право обслуживает, без имён внутренних файлов и полей.
+- Шапка (первая строка) отвечает на «нужно ли мне что-то делать и что происходит» простыми словами, без
+  внутреннего жаргона. Параметр шапки `tile="…"` — короткое значение для плитки поповера: что происходит
+  (`04:30`, `2 ждут`, `62%`, `3 задачи`, `1 проблема`), а не `!` — тревогу и так показывает значок статуса.
+- Технические детали (номера процессов, cron-строки, id) — во второй уровень, свёрнутым: строка
+  `--Подробности | details=true`, под ней `----процесс 123`.
+- Раскладка страницы плагина (по прототипу): `stat="Подпись"` — карточка-цифра (заголовок строки — значение,
+  `note=` — строка под ним, `color=` — её цвет; подряд идущие — рядом); `gauge=0…100` — карточка с полосой
+  (`note=` справа), в первой строке шапки — кольцо (`gaugeLabel=` под числом); `strip=true` — дети строки лентой
+  ячеек (`sfimage`, заголовок, `note`).
+- Свои ярлыки статусов (`<agenthub.status>`) делайте однозначными для своего плагина: «ждёт» у квоты и у
+  сессий значит разное.
 
 ## Тесты
 

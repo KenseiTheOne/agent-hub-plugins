@@ -1,27 +1,50 @@
 #!/usr/bin/env node
 // Ночной раннер: идёт ли ночь, блокеры, очередь двумя слоями, итоги ночей.
 //
-// <agenthub.title>Ночной раннер</agenthub.title>
-// <agenthub.version>0.2.1</agenthub.version>
-// <agenthub.author.github>kensei</agenthub.author.github>
-// <agenthub.desc>Ночь: замок, блокеры (Unity на night-worktree, маркер подмены, питание, квота, задание launchd), очередь по dry-run и «держатся», итоги ночей</agenthub.desc>
+// <agenthub.title>Ночь</agenthub.title>
+// <agenthub.title lang="en">Night</agenthub.title>
+// <agenthub.version>0.4.0</agenthub.version>
+// <agenthub.author.name>Kensei</agenthub.author.name>
+// <agenthub.author.github>KenseiTheOne</agenthub.author.github>
+// <agenthub.desc>Ночной раннер: запустится ли ночь, её бюджет квоты, что мешает и чем кончились прошлые ночи</agenthub.desc>
+// <agenthub.desc lang="en">Night runner: will tonight start, its quota budget, what's in the way and how past nights ended</agenthub.desc>
+// <agenthub.status value="ok" label="Ночь готова или идёт">Ничего не мешает ночному запуску</agenthub.status>
+// <agenthub.status value="ok" lang="en" label="Night ready">Nothing is in the way of tonight's run</agenthub.status>
+// <agenthub.status value="wait" label="Ночь может не стартовать">Мягкое препятствие — например, мак не на зарядке</agenthub.status>
+// <agenthub.status value="wait" lang="en" label="Night may not start">A soft obstacle — for example, the Mac isn't plugged in</agenthub.status>
+// <agenthub.status value="block" label="Ночь не запустится">Блокер, маркер подмены или раннер упал — нужно вмешаться</agenthub.status>
+// <agenthub.status value="block" lang="en" label="Night won't run">A blocker, a tamper marker or a crashed runner — needs you</agenthub.status>
+// <agenthub.status value="unknown" label="Файлы раннера не читаются">Состояние ночи не разобрано</agenthub.status>
+// <agenthub.status value="unknown" lang="en" label="Can't read runner files">The night's state couldn't be read</agenthub.status>
 // <agenthub.platforms>macos</agenthub.platforms>
 // <agenthub.watch>~/.claude/task-runs/night — замок и сводки появляются здесь</agenthub.watch>
-// <agenthub.fsRead>~/Projects/IT/night-runner/config.json — state_dir, время старта, проекты и их night-worktree</agenthub.fsRead>
-// <agenthub.fsRead>~/Projects/IT/night-runner/night-run.mjs — только список команд: есть ли уже status/queue --json</agenthub.fsRead>
-// <agenthub.fsRead>~/.claude/task-runs/night — night.lock, маркер подмены, сводки YYYYMMDD.md, планы .dry.md, маркеры попыток, хвост night.log (id текущей задачи)</agenthub.fsRead>
-// <agenthub.fsRead>~/.claude/cache/kensei-statusline/usage.json — недельная квота: ночь пропустит при ≥ skip_seven_day_pct</agenthub.fsRead>
-// <agenthub.fsRead>~/Library/LaunchAgents/com.kensei.night-runner.plist — не снято ли задание launchd</agenthub.fsRead>
-// <agenthub.exec>/bin/ps -axww -o pid=,ppid=,command= — Unity на night-worktree и жив ли держатель замка</agenthub.exec>
-// <agenthub.exec>/usr/bin/pmset -g batt — питание от сети (ночь по расписанию на батарее не стартует)</agenthub.exec>
-// <agenthub.exec>node night-run.mjs status --json / queue --json — когда раннер их получит (этап 1); до тех пор не запускается</agenthub.exec>
-// <agenthub.exec>node night-run.mjs run --task <проект>:<id> --no-push — действие run: одна задача днём без пуша, только без живого замка</agenthub.exec>
-// <agenthub.fsWrite>~/.claude/task-runs/night/STOP — действие stop: мягкая остановка ночи между задачами (после патча раннера)</agenthub.fsWrite>
-// <agenthub.fsWrite>~/.claude/task-runs/night/SKIP-* — действие skip: пропустить задачу в ночи (после патча раннера)</agenthub.fsWrite>
+// <agenthub.watch lang="en">~/.claude/task-runs/night — the night's lock and summaries appear here</agenthub.watch>
+// <agenthub.fsRead>~/Projects/IT/night-runner/config.json — настройки ночи: во сколько старт и какие проекты в работе</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/Projects/IT/night-runner/config.json — night settings: start time and which projects are included</agenthub.fsRead>
+// <agenthub.fsRead>~/Projects/IT/night-runner/night-run.mjs — узнать, умеет ли раннер сам сообщать своё состояние</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/Projects/IT/night-runner/night-run.mjs — to check whether the runner can report its own state</agenthub.fsRead>
+// <agenthub.fsRead>~/.claude/task-runs/night — идёт ли ночь сейчас, что в плане, чем закончились прошлые ночи и какая задача в работе</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.claude/task-runs/night — whether a night is running, what's planned, how past nights ended and which task is in progress</agenthub.fsRead>
+// <agenthub.fsRead>$AGENTHUB_USAGE_FILE — кэш квоты Agent Hub (проценты недели и время сброса, без токенов): сколько ночь возьмёт и не пропустит ли запуск</agenthub.fsRead>
+// <agenthub.fsRead lang="en">$AGENTHUB_USAGE_FILE — Agent Hub's quota cache (weekly percentages and reset time, no tokens): how much the night will use and whether it skips</agenthub.fsRead>
+// <agenthub.fsRead>~/Library/LaunchAgents/com.kensei.night-runner.plist — на месте ли расписание ночного запуска</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/Library/LaunchAgents/com.kensei.night-runner.plist — whether the night's schedule is still installed</agenthub.fsRead>
+// <agenthub.exec>/bin/ps -axww -o pid=,ppid=,command= — не открыт ли Unity на проекте ночи и жива ли сама ночь</agenthub.exec>
+// <agenthub.exec lang="en">/bin/ps -axww -o pid=,ppid=,command= — whether Unity is open on the night's project and the night itself is alive</agenthub.exec>
+// <agenthub.exec>/usr/bin/pmset -g batt — подключён ли мак к сети: на батарее ночь по расписанию не стартует</agenthub.exec>
+// <agenthub.exec lang="en">/usr/bin/pmset -g batt — whether the Mac is plugged in: on battery the scheduled night won't start</agenthub.exec>
+// <agenthub.exec>node night-run.mjs status --json / queue --json — состояние и очередь от самого раннера, когда он это научится отдавать; пока не запускается</agenthub.exec>
+// <agenthub.exec lang="en">node night-run.mjs status --json / queue --json — state and queue from the runner itself, once it can report them; not run yet</agenthub.exec>
+// <agenthub.exec>node night-run.mjs run --task <проект>:<id> --no-push — кнопка «Запустить днём»: одна задача, без отправки в git, только когда ночь не идёт</agenthub.exec>
+// <agenthub.exec lang="en">node night-run.mjs run --task <проект>:<id> --no-push — the Run now button: one task, nothing pushed to git, only while no night is running</agenthub.exec>
+// <agenthub.fsWrite>~/.claude/task-runs/night/STOP — кнопка «Остановить»: ночь закончится после текущей задачи</agenthub.fsWrite>
+// <agenthub.fsWrite lang="en">~/.claude/task-runs/night/STOP — the Stop button: the night ends after the current task</agenthub.fsWrite>
+// <agenthub.fsWrite>~/.claude/task-runs/night/SKIP-* — кнопка «Пропустить»: задача не пойдёт в эту ночь</agenthub.fsWrite>
+// <agenthub.fsWrite lang="en">~/.claude/task-runs/night/SKIP-* — the Skip button: the task is left out of tonight's run</agenthub.fsWrite>
 // <agenthub.effects>open.file,open.url</agenthub.effects>
-// <agenthub.action id="stop" level="confirm" title="Остановить ночь после текущей задачи">night-runner.30s.mjs --action stop</agenthub.action>
-// <agenthub.action id="skip" level="confirm" arg="taskId:^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" title="Пропустить в ночи задачу">night-runner.30s.mjs --action skip {taskId}</agenthub.action>
-// <agenthub.action id="run" level="confirm-cost" arg="taskId:^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" title="Запустить днём без пуша задачу" cost="расход квоты Claude на задачу целиком">night-runner.30s.mjs --action run {taskId}</agenthub.action>
+// <agenthub.action id="stop" level="confirm" title="Остановить ночь после текущей задачи" title-en="Stop the night after the current task">night-runner.30s.mjs --action stop</agenthub.action>
+// <agenthub.action id="skip" level="confirm" arg="taskId:^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" title="Пропустить в ночи задачу" title-en="Skip this task tonight">night-runner.30s.mjs --action skip {taskId}</agenthub.action>
+// <agenthub.action id="run" level="confirm-cost" arg="taskId:^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" title="Запустить днём без пуша задачу" title-en="Run this task now without pushing" cost="расход квоты Claude на задачу целиком" cost-en="uses Claude quota for the whole task">night-runner.30s.mjs --action run {taskId}</agenthub.action>
 // <agenthub.push key="unity-open" hold="evening" cooldown="0s">Ночь не запустится</agenthub.push>
 // <agenthub.push key="launchd-missing" hold="evening" cooldown="0s">Ночь не запустится</agenthub.push>
 // <agenthub.push key="quota-skip" hold="evening" cooldown="0s">Ночь не запустится</agenthub.push>
@@ -30,6 +53,14 @@
 // <agenthub.push key="runner-crashed" quiet="true">Раннер упал</agenthub.push>
 // <agenthub.push key="tamper" quiet="true">Маркер подмены</agenthub.push>
 // <agenthub.push key="infra-failures">Инфраструктурные провалы подряд</agenthub.push>
+// <agenthub.push key="unity-open" lang="en">Night won't start</agenthub.push>
+// <agenthub.push key="launchd-missing" lang="en">Night won't start</agenthub.push>
+// <agenthub.push key="quota-skip" lang="en">Night won't start</agenthub.push>
+// <agenthub.push key="power" lang="en">Night won't start</agenthub.push>
+// <agenthub.push key="night-done" lang="en">Night finished</agenthub.push>
+// <agenthub.push key="runner-crashed" lang="en">Runner crashed</agenthub.push>
+// <agenthub.push key="tamper" lang="en">Tamper marker</agenthub.push>
+// <agenthub.push key="infra-failures" lang="en">Infrastructure failures in a row</agenthub.push>
 //
 // Официальный плагин реестра agent-hub-plugins. Вывод — только чтение. Управление — только объявленными
 // действиями (<agenthub.action>): ядро показывает своё подтверждение, сверяет аргумент с шаблоном и запускает
@@ -41,6 +72,12 @@
 // infra-failures:<дата> — ночь остановлена инфраструктурными провалами подряд. Пока у раннера нет `status --json` /
 // `queue --json` (детект — по списку COMMANDS в night-run.mjs, сам раннер для детекта не запускается),
 // всё читается из файлов. Незнакомая форма источника → status=unknown + event=source-broken.
+//
+// Квота — из кэша хаба (служба ядра usage): путь в AGENTHUB_USAGE_FILE, ядро даёт его встроенным и официальным
+// плагинам. Нет переменной — «квота недоступна» (бюджета ночи нет, блокера по квоте тоже). Бюджет ночи считается
+// так же, как у раннера (night-runner/lib/schedule.mjs, nightBudget): night_share_pct недели на семь ночей, не больше
+// остатка до stop_seven_day_pct; последняя ночь перед сбросом недели берёт весь остаток. Идущей ночи — бюджет из её
+// сводки (квота на старте), строки со сброшенным resets_at не в счёт.
 //
 // Необязательные настройки: $AGENTHUB_PLUGIN_DATA_PATH/config.json → {"runnerDir": "...", "stateDir": "..."}.
 // Для тестов: AGENTHUB_TEST_BIN_DIR — каталог с двойниками ps/pmset/node; AGENTHUB_TEST_NOW — «сейчас» (ISO).
@@ -58,6 +95,9 @@ export const MAX_RETRIES = 3;
 const DAY_MS = 86_400_000;
 const PLAN_STALE_MS = 36 * 3_600_000;
 const USAGE_DEFAULTS = { skip_seven_day_pct: 80, stop_seven_day_pct: 85, night_share_pct: 30 };
+const HOUR_MS = 3_600_000;
+const WEEK_NIGHTS = 7;
+const QUOTA_STALE_MS = HOUR_MS;
 
 // id задачи раннера — [A-Za-z0-9_-] до 64 символов, первый — буква или цифра (SAFE_ID в night-runner/lib/config.mjs).
 export const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -110,12 +150,13 @@ export function fmtTime(ms) {
   const d = new Date(ms);
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
-export function fmtAgo(ms) {
+export function fmtAgo(ms, lang = "ru") {
   const m = Math.max(0, Math.round(ms / 60_000));
-  if (m < 60) return `${m} мин назад`;
+  const en = lang === "en";
+  if (m < 60) return en ? `${m} min ago` : `${m} мин назад`;
   const h = Math.round(m / 60);
-  if (h < 48) return `${h} ч назад`;
-  return `${Math.round(h / 24)} дн назад`;
+  if (h < 48) return en ? `${h} h ago` : `${h} ч назад`;
+  return en ? `${Math.round(h / 24)} d ago` : `${Math.round(h / 24)} дн назад`;
 }
 export function dateStamp(ms) {
   const d = new Date(ms);
@@ -140,12 +181,13 @@ function bin(name, system) {
 
 // ---------- конфигурация раннера ----------
 
-// → { ok, stateDir, start, usage, projects:[{id, title, enabled, worktree, unityDir}], problem? }
+// → { ok, stateDir, start, usage, windowHours, projects:[{id, title, enabled, worktree, unityDir}], problem? }
 export function parseRunnerConfig(raw, home = homedir()) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, problem: "config.json раннера: не объект" };
   const stateDir = expand(typeof raw.state_dir === "string" ? raw.state_dir : "~/.claude/task-runs/night", home);
   const start = typeof raw.schedule?.start === "string" && /^\d{1,2}:\d{2}$/.test(raw.schedule.start) ? raw.schedule.start : "04:30";
   const usage = { ...USAGE_DEFAULTS, ...(raw.usage && typeof raw.usage === "object" ? raw.usage : {}) };
+  const windowHours = Number.isFinite(raw.schedule?.window_hours) && raw.schedule.window_hours > 0 ? raw.schedule.window_hours : 5;
   let list = raw.projects;
   if (list === undefined && typeof raw.worktree === "string") {
     // конфиг v1: один проект PerfectWar (night-runner/lib/config.mjs, upgradeV1)
@@ -166,7 +208,7 @@ export function parseRunnerConfig(raw, home = homedir()) {
       unityDir: unity && worktree ? join(worktree, p.profile.project_path) : null,
     });
   }
-  return { ok: true, stateDir, start, usage, projects };
+  return { ok: true, stateDir, start, usage, windowHours, projects };
 }
 
 // Поддерживает ли раннер команду: только по списку COMMANDS в night-run.mjs (запускать раннер ради детекта нельзя:
@@ -272,10 +314,26 @@ export function parseSummary(text) {
     else if ((x = /^остановка: (.*)$/.exec(part))) out.stop = clean(x[1], 200);
     else if ((x = /^задач (\d+)$/.exec(part))) out.tasks = Number(x[1]);
     else if ((x = /^PR (\d+)$/.exec(part))) out.prs = Number(x[1]);
-    else if (/^квота/.test(part)) out.quota = clean(part, 80);
+    else if (/^квота/.test(part)) {
+      out.quota = clean(part, 80);
+      out.nightQuota = parseNightQuota(part);
+    }
   }
   if (out.tasks === null || out.stop === null) return { ok: false };
   return out;
+}
+
+// Часть «квота: …» сводки ночи (night-runner/lib/report.mjs, quotaText) → квота на старте ночи, которой раннер
+// фиксирует бюджет (trackUsage: state.start). → { startPct, budgetPct, lastNight, fiveHour } | null
+//   «квота: неделя 40% → 42%, бюджет ночи 4.3 п. п. недели[ — неделя сбрасывается до следующей ночи, …]»
+//   «квота 5ч 10% → 30%, неделя 44%» — ночь в 5-часовом окне, бюджета недели нет
+export function parseNightQuota(part) {
+  const t = String(part);
+  if (/^квота 5ч /.test(t)) return { startPct: null, budgetPct: null, lastNight: false, fiveHour: true };
+  const m = /^квота: неделя (\d+(?:\.\d+)?)% → /.exec(t);
+  if (!m) return null;
+  const b = /бюджет ночи (\d+(?:\.\d+)?) п\. п\./.exec(t);
+  return { startPct: Number(m[1]), budgetPct: b ? Number(b[1]) : null, lastNight: /неделя сбрасывается до следующей ночи/.test(t), fiveHour: false };
 }
 
 // План dry-run: пункты «**В плане:**» по секциям проектов. → {ok, sections:[{title, tasks:[{name,url}]}], skipped}
@@ -402,9 +460,53 @@ function latestRunLog(stateDir, nowMs) {
 // ---------- квота и питание ----------
 
 export function weeklyPct(usageJson) {
+  return weeklyRow(usageJson)?.percent ?? null;
+}
+
+// Строка недели из кэша хаба → { percent, resetsMs } | null. С nowMs строка, чей сброс уже прошёл, не в счёт: служба
+// usage при истёкшем токене или без сети оставляет прежние строки, и после сброса недели их процент ничего не значит.
+export function weeklyRow(usageJson, nowMs = null) {
   const rows = Array.isArray(usageJson?.rows) ? usageJson.rows : [];
-  const row = rows.find((r) => r && r.kind === "weekly_all" && typeof r.percent === "number");
-  return row ? row.percent : null;
+  const row = rows.find((r) => r && r.kind === "weekly_all" && typeof r.percent === "number" && Number.isFinite(r.percent));
+  if (!row) return null;
+  const resetsMs = typeof row.resets_at === "string" ? Date.parse(row.resets_at) : NaN;
+  if (nowMs !== null && Number.isFinite(resetsMs) && resetsMs <= nowMs) return null;
+  return { percent: row.percent, resetsMs: Number.isFinite(resetsMs) ? resetsMs : null };
+}
+
+// Есть ли 5-часовое окно (строка session): с ним раннер ограничивает ночь окном, а не бюджетом недели.
+export function hasFiveHour(usageJson) {
+  return (Array.isArray(usageJson?.rows) ? usageJson.rows : []).some((r) => r && (r.kind === "session" || r.group === "session") && typeof r.percent === "number");
+}
+
+// Бюджет ночи — формула раннера (night-runner/lib/schedule.mjs, nightBudget): доля недели на ночь
+// (night_share_pct / 7), но не больше остатка до stop_seven_day_pct; ночь, после которой следующая начнётся уже
+// у сброса (до сброса меньше суток и окна ночи), — последняя: берёт весь остаток до потолка.
+// atMs — момент старта ночи. → { pct, stopAt, lastNight }
+export function nightBudget(weekPct, resetsMs, atMs, usageCfg, windowHours = 5) {
+  const room = Math.max(0, usageCfg.stop_seven_day_pct - weekPct);
+  const lastNight = resetsMs !== null && resetsMs !== undefined && resetsMs - atMs < DAY_MS + windowHours * HOUR_MS;
+  const pct = lastNight ? room : Math.min(usageCfg.night_share_pct / WEEK_NIGHTS, room);
+  return { pct, stopAt: weekPct + pct, lastNight };
+}
+
+// Кэш квоты хаба (AGENTHUB_USAGE_FILE). → { ok:true, week:{percent, resetsMs}|null, rolled, rolledAt, fiveHour, ageMs, error }
+// (week = null и rolled — неделя уже сброшена, а свежих строк нет)
+// | { ok:false, why: "no-env" | "no-file" | "broken" }
+export function readQuota(file, nowMs) {
+  if (!file) return { ok: false, why: "no-env" };
+  let j;
+  try {
+    j = readJson(file);
+  } catch (e) {
+    return { ok: false, why: e.code === "ENOENT" ? "no-file" : "broken" };
+  }
+  if (!j || typeof j !== "object" || Array.isArray(j) || (j.rows !== undefined && !Array.isArray(j.rows))) return { ok: false, why: "broken" };
+  const fetchedMs = typeof j.fetched_at === "number" ? j.fetched_at * 1000 : null;
+  const week = weeklyRow(j, nowMs);
+  const any = weeklyRow(j);
+  const error = typeof j.error === "string" && /^[a-z0-9-]{1,40}$/.test(j.error) ? j.error : typeof j.error === "string" ? "other" : null;
+  return { ok: true, week, rolled: !week && Boolean(any), rolledAt: !week && any ? any.resetsMs : null, fiveHour: hasFiveHour(j), ageMs: fetchedMs === null ? null : nowMs - fetchedMs, error };
 }
 
 export function parsePower(text) {
@@ -481,12 +583,13 @@ function pluginSettings() {
   }
 }
 
-export async function collect({ home = homedir(), nowMs = Date.now(), settings = pluginSettings() } = {}) {
+export async function collect({ home = homedir(), nowMs = Date.now(), settings = pluginSettings(), usageFile = process.env.AGENTHUB_USAGE_FILE || null } = {}) {
   const facts = { nowMs, broken: [], notes: [], blockers: [], mode: "files" };
   const runnerDir = expand(settings.runnerDir || "~/Projects/IT/night-runner", home);
   facts.runnerDir = runnerDir;
   // конфиг раннера
-  let cfg = { ok: true, stateDir: expand("~/.claude/task-runs/night", home), start: "04:30", usage: { ...USAGE_DEFAULTS }, projects: [] };
+  let cfg = { ok: true, stateDir: expand("~/.claude/task-runs/night", home), start: "04:30", usage: { ...USAGE_DEFAULTS }, windowHours: 5, projects: [] };
+  facts.usage = cfg.usage;
   const cfgPath = join(runnerDir, "config.json");
   if (existsSync(cfgPath)) {
     let raw = null;
@@ -500,10 +603,14 @@ export async function collect({ home = homedir(), nowMs = Date.now(), settings =
       if (c.ok) cfg = c;
       else facts.broken.push(c.problem);
     }
-  } else facts.notes.push("config.json раннера не найден — state_dir по умолчанию");
+  } else facts.notes.push({ k: "noConfig" });
   if (settings.stateDir) cfg.stateDir = expand(settings.stateDir, home);
   facts.cfg = cfg;
+  facts.usage = cfg.usage;
   const stateDir = cfg.stateDir;
+  // квота — из кэша хаба (служба usage); без переменной — «недоступна»
+  facts.quota = readQuota(usageFile, nowMs);
+  if (facts.quota.ok && facts.quota.week) facts.week = facts.quota.week.percent;
 
   // команды раннера (этап 1)
   let commands = [];
@@ -520,8 +627,8 @@ export async function collect({ home = homedir(), nowMs = Date.now(), settings =
   if (!procs) facts.broken.push("ps не ответил");
   const status = statusJ ? adaptStatus(statusJ) : null;
   const queue = queueJ ? adaptQueue(queueJ) : null;
-  if (commands.includes("status") && !status) facts.notes.push("status --json: нет ответа или незнакомая форма — читаю файлы");
-  if (commands.includes("queue") && !queue) facts.notes.push("queue --json: нет ответа или незнакомая форма — читаю файлы");
+  if (commands.includes("status") && !status) facts.notes.push({ k: "badJson", cmd: "status" });
+  if (commands.includes("queue") && !queue) facts.notes.push({ k: "badJson", cmd: "queue" });
   if (status) facts.mode = "status";
 
   // замок и текущая задача
@@ -533,7 +640,7 @@ export async function collect({ home = homedir(), nowMs = Date.now(), settings =
   } else {
     const lock = readLock(stateDir);
     if (lock?.broken) {
-      facts.notes.push("night.lock не разобран (раннер сочтёт его протухшим)");
+      facts.notes.push({ k: "badLock" });
       facts.lock = null;
     } else facts.lock = lock;
     facts.running = false;
@@ -553,27 +660,24 @@ export async function collect({ home = homedir(), nowMs = Date.now(), settings =
 
   // блокеры
   const tamper = status ? (status.tamper ? { text: status.tamper, path: join(stateDir, TAMPER_FILE) } : null) : readTamper(stateDir);
-  if (tamper) facts.blockers.push({ id: "tamper", event: "tamper", text: `маркер подмены: ${tamper.text}`, path: tamper.path });
+  if (tamper) facts.blockers.push({ id: "tamper", event: "tamper", kind: "tamper", detail: tamper.text, text: `маркер подмены: ${tamper.text}`, path: tamper.path });
   if (status) {
     for (const b of status.blockers) if (b.id !== "tamper") facts.blockers.push({ id: b.id, event: b.id, text: b.text });
   } else {
     if (procs) {
       for (const p of cfg.projects.filter((x) => x.enabled && x.unityDir)) {
         const pid = liveEditor(procs, p.unityDir);
-        if (pid) facts.blockers.push({ id: `unity:${p.id}`, event: `unity-open:${p.id}`, text: `на night-worktree ${p.id} открыт редактор Unity (pid ${pid})` });
+        if (pid) facts.blockers.push({ id: `unity:${p.id}`, event: `unity-open:${p.id}`, kind: "unity", where: basename(String(p.unityDir).replace(/\/+$/, "")) || p.id, pid, text: `на night-worktree ${p.id} открыт редактор Unity (pid ${pid})` });
       }
     }
     const ac = power.code === 0 ? parsePower(power.stdout) : null;
-    if (ac === false) facts.blockers.push({ id: "power", event: "power", text: "не на питании от сети — ночь по расписанию не стартует", soft: true });
+    if (ac === false) facts.blockers.push({ id: "power", event: "power", kind: "power", text: "не на питании от сети — ночь по расписанию не стартует", soft: true });
     const plist = join(home, "Library/LaunchAgents", `${LAUNCHD_LABEL}.plist`);
-    if (!existsSync(plist)) facts.blockers.push({ id: "launchd", event: "launchd-missing", text: "задание launchd снято — ночь не запустится сама" });
-    const usagePath = join(home, ".claude/cache/kensei-statusline/usage.json");
-    try {
-      const week = weeklyPct(readJson(usagePath));
-      if (week !== null && week >= cfg.usage.skip_seven_day_pct) {
-        facts.blockers.push({ id: "quota", event: "quota-skip", text: `недельная квота ${Math.round(week)}% ≥ ${cfg.usage.skip_seven_day_pct}% — ночь пропустит` });
-      }
-    } catch {}
+    if (!existsSync(plist)) facts.blockers.push({ id: "launchd", event: "launchd-missing", kind: "launchd", text: "задание launchd снято — ночь не запустится сама" });
+    const week = facts.quota.ok ? facts.quota.week?.percent ?? null : null;
+    if (!facts.running && week !== null && week >= cfg.usage.skip_seven_day_pct) {
+      facts.blockers.push({ id: "quota", event: "quota-skip", kind: "quota", week: Math.round(week), skip: cfg.usage.skip_seven_day_pct, text: `недельная квота ${Math.round(week)}% ≥ ${cfg.usage.skip_seven_day_pct}% — ночь пропустит` });
+    }
   }
 
   // итоги ночей
@@ -586,6 +690,14 @@ export async function collect({ home = homedir(), nowMs = Date.now(), settings =
     facts.summaries.push({ ...s, ...parsed });
   }
   if (facts.summaries.length && !facts.summaries[0].ok) facts.broken.push(`сводка ${facts.summaries[0].stamp}.md: незнакомая форма`);
+  // Идёт ночь — её бюджет раннер зафиксировал по квоте на старте (trackUsage: state.start), и он есть в сводке
+  // ночи (дата — день старта по замку). Текущая неделя для бюджета идущей ночи не берётся.
+  if (facts.running) {
+    const startedMs = Date.parse(facts.lock?.startedAt || "");
+    const stamp = Number.isFinite(startedMs) ? dateStamp(startedMs) : dateStamp(nowMs);
+    const cur = facts.summaries.find((x) => x.ok && x.stamp === stamp);
+    facts.nightStart = cur?.nightQuota ?? null;
+  }
   // Сводка дня осталась «прогон не завершён», а живого замка нет — раннер упал (замок мог снять перезапуск).
   const today = facts.summaries.find((x) => x.ok && x.stamp === dateStamp(nowMs));
   if (!facts.crashed && today && /^прогон не завершён/.test(today.stop || "") && !(facts.lock && facts.lock.alive !== false)) {
@@ -626,7 +738,7 @@ export async function collect({ home = homedir(), nowMs = Date.now(), settings =
       facts.heldAsOf = Math.max(facts.heldAsOf, a.newestMs);
       broken += a.broken;
     }
-    if (broken) facts.notes.push(`маркеров попыток не разобрано: ${broken}`);
+    if (broken) facts.notes.push({ k: "badMarkers", n: broken });
   }
   return facts;
 }
@@ -645,78 +757,360 @@ function fileEffect(path) {
   return path && !/\s/.test(path) ? ` effect=${q(`open.file ${path}`)}` : "";
 }
 
-export function render(f) {
+// Язык — AGENTHUB_LANG (ru | en) от ядра; без переменной — ru.
+export function envLang() {
+  return process.env.AGENTHUB_LANG === "en" ? "en" : "ru";
+}
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const plEn = (n, one, other) => (n === 1 ? one : other);
+
+export const T = {
+  ru: {
+    stamp: (s) => `${s.slice(6, 8)}.${s.slice(4, 6)}`,
+    dt: (ms) => fmtDateTime(ms),
+    blocker: (b, start) =>
+      b.kind === "unity" ? `Unity открыт на ${b.where} — закройте до ${start}`
+      : b.kind === "tamper" ? "Найден маркер подмены — ночь заблокирована до проверки"
+      : b.kind === "power" ? "мак не на зарядке"
+      : b.kind === "launchd" ? "снято задание launchd — включите его снова"
+      : b.kind === "quota" ? `неделя ${b.week}% ≥ ${b.skip}% — ночь пропустит запуск`
+      : b.text,
+    blockerDetail: (b) => (b.kind === "unity" ? `процесс Unity ${b.pid}` : b.kind === "tamper" ? b.detail : null),
+    running: (since, task) => `Ночь идёт${since ? ` с ${since}` : ""}${task ? ` · задача ${task}` : ""}`,
+    crashed: "Ночь оборвалась (раннер упал) — откройте night.log",
+    wontStart: (b) => `Ночь не запустится: ${b}`,
+    mayNot: (b) => `Ночь может не стартовать: ${b}`,
+    ready: (t) => `Ночь готова · старт в ${t}`,
+    tileRunning: "идёт",
+    broken: "Не получается прочитать файлы раннера",
+    crashLine: (d) => `Раннер упал посреди ночи ${d} — разберите night.log`,
+    stop: "Остановить ночь после текущей задачи",
+    skipTask: (id) => `Пропустить задачу ${id}`,
+    blockers: (n) => `Что мешает (${n})`,
+    noBlockers: "Ничего не мешает",
+    lockStale: (when) => `Ночь не идёт; остался старый замок от ${when} — раннер уберёт его сам`,
+    lockHeld: (h, when) => `Раннер занят командой «${h}» с ${when}`,
+    lockNight: (when, task) => `Ночь идёт с ${when}${task ? ` · задача ${task}` : ""}`,
+    lockPid: (pid) => `процесс ${pid}`,
+    noLock: (when) => `Следующий старт ${when}`,
+    lastNight: (d, tasks, prs, stop) => `Последняя ночь ${d}: задач ${tasks}, PR ${prs} · ${stop}`,
+    nightDone: (d) => `Итог ночи ${d} готов`,
+    infra: (stop) => `Ночь остановлена: ${stop}`,
+    history: "Последние ночи",
+    stStart: "Следующий запуск",
+    stNote: { running: "ночь идёт сейчас", crashed: "раннер упал", blocked: "не запустится", maybe: "может не стартовать", ready: "всё готово" },
+    stPlanTitle: "План на ночь",
+    stPlan: (n) => `${n} ${plural(n, "задача", "задачи", "задач")}`,
+    stHeld: (n) => `отложено ${n}`,
+    stNoHeld: "отложенных нет",
+    stNoPlan: "плана пока нет",
+    stWeek: "Квота недели",
+    stWeekNote: (skip) => `при ≥ ${skip}% ночь пропустит запуск`,
+    stWeekOff: "квота недоступна",
+    budgetTitle: "Бюджет ночи",
+    budgetNote: "доля недели",
+    budget: (b, last) => `Ночь возьмёт не больше ${b} недели${last ? " — последняя ночь перед сбросом" : ""}`,
+    budgetStop: (stop) => `Ночь остановится, когда неделя дойдёт до ${stop}`,
+    budgetSkip: (w, n) => `Ночь пропустит запуск: неделя ${w} ≥ ${n}`,
+    budgetFive: "Есть 5-часовое окно — ночь ограничит себя им, а не бюджетом недели",
+    budgetStale: (ago) => `квота обновлялась ${ago}`,
+    budgetDefaults: "Пороги ночи — по умолчанию: настройки раннера не прочитаны",
+    budgetFixed: (w) => `бюджет зафиксирован на старте ночи, при неделе ${w}`,
+    budgetRunningUnknown: "Ночь идёт: бюджет раннер считает от квоты на старте ночи — в сводке ночи его пока нет",
+    quotaNoWeek: (why) => `Квота недоступна: ${why} — бюджет ночи не посчитать`,
+    quotaRolled: (when) => `неделя сброшена${when ? ` ${when}` : ""}, свежей квоты пока нет`,
+    quotaWhy: (code) =>
+      ({
+        "no-token": "нет входа в Claude Code",
+        "token-expired": "токен Claude Code истёк, хаб ждёт, пока его обновит Claude Code",
+        "http-401": "Claude Code не пускает к квоте",
+        "http-403": "нет доступа к квоте",
+        "http-429": "Anthropic просит подождать",
+        network: "нет связи с Anthropic",
+        timeout: "Anthropic не ответил вовремя",
+        "bad-response": "незнакомый ответ Anthropic",
+      })[code] || (code ? `ошибка службы квоты ${code}` : "хаб ещё не получил квоту"),
+    quotaOff: (why) => `Квота недоступна: ${why === "no-env" ? "хаб не передал кэш квоты (служба usage выключена или хаб старый)" : why === "no-file" ? "хаб ещё не загрузил квоту" : "кэш квоты хаба не разобран"} — бюджет ночи не посчитать`,
+    stripNote: (tasks, prs) => `задач ${tasks} · PR ${prs}`,
+    stripBad: "сводка не разобрана",
+    detailsTitle: "Подробности",
+    histLine: (d, range, tasks, prs, stop) => `${d}${range ? ` ${range}` : ""}: задач ${tasks}, PR ${prs} · ${stop}`,
+    histBad: (d) => `${d}: сводка не разобрана`,
+    plan: (n, asOf, stale, why) => `План на ночь (пробный прогон${asOf ? ` ${asOf}` : ""}): ${n} ${plural(n, "задача", "задачи", "задач")}${stale ? " — устарел" : ""}${why}`,
+    planAsOf: (when, ago) => `от ${when}, ${ago}`,
+    skipTonight: "Пропустить в ночи",
+    runNow: "Запустить днём без пуша",
+    filtered: (n) => `пропущено по фильтрам: ${n}`,
+    noPlan: "Плана на ночь пока нет",
+    held: (n, retry, asOf) => `Отложены: ${n}${retry ? ` · повторятся: ${retry}` : ""}${asOf ? ` (на ${asOf})` : ""}`,
+    heldLine: (h, d) => `${h.id} · ${h.outcome}${d ? ` · ${d}` : ""}${h.draft ? " · вопросы не отправлены" : ""}`,
+    retryLine: (h, max) => `${h.id} · повтор ${h.retries}/${max} · ${h.outcome}`,
+    sourceTitle: "Откуда данные",
+    source: (st) => (st ? "night-run.mjs status --json" : "файлы раннера (status --json ещё нет)"),
+    pluginError: "Сбой плагина ночи",
+    note: (x) =>
+      x.k === "noConfig" ? "config.json раннера не найден — state_dir по умолчанию"
+      : x.k === "badJson" ? `${x.cmd} --json: нет ответа или незнакомая форма — читаю файлы`
+      : x.k === "badLock" ? "night.lock не разобран (раннер сочтёт его протухшим)"
+      : x.k === "badMarkers" ? `маркеров попыток не разобрано: ${x.n}`
+      : String(x.k ?? x),
+  },
+  en: {
+    stamp: (s) => `${MON[Number(s.slice(4, 6)) - 1]} ${Number(s.slice(6, 8))}`,
+    dt: (ms) => {
+      const d = new Date(ms);
+      return `${MON[d.getMonth()]} ${d.getDate()}, ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    },
+    blocker: (b, start) =>
+      b.kind === "unity" ? `Unity is open on ${b.where} — close it before ${start}`
+      : b.kind === "tamper" ? "Tamper marker found — night blocked until checked"
+      : b.kind === "power" ? "Mac isn't plugged in"
+      : b.kind === "launchd" ? "the launchd job was removed — turn it back on"
+      : b.kind === "quota" ? `week at ${b.week}% ≥ ${b.skip}% — the night will skip`
+      : b.text,
+    blockerDetail: (b) => (b.kind === "unity" ? `Unity process ${b.pid}` : b.kind === "tamper" ? b.detail : null),
+    running: (since, task) => `Night running${since ? ` since ${since}` : ""}${task ? ` · task ${task}` : ""}`,
+    crashed: "Night stopped (runner crashed) — open night.log",
+    wontStart: (b) => `Night won't start: ${b}`,
+    mayNot: (b) => `Night may not start: ${b}`,
+    ready: (t) => `Night ready · starts at ${t}`,
+    tileRunning: "running",
+    broken: "Can't read runner files",
+    crashLine: (d) => `Runner crashed during the night of ${d} — check night.log`,
+    stop: "Stop the night after the current task",
+    skipTask: (id) => `Skip task ${id}`,
+    blockers: (n) => `In the way (${n})`,
+    noBlockers: "Nothing in the way",
+    lockStale: (when) => `Not running; a stale lock from ${when} is left — the runner will clear it`,
+    lockHeld: (h, when) => `Runner busy with "${h}" since ${when}`,
+    lockNight: (when, task) => `Night running since ${when}${task ? ` · task ${task}` : ""}`,
+    lockPid: (pid) => `process ${pid}`,
+    noLock: (when) => `Next start ${when}`,
+    lastNight: (d, tasks, prs, stop) => `Last night ${d}: ${tasks} ${plEn(tasks, "task", "tasks")}, ${prs} PR · ${stop}`,
+    nightDone: (d) => `Night of ${d} finished`,
+    infra: (stop) => `Night stopped: ${stop}`,
+    history: "Recent nights",
+    stStart: "Next start",
+    stNote: { running: "running now", crashed: "runner crashed", blocked: "won't start", maybe: "may not start", ready: "all set" },
+    stPlanTitle: "Tonight's plan",
+    stPlan: (n) => `${n} ${plEn(n, "task", "tasks")}`,
+    stHeld: (n) => `${n} on hold`,
+    stNoHeld: "nothing on hold",
+    stNoPlan: "no plan yet",
+    stWeek: "Weekly quota",
+    stWeekNote: (skip) => `at ≥ ${skip}% the night skips`,
+    stWeekOff: "quota unavailable",
+    budgetTitle: "Night budget",
+    budgetNote: "share of the week",
+    budget: (b, last) => `The night will use at most ${b} of the week${last ? " — last night before reset" : ""}`,
+    budgetStop: (stop) => `The night stops once the week reaches ${stop}`,
+    budgetSkip: (w, n) => `The night will skip: week at ${w} ≥ ${n}`,
+    budgetFive: "There's a 5-hour window — the night limits itself by it, not by a weekly budget",
+    budgetStale: (ago) => `quota updated ${ago}`,
+    budgetDefaults: "Night thresholds are defaults: runner settings weren't read",
+    budgetFixed: (w) => `budget fixed at the night's start, with the week at ${w}`,
+    budgetRunningUnknown: "Night running: the runner sets its budget from the quota at the start — not in the night's summary yet",
+    quotaNoWeek: (why) => `Quota unavailable: ${why} — no night budget`,
+    quotaRolled: (when) => `the week reset${when ? ` ${when}` : ""}, no fresh quota yet`,
+    quotaWhy: (code) =>
+      ({
+        "no-token": "not signed in to Claude Code",
+        "token-expired": "the Claude Code token expired; the hub waits for Claude Code to refresh it",
+        "http-401": "Claude Code isn't allowed to read quota",
+        "http-403": "no access to quota",
+        "http-429": "Anthropic asks to wait",
+        network: "can't reach Anthropic",
+        timeout: "Anthropic didn't answer in time",
+        "bad-response": "unexpected answer from Anthropic",
+      })[code] || (code ? `quota service error ${code}` : "the hub hasn't got the quota yet"),
+    quotaOff: (why) => `Quota unavailable: ${why === "no-env" ? "the hub didn't pass its quota cache (usage service off or an older hub)" : why === "no-file" ? "the hub hasn't loaded the quota yet" : "the hub's quota cache couldn't be read"} — no night budget`,
+    stripNote: (tasks, prs) => `${tasks} ${plEn(tasks, "task", "tasks")} · ${prs} PR`,
+    stripBad: "summary unreadable",
+    detailsTitle: "Details",
+    histLine: (d, range, tasks, prs, stop) => `${d}${range ? ` ${range}` : ""}: ${tasks} ${plEn(tasks, "task", "tasks")}, ${prs} PR · ${stop}`,
+    histBad: (d) => `${d}: summary couldn't be read`,
+    plan: (n, asOf, stale, why) => `Tonight's plan (dry run${asOf ? ` ${asOf}` : ""}): ${n} ${plEn(n, "task", "tasks")}${stale ? " — out of date" : ""}${why}`,
+    planAsOf: (when, ago) => `from ${when}, ${ago}`,
+    skipTonight: "Skip tonight",
+    runNow: "Run now without pushing",
+    filtered: (n) => `skipped by filters: ${n}`,
+    noPlan: "No plan for tonight yet",
+    held: (n, retry, asOf) => `On hold: ${n}${retry ? ` · will retry: ${retry}` : ""}${asOf ? ` (as of ${asOf})` : ""}`,
+    heldLine: (h, d) => `${h.id} · ${h.outcome}${d ? ` · ${d}` : ""}${h.draft ? " · questions not sent" : ""}`,
+    retryLine: (h, max) => `${h.id} · retry ${h.retries}/${max} · ${h.outcome}`,
+    sourceTitle: "Where the data comes from",
+    source: (st) => (st ? "night-run.mjs status --json" : "runner files (no status --json yet)"),
+    pluginError: "Night plugin failure",
+    note: (x) =>
+      x.k === "noConfig" ? "runner config.json not found — using the default state_dir"
+      : x.k === "badJson" ? `${x.cmd} --json: no reply or unknown format — reading files`
+      : x.k === "badLock" ? "night.lock couldn't be read (the runner will treat it as stale)"
+      : x.k === "badMarkers" ? `attempt markers that couldn't be read: ${x.n}`
+      : String(x.k ?? x),
+  },
+};
+
+const points = (v, lang) => {
+  const r = String(Math.round(v * 10) / 10);
+  return `${lang === "en" ? r : r.replace(".", ",")}%`;
+};
+
+// Бюджет ближайшей ночи: карточка с полосой (доля недели) и строки под ней; квоты нет — одна строка «недоступна».
+// Идёт ночь — бюджет из её сводки (квота на старте, как у раннера), «пропустит запуск» не показывается.
+export function budgetLines(f, startMs, L, lang) {
+  const q0 = f.quota;
+  if (!q0) return [];
+  if (!q0.ok) return [`${clean(L.quotaOff(q0.why), 160)} | sfimage=moon.zzz color=gray`, "---"];
+  const usage = f.usage || USAGE_DEFAULTS;
+  const out = [];
+  const card = (pct, last, stopAt) => {
+    out.push(`${L.budgetTitle} | gauge=${Math.round(Math.min(100, Math.max(0, pct)))} note=${q(L.budgetNote)} color=#BF5AF2 sfimage=moon.stars`);
+    out.push(`--${L.budget(points(pct, lang), last)}`);
+    out.push(`--${L.budgetStop(`${Math.round(stopAt)}%`)}`);
+  };
+  if (f.running) {
+    const ns = f.nightStart;
+    if (ns && ns.fiveHour) out.push(`${L.budgetFive} | sfimage=moon.stars color=gray`);
+    else if (ns && ns.startPct !== null && ns.budgetPct !== null) {
+      card(ns.budgetPct, ns.lastNight, ns.startPct + ns.budgetPct);
+      out.push(`--${L.budgetFixed(`${Math.round(ns.startPct)}%`)} | color=gray`);
+    } else out.push(`${L.budgetRunningUnknown} | sfimage=moon.stars color=gray`);
+    out.push("---");
+    return out;
+  }
+  const week = q0.week;
+  if (!week) {
+    // кэш есть, а недели в нём нет: служба ещё не получила квоту, вход потерян, нет сети — или неделя уже сброшена
+    const why = q0.rolled ? L.quotaRolled(q0.rolledAt ? L.dt(q0.rolledAt) : null) : L.quotaWhy(q0.error);
+    out.push(`${clean(L.quotaNoWeek(why), 160)} | sfimage=moon.zzz color=gray`);
+    if (q0.ageMs !== null && q0.ageMs > QUOTA_STALE_MS) out.push(`--${L.budgetStale(fmtAgo(q0.ageMs, lang))} | color=gray`);
+    out.push("---");
+    return out;
+  }
+  if (week.percent >= usage.skip_seven_day_pct) {
+    out.push(`${L.budgetSkip(`${Math.round(week.percent)}%`, `${usage.skip_seven_day_pct}%`)} | sfimage=moon.zzz color=orange`);
+  } else if (q0.fiveHour) {
+    out.push(`${L.budgetFive} | sfimage=moon.stars color=gray`);
+  } else {
+    // момент старта ночи — ближайший старт по расписанию (как start.at у раннера)
+    const b = nightBudget(week.percent, week.resetsMs, startMs, usage, f.cfg?.windowHours ?? 5);
+    card(b.pct, b.lastNight, b.stopAt);
+  }
+  if (q0.ageMs !== null && q0.ageMs > QUOTA_STALE_MS) out.push(`--${L.budgetStale(fmtAgo(q0.ageMs, lang))} | color=gray`);
+  if (f.notes.some((n) => n.k === "noConfig")) out.push(`--${L.budgetDefaults} | color=gray`);
+  out.push("---");
+  return out;
+}
+
+// Шапка отвечает на «запустится ли ночь и что сделать»: идёт → упала → блокер → мягкое → готова. tile= — плитка.
+export function render(f, lang = envLang()) {
+  const L = T[lang] || T.ru;
   const out = [];
   const hard = f.blockers.filter((b) => !b.soft);
   const soft = f.blockers.filter((b) => b.soft);
   const startMs = nextStart(f.cfg.start, f.nowMs);
+  const startT = fmtTime(startMs);
   let status = "ok";
   let title;
+  let tile = startT;
   const crashStamp = f.crashed ? f.crashed.stamp || (Number.isFinite(Date.parse(f.crashed.since || "")) ? dateStamp(Date.parse(f.crashed.since)) : dateStamp(f.nowMs)) : null;
   if (f.running) {
     const since = Date.parse(f.lock?.startedAt || "");
-    title = `Ночь идёт${Number.isFinite(since) ? ` с ${fmtTime(since)}` : ""}${f.task ? ` · задача ${clean(f.task, 40)}` : ""}`;
+    title = L.running(Number.isFinite(since) ? fmtTime(since) : null, f.task ? clean(f.task, 40) : null);
+    tile = L.tileRunning;
   } else if (f.crashed) {
     status = "block";
-    title = `Ночь: раннер упал${f.lock?.pid ? ` (pid ${f.lock.pid})` : ""}`;
+    title = L.crashed;
   } else if (hard.length) {
     status = "block";
-    title = `Ночь: ${hard.length} ${plural(hard.length, "блокер", "блокера", "блокеров")} · ${clean(hard[0].text, 70)}`;
+    title = L.wontStart(clean(L.blocker(hard[0], startT), 90));
   } else if (soft.length) {
     status = "wait";
-    title = `Ночь: ${clean(soft[0].text, 80)}`;
+    title = L.mayNot(clean(L.blocker(soft[0], startT), 90));
   } else {
-    title = `Ночь: готова · старт ${fmtTime(startMs)}`;
+    title = L.ready(startT);
   }
   if (!f.running && f.blockers.some((b) => b.id === "tamper")) status = "block";
   if (f.broken.length && status === "ok") status = "unknown";
-  out.push(`${title} | status=${status} sfimage=moon.stars`);
+  out.push(`${title} | status=${status} tile=${q(tile)} sfimage=moon.stars`);
   out.push("---");
 
+  // карточки-цифры страницы плагина (Panel.dc.html): следующий запуск, план, квота недели
+  {
+    const planN = f.plan ? f.plan.sections.reduce((a, s) => a + s.tasks.length, 0) : null;
+    const key = f.running ? "running" : f.crashed ? "crashed" : hard.length ? "blocked" : soft.length ? "maybe" : "ready";
+    const color = status === "block" ? "red" : status === "wait" ? "orange" : "green";
+    out.push(`${f.running ? L.tileRunning : startT} | stat=${q(L.stStart)} note=${q(L.stNote[key])} color=${color}`);
+    const held = (f.held || []).length;
+    out.push(`${planN === null ? "—" : L.stPlan(planN)} | stat=${q(L.stPlanTitle)} note=${q(planN === null ? L.stNoPlan : held ? L.stHeld(held) : L.stNoHeld)}`);
+    const skip = f.usage?.skip_seven_day_pct ?? USAGE_DEFAULTS.skip_seven_day_pct;
+    if (Number.isFinite(f.week)) {
+      out.push(`${Math.round(f.week)}% | stat=${q(L.stWeek)} note=${q(L.stWeekNote(skip))}${f.week >= skip ? " color=orange" : ""}`);
+    } else if (f.quota) out.push(`— | stat=${q(L.stWeek)} note=${q(L.stWeekOff)} color=gray`);
+    out.push("---");
+    out.push(...budgetLines(f, startMs, L, lang));
+  }
+
   if (f.broken.length) {
-    out.push(`Источник сломался: ${clean(f.broken.join("; "), 160)} | status=unknown event=source-broken sfimage=exclamationmark.triangle`);
+    out.push(`${L.broken} | status=unknown event=source-broken sfimage=exclamationmark.triangle`);
+    out.push(`--${clean(f.broken.join("; "), 160)}`);
   }
   if (f.crashed) {
-    out.push(`Раннер упал посреди ночи ${stampLabel(crashStamp)} — разберите night.log | status=block event=runner-crashed:${crashStamp} sfimage=exclamationmark.octagon color=red`);
+    out.push(`${L.crashLine(L.stamp(crashStamp))} | status=block event=runner-crashed:${crashStamp} sfimage=exclamationmark.octagon color=red`);
+    if (f.lock?.pid) {
+      out.push(`--${L.detailsTitle} | details=true`);
+      out.push(`----${L.lockPid(f.lock.pid)}`);
+    }
   }
 
   // управление идущей ночью — объявленные действия (подтверждает ядро; факты действие проверит само)
   if (f.running) {
-    out.push(`Остановить ночь после текущей задачи | action=stop sfimage=stop.circle`);
-    if (f.task && argOk(f.task)) out.push(`Пропустить задачу ${f.task} | action=skip arg=${f.task} sfimage=forward.end`);
+    out.push(`${L.stop} | action=stop sfimage=stop.circle`);
+    if (f.task && argOk(f.task)) out.push(`${L.skipTask(f.task)} | action=skip arg=${f.task} sfimage=forward.end`);
   }
 
   // блокеры
   if (f.blockers.length) {
-    out.push(`Блокеры (${f.blockers.length}) | sfimage=hand.raised`);
-    for (const b of f.blockers) out.push(`--${clean(b.text, 140)} | status=${b.soft ? "wait" : "block"} event=${b.event}${fileEffect(b.path)}`);
-  } else out.push("Блокеров нет | sfimage=checkmark.circle");
+    out.push(`${L.blockers(f.blockers.length)} | sfimage=hand.raised`);
+    for (const b of f.blockers) {
+      out.push(`--${clean(L.blocker(b, startT), 140)} | status=${b.soft ? "wait" : "block"} event=${b.event}${fileEffect(b.path)}`);
+      const d = L.blockerDetail(b);
+      // номер процесса — во второй уровень; пояснение маркера подмены — на виду
+      if (d && b.kind === "unity") out.push(`----${L.detailsTitle} | details=true`, `------${clean(d, 140)}`);
+      else if (d) out.push(`----${clean(d, 140)}`);
+    }
+  } else out.push(`${L.noBlockers} | sfimage=checkmark.circle`);
 
   // замок
   if (f.lock) {
     const since = Date.parse(f.lock.startedAt || "");
-    const when = Number.isFinite(since) ? fmtDateTime(since) : "?";
+    const when = Number.isFinite(since) ? L.dt(since) : "?";
     const holder = !f.running ? f.lock.command || f.lock.holder : null;
-    if (f.lock.alive === false) out.push(`Замок протух: pid ${f.lock.pid} от ${when} (раннер снимет сам) | sfimage=lock.open`);
-    else if (holder) out.push(`Замок держит «${clean(holder, 30)}», pid ${f.lock.pid} с ${when} | sfimage=lock`);
-    else out.push(`Замок ночи: pid ${f.lock.pid} с ${when}${f.task ? ` · задача ${clean(f.task, 40)}` : ""} | sfimage=lock`);
-  } else out.push(`Замка нет · следующий старт ${fmtDateTime(startMs)} | sfimage=clock`);
+    if (f.lock.alive === false) out.push(`${L.lockStale(when)} | sfimage=lock.open`);
+    else if (holder) out.push(`${L.lockHeld(clean(holder, 30), when)} | sfimage=lock`);
+    else out.push(`${L.lockNight(when, f.task ? clean(f.task, 40) : null)} | sfimage=lock`);
+    out.push(`--${L.detailsTitle} | details=true`);
+    out.push(`----${L.lockPid(f.lock.pid)}`);
+  } else out.push(`${L.noLock(L.dt(startMs))} | sfimage=clock`);
 
   // последняя ночь и итоги
   const last = f.summaries.find((s) => s.ok);
   if (last) {
-    out.push(`Последняя ночь ${stampLabel(last.stamp)}: задач ${last.tasks}, PR ${last.prs ?? 0} · ${clean(last.stop, 80)} |${fileEffect(last.path)} sfimage=doc.text`);
+    out.push(`${L.lastNight(L.stamp(last.stamp), last.tasks, last.prs ?? 0, clean(last.stop, 80))} |${fileEffect(last.path)} sfimage=doc.text`);
     const today = dateStamp(f.nowMs);
     if (!f.running && last.stamp === today && !(f.lock && f.lock.alive)) {
-      out.push(`--Итог ночи ${stampLabel(last.stamp)} готов | event=night-done:${last.stamp}`);
-      if (/инфраструктурн\S* провал\S* подряд/.test(last.stop || "")) out.push(`--Ночь остановлена: ${clean(last.stop, 80)} | status=block event=infra-failures:${last.stamp}`);
+      out.push(`--${L.nightDone(L.stamp(last.stamp))} | event=night-done:${last.stamp}`);
+      if (/инфраструктурн\S* провал\S* подряд/.test(last.stop || "")) out.push(`--${L.infra(clean(last.stop, 80))} | status=block event=infra-failures:${last.stamp}`);
     }
   }
+  // лента «Последние ночи» (strip=true): старые слева, ячейка — дата, итог, щелчок открывает сводку
   if (f.summaries.length) {
-    out.push("Итоги ночей | sfimage=calendar");
-    for (const s of f.summaries) {
-      if (s.ok) out.push(`--${stampLabel(s.stamp)}${s.range ? ` ${s.range}` : ""}: задач ${s.tasks}, PR ${s.prs ?? 0} · ${clean(s.stop, 90)} |${fileEffect(s.path)}`);
-      else out.push(`--${stampLabel(s.stamp)}: сводка не разобрана |${fileEffect(s.path)}`);
+    out.push(`${L.history} | strip=true sfimage=calendar`);
+    for (const s of [...f.summaries].slice(0, 7).reverse()) {
+      if (s.ok) {
+        const ok = (s.tasks || 0) > 0;
+        out.push(`--${L.stamp(s.stamp)} | note=${q(L.stripNote(s.tasks, s.prs ?? 0))} tooltip=${q(L.histLine(L.stamp(s.stamp), s.range, s.tasks, s.prs ?? 0, clean(s.stop, 90)))} sfimage=${ok ? "checkmark.circle.fill" : "minus.circle.fill"} color=${ok ? "green" : "gray"}${fileEffect(s.path)}`);
+      } else out.push(`--${L.stamp(s.stamp)} | note=${q(L.stripBad)} sfimage=xmark.circle.fill color=red${fileEffect(s.path)}`);
     }
   }
 
@@ -726,9 +1120,9 @@ export function render(f) {
     const n = f.plan.sections.reduce((a, s) => a + s.tasks.length, 0);
     const age = f.plan.asOf ? f.nowMs - f.plan.asOf : null;
     const stale = age !== null && age > PLAN_STALE_MS;
-    const asOf = f.plan.asOf ? `от ${fmtDateTime(f.plan.asOf)}, ${fmtAgo(age)}` : "время неизвестно";
+    const asOf = f.plan.asOf ? L.planAsOf(L.dt(f.plan.asOf), fmtAgo(age, lang)) : null;
     const why = !n && f.plan.stop ? ` · ${clean(f.plan.stop, 70)}` : "";
-    out.push(`План по dry-run: ${n} ${plural(n, "задача", "задачи", "задач")} (${asOf}${stale ? ", устарел" : ""})${why} |${fileEffect(f.plan.path)} sfimage=list.bullet${stale ? " color=gray" : ""}`);
+    out.push(`${L.plan(n, asOf, stale, why)} |${fileEffect(f.plan.path)} sfimage=list.bullet${stale ? " color=gray" : ""}`);
     const many = f.plan.sections.length > 1;
     for (const s of f.plan.sections) {
       if (many) out.push(`--${s.title} (${s.tasks.length}) | sfimage=folder`);
@@ -738,26 +1132,24 @@ export function render(f) {
         out.push(`${lvl}${t.name} |${href}`);
         const id = t.id || taskIdFromUrl(t.url);
         if (id && argOk(id)) {
-          out.push(`${lvl}--Пропустить в ночи | action=skip arg=${id} sfimage=forward.end`);
+          out.push(`${lvl}--${L.skipTonight} | action=skip arg=${id} sfimage=forward.end`);
           // днём, без замка: одна задача без пуша (подтверждение с ценой)
-          if (!f.lock || f.lock.alive === false) out.push(`${lvl}--Запустить днём без пуша | action=run arg=${id} sfimage=play.circle`);
+          if (!f.lock || f.lock.alive === false) out.push(`${lvl}--${L.runNow} | action=run arg=${id} sfimage=play.circle`);
         }
       }
     }
-    if (f.plan.skipped) out.push(`--пропущено по фильтрам: ${f.plan.skipped}`);
-  } else out.push("План по dry-run: нет | sfimage=list.bullet color=gray");
+    if (f.plan.skipped) out.push(`--${L.filtered(f.plan.skipped)}`);
+  } else out.push(`${L.noPlan} | sfimage=list.bullet color=gray`);
 
-  // очередь: держатся
-  const heldAge = f.heldAsOf ? ` (маркеры на ${fmtDateTime(f.heldAsOf)})` : "";
-  out.push(`Держатся: ${f.held.length}${f.retry.length ? ` · на повторе ${f.retry.length}` : ""}${heldAge} | sfimage=pause.circle`);
-  for (const h of f.held.slice(0, 30)) out.push(`--${h.id} · ${h.outcome}${h.date ? ` · ${stampLabel(h.date)}` : ""}${h.draft ? " · вопросы не отправлены" : ""}`);
-  for (const h of f.retry.slice(0, 30)) out.push(`--${h.id} · повтор ${h.retries}/${MAX_RETRIES} · ${h.outcome}`);
+  // очередь: отложенные
+  out.push(`${L.held(f.held.length, f.retry.length, f.heldAsOf ? L.dt(f.heldAsOf) : null)} | sfimage=pause.circle`);
+  for (const h of f.held.slice(0, 30)) out.push(`--${L.heldLine(h, h.date ? L.stamp(h.date) : null)}`);
+  for (const h of f.retry.slice(0, 30)) out.push(`--${L.retryLine(h, MAX_RETRIES)}`);
 
-  if (f.notes.length) {
-    out.push("---");
-    for (const n of f.notes) out.push(`${clean(n, 140)} | color=gray`);
-  }
-  out.push(`Источник: ${f.mode === "status" ? "night-run.mjs status --json" : "файлы раннера (status --json ещё нет)"} | color=gray size=11`);
+  out.push("---");
+  out.push(`${L.sourceTitle} | color=gray size=11`);
+  for (const n of f.notes) out.push(`--${clean(typeof n === "string" ? n : L.note(n), 140)} | color=gray`);
+  out.push(`--${L.source(f.mode === "status")} | color=gray size=11`);
   return out.join("\n") + "\n";
 }
 
@@ -910,7 +1302,7 @@ async function main() {
   try {
     text = render(await collect({ nowMs: now }));
   } catch (e) {
-    text = `Ночь: ошибка плагина | status=unknown\n---\n${clean(e?.message || e, 140)} | event=source-broken\n`;
+    text = `${T[envLang()].pluginError} | status=unknown\n---\n${clean(e?.message || e, 140)} | event=source-broken\n`;
   }
   process.stdout.write(text);
 }

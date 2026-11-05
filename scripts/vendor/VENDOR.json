@@ -8,7 +8,7 @@
     "perms.mjs": "daemon/lib/registry/perms.mjs"
   },
   "files": {
-    "meta.mjs": "a77511fc8f9b9b078572ed0532d7daa768bcfd710d25e6b14aadfed6d2507e40",
+    "meta.mjs": "a39cc7c0cf98f40aba41e39074d24e9651c7320f0238387e97b541b0c12d5f38",
     "output.mjs": "a60634ba46e822a1b460dd536aaf4c3a480cd07152875fab7b40af5a6f44cd16",
     "minisign.mjs": "9e098eb3d56e757eb0c7d83c071e5ee78c7ae389f32709fccc33a46a76580285",
     "tarball.mjs": "e74eed995e971c54a22bb07275caefefe91e4ad4fa506eb69360b4e0ec2b4161",

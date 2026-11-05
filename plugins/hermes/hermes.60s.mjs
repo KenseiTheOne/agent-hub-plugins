@@ -1,27 +1,50 @@
 #!/usr/bin/env node
 // <agenthub.title>Hermes</agenthub.title>
-// <agenthub.version>1.1.1</agenthub.version>
-// <agenthub.desc>Задачи cron Hermes, их падения и расход, жив ли gateway, ESTOP. Пауза задач — действиями с подтверждением ядра.</agenthub.desc>
-// <agenthub.author.github>kensei</agenthub.author.github>
+// <agenthub.version>1.2.0</agenthub.version>
+// <agenthub.desc>Задачи Hermes по расписанию: что упало, что подорожало, отвечает ли служба Hermes и не на паузе ли он</agenthub.desc>
+// <agenthub.desc lang="en">Hermes scheduled jobs: what failed, what got costly, whether the Hermes service responds and whether it is paused</agenthub.desc>
+// <agenthub.status value="ok" label="Задачи по расписанию">Hermes работает, задачи идут по расписанию</agenthub.status>
+// <agenthub.status value="ok" lang="en" label="On schedule">Hermes is up and jobs run on schedule</agenthub.status>
+// <agenthub.status value="wait" label="Пауза или дорогая задача">Hermes на паузе или задача потратила вдвое больше обычного</agenthub.status>
+// <agenthub.status value="wait" lang="en" label="Paused or costly run">Hermes is paused or a job used twice the usual</agenthub.status>
+// <agenthub.status value="error" label="Задача упала или Hermes не отвечает">Задача упала, расписание встало или служба Hermes молчит</agenthub.status>
+// <agenthub.status value="error" lang="en" label="Job failed / not responding">A job failed, the schedule stopped or the Hermes service is silent</agenthub.status>
+// <agenthub.status value="unknown" label="Нет данных Hermes">Hermes не установлен или его файлы не читаются</agenthub.status>
+// <agenthub.status value="unknown" lang="en" label="No Hermes data">Hermes isn't installed or its files can't be read</agenthub.status>
+// <agenthub.author.name>Kensei</agenthub.author.name>
+// <agenthub.author.github>KenseiTheOne</agenthub.author.github>
 // <agenthub.platforms>macos</agenthub.platforms>
-// <agenthub.fsRead>~/.hermes/gateway_state.json — состояние gateway</agenthub.fsRead>
-// <agenthub.fsRead>~/.hermes/state/gateway.heartbeat — пульс gateway</agenthub.fsRead>
-// <agenthub.fsRead>~/.hermes/cron, ~/.hermes/profiles/*/cron — jobs.json, executions.db, usage_audit.jsonl, ticker_heartbeat</agenthub.fsRead>
-// <agenthub.fsRead>~/.hermes/ESTOP, ~/.hermes/profiles/*/ESTOP — пауза Hermes</agenthub.fsRead>
-// <agenthub.exec>/usr/bin/sqlite3 file:…/executions.db?immutable=1 — статусы запусков (только чтение)</agenthub.exec>
-// <agenthub.exec>/bin/ps -p <pid> — жив ли процесс gateway</agenthub.exec>
-// <agenthub.exec>~/.local/bin/hermes [-p <профиль>] cron pause|resume|run <job> — действия cron-pause, cron-resume, cron-run</agenthub.exec>
-// <agenthub.exec>~/.local/bin/hermes pause — действие pause: поставить Hermes на паузу</agenthub.exec>
+// <agenthub.fsRead>~/.hermes/gateway_state.json — запущена ли служба Hermes</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.hermes/gateway_state.json — whether the Hermes service is running</agenthub.fsRead>
+// <agenthub.fsRead>~/.hermes/state/gateway.heartbeat — отвечает ли служба Hermes</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.hermes/state/gateway.heartbeat — whether the Hermes service is responding</agenthub.fsRead>
+// <agenthub.fsRead>~/.hermes/cron, ~/.hermes/profiles/*/cron — задачи по расписанию: когда запускаются, чем закончились и сколько потратили</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.hermes/cron, ~/.hermes/profiles/*/cron — scheduled jobs: when they run, how they ended and what they spent</agenthub.fsRead>
+// <agenthub.fsRead>~/.hermes/ESTOP, ~/.hermes/profiles/*/ESTOP — не поставлен ли Hermes на паузу</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.hermes/ESTOP, ~/.hermes/profiles/*/ESTOP — whether Hermes is paused</agenthub.fsRead>
+// <agenthub.exec>/usr/bin/sqlite3 file:…/executions.db?immutable=1 — прочитать, чем закончились запуски задач (только чтение)</agenthub.exec>
+// <agenthub.exec lang="en">/usr/bin/sqlite3 file:…/executions.db?immutable=1 — read how job runs ended (read-only)</agenthub.exec>
+// <agenthub.exec>/bin/ps -p <pid> — жив ли процесс службы Hermes</agenthub.exec>
+// <agenthub.exec lang="en">/bin/ps -p <pid> — whether the Hermes service process is alive</agenthub.exec>
+// <agenthub.exec>~/.local/bin/hermes [-p <профиль>] cron pause|resume|run <job> — кнопки задачи «Пауза», «Возобновить», «Запустить сейчас»</agenthub.exec>
+// <agenthub.exec lang="en">~/.local/bin/hermes [-p <профиль>] cron pause|resume|run <job> — the job's Pause, Resume and Run now buttons</agenthub.exec>
+// <agenthub.exec>~/.local/bin/hermes pause — кнопка «Поставить Hermes на паузу»</agenthub.exec>
+// <agenthub.exec lang="en">~/.local/bin/hermes pause — the Pause Hermes button</agenthub.exec>
 // <agenthub.effects>open.file</agenthub.effects>
-// <agenthub.action id="cron-pause" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: поставить на паузу задачу" cost="задача не запустится по расписанию до возобновления">hermes.60s.mjs --action cron-pause {job}</agenthub.action>
-// <agenthub.action id="cron-resume" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: возобновить задачу" cost="задача снова будет запускаться по расписанию (расход квоты)">hermes.60s.mjs --action cron-resume {job}</agenthub.action>
-// <agenthub.action id="cron-run" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: запустить вне расписания задачу" cost="внеочередной запуск задачи — расход квоты">hermes.60s.mjs --action cron-run {job}</agenthub.action>
-// <agenthub.action id="pause" level="confirm" title="Hermes: поставить всё на паузу (ESTOP)">hermes.60s.mjs --action pause</agenthub.action>
+// <agenthub.action id="cron-pause" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: поставить на паузу задачу" title-en="Hermes: pause job" cost="задача не запустится по расписанию до возобновления" cost-en="the job won't run on schedule until resumed">hermes.60s.mjs --action cron-pause {job}</agenthub.action>
+// <agenthub.action id="cron-resume" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: возобновить задачу" title-en="Hermes: resume job" cost="задача снова будет запускаться по расписанию (расход квоты)" cost-en="the job runs on schedule again (uses quota)">hermes.60s.mjs --action cron-resume {job}</agenthub.action>
+// <agenthub.action id="cron-run" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: запустить вне расписания задачу" title-en="Hermes: run job now" cost="внеочередной запуск задачи — расход квоты" cost-en="an extra run of the job — uses quota">hermes.60s.mjs --action cron-run {job}</agenthub.action>
+// <agenthub.action id="pause" level="confirm" title="Поставить Hermes на паузу" title-en="Pause Hermes">hermes.60s.mjs --action pause</agenthub.action>
 // <agenthub.push key="job-failed">Hermes: задача упала</agenthub.push>
 // <agenthub.push key="job-costly">Hermes: задача потратила вдвое больше обычного</agenthub.push>
-// <agenthub.push key="ticker-silent">Hermes: планировщик cron не тикает</agenthub.push>
-// <agenthub.push key="gateway-silent" macOnly="true">Hermes: gateway молчит</agenthub.push>
-// <agenthub.push key="estop">Hermes: ESTOP</agenthub.push>
+// <agenthub.push key="ticker-silent">Hermes: расписание остановилось</agenthub.push>
+// <agenthub.push key="gateway-silent" macOnly="true">Hermes: служба молчит</agenthub.push>
+// <agenthub.push key="estop">Hermes на паузе</agenthub.push>
+// <agenthub.push key="job-failed" lang="en">Hermes: job failed</agenthub.push>
+// <agenthub.push key="job-costly" lang="en">Hermes: job used twice the usual</agenthub.push>
+// <agenthub.push key="ticker-silent" lang="en">Hermes: schedule stopped</agenthub.push>
+// <agenthub.push key="gateway-silent" lang="en">Hermes: service silent</agenthub.push>
+// <agenthub.push key="estop" lang="en">Hermes is paused</agenthub.push>
 //
 // Официальный плагин реестра agent-hub-plugins. Вывод — только чтение. Пауза, возобновление и внеочередной
 // запуск задач — объявленные действия: подтверждение и его текст — от ядра, аргумент (id задачи) ядро сверяет
@@ -76,24 +99,58 @@ function line(title, params = {}) {
 function fmtInt(n) {
   return Math.round(n).toLocaleString("ru-RU").replace(/ /g, " ");
 }
+// Язык — AGENTHUB_LANG (ru | en) от ядра; без переменной — ru.
+export function envLang() {
+  return process.env.AGENTHUB_LANG === "en" ? "en" : "ru";
+}
+let LANG = "ru";
+const EN = () => LANG === "en";
 export function fmtTokens(n) {
+  if (EN()) return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}K` : String(Math.round(n));
   if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace(".", ",")} млн`;
   if (n >= 1e4) return `${Math.round(n / 1e3)} тыс`;
   return fmtInt(n);
 }
 function fmtAge(sec) {
+  if (EN()) return sec < 90 ? `${Math.round(sec)} s ago` : sec < 5400 ? `${Math.round(sec / 60)} min ago` : sec < 172800 ? `${Math.round(sec / 3600)} h ago` : `${Math.round(sec / 86400)} d ago`;
   if (sec < 90) return `${Math.round(sec)} с назад`;
   if (sec < 5400) return `${Math.round(sec / 60)} мин назад`;
   if (sec < 172800) return `${Math.round(sec / 3600)} ч назад`;
   return `${Math.round(sec / 86400)} дн назад`;
 }
+function fmtFor(sec) {
+  const m = Math.max(1, Math.round(sec / 60));
+  if (EN()) return m < 90 ? `${m} min` : `${Math.round(m / 60)} h`;
+  return m < 90 ? `${m} мин` : `${Math.round(m / 60)} ч`;
+}
 function fmtTime(iso, now) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "?";
-  const hm = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const loc = EN() ? "en-US" : "ru-RU";
+  const hm = d.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit", hour12: false });
   const sameDay = d.toDateString() === new Date(now).toDateString();
   if (sameDay) return hm;
-  return `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })} ${hm}`;
+  return `${d.toLocaleDateString(loc, EN() ? { month: "short", day: "numeric" } : { day: "2-digit", month: "2-digit" })} ${hm}`;
+}
+const plEn = (n, one, other) => (n === 1 ? one : other);
+const tr = (ru, en) => (EN() ? en : ru);
+
+// Расписание cron → по-человечески для частых форм; незнакомое — null (сырая строка уходит в «Подробности»).
+export function humanCron(expr) {
+  const e = String(expr || "").trim();
+  const p2 = (n) => String(n).padStart(2, "0");
+  const DAYS = { ru: ["вс", "пн", "вт", "ср", "чт", "пт", "сб"], en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] };
+  let m;
+  if ((m = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(e)) && +m[1] < 60 && +m[2] < 24) return tr(`каждый день в ${p2(m[2])}:${p2(m[1])}`, `every day at ${p2(m[2])}:${p2(m[1])}`);
+  if ((m = /^(\d{1,2}) (\d{1,2}) \* \* 1-5$/.exec(e)) && +m[1] < 60 && +m[2] < 24) return tr(`по будням в ${p2(m[2])}:${p2(m[1])}`, `on weekdays at ${p2(m[2])}:${p2(m[1])}`);
+  if ((m = /^(\d{1,2}) (\d{1,2}) \* \* ([0-6](?:,[0-6])*)$/.exec(e)) && +m[1] < 60 && +m[2] < 24) {
+    const d = m[3].split(",").map((x) => DAYS[EN() ? "en" : "ru"][+x]).join(", ");
+    return tr(`${d} в ${p2(m[2])}:${p2(m[1])}`, `${d} at ${p2(m[2])}:${p2(m[1])}`);
+  }
+  if ((m = /^\*\/(\d{1,2}) \* \* \* \*$/.exec(e))) return tr(`каждые ${+m[1]} мин`, `every ${+m[1]} min`);
+  if ((m = /^(\d{1,2}) \* \* \* \*$/.exec(e)) && +m[1] < 60) return tr(`каждый час в :${p2(m[1])}`, `every hour at :${p2(m[1])}`);
+  if ((m = /^every (\d+)\s*([mh])$/i.exec(e))) return tr(`каждые ${m[1]} ${m[2].toLowerCase() === "h" ? "ч" : "мин"}`, `every ${m[1]} ${m[2].toLowerCase() === "h" ? "h" : "min"}`);
+  return null;
 }
 
 // ---------- чтение источников ----------
@@ -332,14 +389,16 @@ export function collect({ home = homedir(), now = Date.now(), sqliteBin = "/usr/
   return r;
 }
 
-export function render(r, { now = Date.now() } = {}) {
+// Шапка отвечает на «нужно ли что-то сделать с Hermes»: не отвечает → упала → встало → пауза → дорого → всё ок.
+export function render(r, { now = Date.now(), lang = envLang() } = {}) {
+  LANG = lang === "en" ? "en" : "ru";
   const out = [];
   const body = [];
   const events = [];
   if (!r.present) {
-    out.push(line("Hermes: не установлен", { status: "ok", sfimage: "moon.zzz" }));
+    out.push(line(tr("Hermes не установлен", "Hermes isn't installed"), { status: "unknown", tile: "—", sfimage: "moon.zzz" }));
     out.push("---");
-    out.push(line(`Нет каталога ${r.root}`, { color: "gray" }));
+    out.push(line(tr(`Нет каталога ${r.root}`, `No ${r.root} folder`), { color: "gray" }));
     return out.join("\n");
   }
   let status = "ok";
@@ -347,105 +406,114 @@ export function render(r, { now = Date.now() } = {}) {
     const sev = { ok: 0, unknown: 1, wait: 2, block: 3, error: 4 };
     if (sev[s] > sev[status]) status = s;
   };
-  const problems = [];
+  const problems = []; // [{ rank, text }] — шапка по самому важному
 
   // gateway
   const g = r.gateway;
   if (g && g.present) {
-    const hb = g.heartbeatAgeSec === null ? "пульса нет" : `пульс ${fmtAge(g.heartbeatAgeSec)}`;
-    const who = g.pid ? `pid ${g.pid}` : "pid ?";
+    const hb = g.heartbeatAgeSec === null ? tr("отклика нет", "no heartbeat") : tr(`отклик ${fmtAge(g.heartbeatAgeSec)}`, `last beat ${fmtAge(g.heartbeatAgeSec)}`);
     if (g.silent) {
       bump("error");
-      problems.push("gateway молчит");
+      const why = g.alive === false ? tr("служба не запущена", "its service isn't running") : g.heartbeatAgeSec !== null ? tr(`служба молчит ${fmtFor(g.heartbeatAgeSec)}`, `its service has been silent for ${fmtFor(g.heartbeatAgeSec)}`) : tr("служба молчит", "its service is silent");
+      problems.push({ rank: 0, text: tr(`Hermes не отвечает: ${why}`, `Hermes isn't responding: ${why}`) });
       events.push("gateway-silent");
-      body.push(line(`Gateway молчит: ${g.alive === false ? "процесса нет" : hb} (${who})`, { color: "red", sfimage: "antenna.radiowaves.left.and.right.slash", event: "gateway-silent" }));
+      body.push(line(tr(`Служба Hermes не отвечает: ${g.alive === false ? "она не запущена" : hb}`, `Hermes service not responding: ${g.alive === false ? "it isn't running" : hb}`), { color: "red", sfimage: "antenna.radiowaves.left.and.right.slash", event: "gateway-silent" }));
     } else if (g.state === "running") {
-      body.push(line(`Gateway работает: ${hb} (${who})`, { sfimage: "antenna.radiowaves.left.and.right" }));
+      body.push(line(tr(`Служба Hermes работает (${hb})`, `Hermes service running (${hb})`), { sfimage: "antenna.radiowaves.left.and.right" }));
     } else {
-      body.push(line(`Gateway: ${clean(g.state)}`, { color: "gray", sfimage: "antenna.radiowaves.left.and.right.slash" }));
+      body.push(line(tr(`Служба Hermes: ${clean(g.state)}`, `Hermes service: ${clean(g.state)}`), { color: "gray", sfimage: "antenna.radiowaves.left.and.right.slash" }));
     }
-    body.push(line(`--Платформ подключено: ${g.platforms}${g.platforms === 0 ? " (мессенджеры в Hermes не подключены)" : ""}`));
-    if (g.activeAgents !== null) body.push(line(`--Активных агентов: ${g.activeAgents}`));
+    body.push(line(tr(`--Подключено платформ: ${g.platforms}${g.platforms === 0 ? " (мессенджеры в Hermes не подключены)" : ""}`, `--Connected platforms: ${g.platforms}${g.platforms === 0 ? " (no messengers connected in Hermes)" : ""}`)));
+    if (g.activeAgents !== null) body.push(line(tr(`--Активных агентов: ${g.activeAgents}`, `--Active agents: ${g.activeAgents}`)));
+    if (g.pid) {
+      body.push(line(tr("--Подробности", "--Details"), { details: "true" }));
+      body.push(line(tr(`----служба gateway, процесс ${g.pid}`, `----gateway service, process ${g.pid}`), { color: "gray" }));
+    }
   } else if (g && !g.present) {
-    body.push(line("Gateway: нет gateway_state.json", { color: "gray" }));
+    body.push(line(tr("Gateway: нет gateway_state.json", "Gateway: no gateway_state.json"), { color: "gray" }));
   }
 
-  // ESTOP
+  // пауза самого Hermes (~/.hermes/ESTOP — его собственный механизм, не пауза хаба)
   if (r.estop.length) {
     bump("wait");
-    problems.push("пауза (ESTOP)");
+    problems.push({ rank: 3, text: tr("Hermes на паузе — задачи не запускаются", "Hermes is paused — jobs won't run") });
     events.push("estop");
-    body.push(line(`Hermes на паузе (ESTOP): ${r.estop.join(", ")}`, { color: "orange", sfimage: "pause.circle", event: "estop" }));
-    body.push(line("--Снять: hermes resume (в терминале)", { color: "gray" }));
+    body.push(line(tr(`Hermes на паузе — задачи не запускаются (${r.estop.join(", ")})`, `Hermes is paused — jobs won't run (${r.estop.join(", ")})`), { color: "orange", sfimage: "pause.circle", event: "estop" }));
+    body.push(line(tr("--Снять: hermes resume в терминале", "--To resume: run hermes resume in a terminal"), { color: "gray" }));
   } else if (r.present) {
     // лестница остановки (дизайн §5): весь Hermes — одно объявленное действие, подтверждение — от ядра
-    body.push(line("Поставить Hermes на паузу (ESTOP)", { action: "pause", sfimage: "pause.circle", color: "gray" }));
+    body.push(line(tr("Поставить Hermes на паузу", "Pause Hermes"), { action: "pause", sfimage: "pause.circle", color: "gray" }));
   }
 
   // задачи
   for (const p of r.profiles) {
     body.push("---");
     const tickerSilent = p.ticker && p.ticker.ageSec > TICKER_STALE_S;
-    const tickerText = p.ticker ? `планировщик: пульс ${fmtAge(p.ticker.ageSec)}` : "планировщик: пульса нет";
+    const pn = clean(p.name);
     if (tickerSilent && !r.estop.length) {
       bump("error");
-      problems.push(`cron ${p.name} не тикает`);
+      problems.push({ rank: 2, text: tr(`Расписание профиля ${pn} остановилось`, `Profile ${pn}'s schedule has stopped`) });
       const key = `ticker-silent-${p.name.replace(/[^\w-]/g, "_")}`;
       events.push(key);
-      body.push(line(`Профиль ${clean(p.name)} — ${tickerText}`, { color: "red", event: key }));
-    } else body.push(line(`Профиль ${clean(p.name)} — ${tickerText}`, { color: "gray" }));
-    if (!p.jobs.length) body.push(line("Задач нет", { color: "gray" }));
+      body.push(line(tr(`Профиль ${pn}: расписание остановилось (отклик ${fmtAge(p.ticker.ageSec)})`, `Profile ${pn}: schedule stopped (last beat ${fmtAge(p.ticker.ageSec)})`), { color: "red", event: key }));
+    } else body.push(line(p.ticker ? tr(`Профиль ${pn}: расписание работает (отклик ${fmtAge(p.ticker.ageSec)})`, `Profile ${pn}: schedule running (last beat ${fmtAge(p.ticker.ageSec)})`) : tr(`Профиль ${pn}: расписание не отзывалось`, `Profile ${pn}: no schedule heartbeat`), { color: "gray" }));
+    if (!p.jobs.length) body.push(line(tr("Задач нет", "No jobs"), { color: "gray" }));
     for (const j of p.jobs) {
       const name = clean(j.name || j.id);
       let state;
       const params = {};
       if (j.paused) {
-        state = "на паузе";
+        state = tr("на паузе", "paused");
         params.color = "gray";
         params.sfimage = "pause.circle";
       } else if (j.running) {
-        state = "идёт";
+        state = tr("идёт", "running");
         params.sfimage = "play.circle";
       } else if (j.failed) {
-        state = "упала";
+        state = tr("упала", "failed");
         params.color = "red";
         params.sfimage = "xmark.octagon";
       } else {
-        state = statusRu(j.lastStatus) || "ещё не запускалась";
+        state = statusRu(j.lastStatus) || tr("ещё не запускалась", "hasn't run yet");
         params.sfimage = "checkmark.circle";
       }
-      const next = j.next_run_at && !j.paused ? `, следующая ${fmtTime(j.next_run_at, now)}` : "";
+      const next = j.next_run_at && !j.paused ? tr(`, следующая ${fmtTime(j.next_run_at, now)}`, `, next ${fmtTime(j.next_run_at, now)}`) : "";
       if (j.failed && !j.paused) {
         bump("error");
-        problems.push(`упала «${name}»`);
+        problems.push({ rank: 1, text: tr(`Задача «${name}» упала`, `Job "${name}" failed`) });
         events.push(`job-failed-${j.id}`);
         params.event = `job-failed-${j.id}`;
       }
       body.push(line(`${name} — ${state}${next}`, params));
       if (j.cost && j.cost.costly && !j.paused) {
         bump("wait");
-        problems.push(`«${name}» вдвое дороже обычного`);
+        problems.push({ rank: 4, text: tr(`«${name}» потратила вдвое больше обычного`, `"${name}" used twice the usual`) });
         events.push(`job-costly-${j.id}`);
-        body.push(line(`--Последний запуск: ${fmtTokens(j.cost.last)} токенов — вдвое больше обычного (${fmtTokens(j.cost.usual)})`, { color: "orange", event: `job-costly-${j.id}` }));
+        body.push(line(tr(`--Последний запуск: ${fmtTokens(j.cost.last)} токенов — вдвое больше обычного (${fmtTokens(j.cost.usual)})`, `--Last run: ${fmtTokens(j.cost.last)} tokens — twice the usual (${fmtTokens(j.cost.usual)})`), { color: "orange", event: `job-costly-${j.id}` }));
       } else if (j.cost) {
-        body.push(line(`--Последний запуск: ${fmtTokens(j.cost.last)} токенов${j.cost.usual ? ` (обычно ${fmtTokens(j.cost.usual)})` : ""}`));
+        body.push(line(tr(`--Последний запуск: ${fmtTokens(j.cost.last)} токенов${j.cost.usual ? ` (обычно ${fmtTokens(j.cost.usual)})` : ""}`, `--Last run: ${fmtTokens(j.cost.last)} tokens${j.cost.usual ? ` (usually ${fmtTokens(j.cost.usual)})` : ""}`)));
       }
       if (j.lastRun) {
-        const dur = j.lastDur !== null ? `, ${Math.round(j.lastDur)} с` : "";
-        body.push(line(`--Запуск ${fmtTime(j.lastRun.started_at || j.lastRun.claimed_at, now)}: ${statusRu(j.lastRun.status)}${dur}${j.lastRun.has_error ? ", есть ошибка" : ""}`));
-      } else if (j.last_run_at) body.push(line(`--Запуск ${fmtTime(j.last_run_at, now)}: ${statusRu(j.lastStatus) || "?"}`));
-      if (Number(j.failure_streak) > 0) body.push(line(`--Падений подряд: ${Number(j.failure_streak)}`, { color: "red" }));
-      if (j.schedule_display) body.push(line(`--Расписание: ${clean(j.schedule_display)}`, { color: "gray" }));
+        const dur = j.lastDur !== null ? tr(`, ${Math.round(j.lastDur)} с`, `, ${Math.round(j.lastDur)} s`) : "";
+        body.push(line(tr(`--Запуск ${fmtTime(j.lastRun.started_at || j.lastRun.claimed_at, now)}: ${statusRu(j.lastRun.status)}${dur}${j.lastRun.has_error ? ", есть ошибка" : ""}`, `--Run at ${fmtTime(j.lastRun.started_at || j.lastRun.claimed_at, now)}: ${statusRu(j.lastRun.status)}${dur}${j.lastRun.has_error ? ", with an error" : ""}`)));
+      } else if (j.last_run_at) body.push(line(tr(`--Запуск ${fmtTime(j.last_run_at, now)}: ${statusRu(j.lastStatus) || "?"}`, `--Run at ${fmtTime(j.last_run_at, now)}: ${statusRu(j.lastStatus) || "?"}`)));
+      if (Number(j.failure_streak) > 0) body.push(line(tr(`--Падений подряд: ${Number(j.failure_streak)}`, `--Failures in a row: ${Number(j.failure_streak)}`), { color: "red" }));
+      if (j.schedule_display) {
+        const human = humanCron(j.schedule_display);
+        if (human) body.push(line(tr(`--Запускается ${human}`, `--Runs ${human}`), { color: "gray" }));
+        body.push(line(tr("--Подробности", "--Details"), { details: "true" }));
+        body.push(line(tr(`----расписание cron: ${clean(j.schedule_display)} · id ${clean(j.id)}`, `----cron schedule: ${clean(j.schedule_display)} · id ${clean(j.id)}`), { color: "gray" }));
+      }
       // пауза/возобновление/запуск — объявленные действия (подтверждение с ценой — от ядра, только из приложения)
       if (/^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(j.id)) {
-        if (j.paused) body.push(line("--Возобновить по расписанию", { action: "cron-resume", arg: j.id }));
+        if (j.paused) body.push(line(tr("--Возобновить по расписанию", "--Resume on schedule"), { action: "cron-resume", arg: j.id }));
         else {
-          body.push(line("--Поставить на паузу", { action: "cron-pause", arg: j.id }));
-          if (!j.running) body.push(line("--Запустить вне расписания", { action: "cron-run", arg: j.id }));
+          body.push(line(tr("--Поставить на паузу", "--Pause"), { action: "cron-pause", arg: j.id }));
+          if (!j.running) body.push(line(tr("--Запустить вне расписания", "--Run now"), { action: "cron-run", arg: j.id }));
         }
       }
       const outDir = join(p.cron, "output", j.id);
-      if (/^[\w-]+$/.test(j.id) && existsSync(outDir)) body.push(line("--Открыть выводы задачи", { effect: `open.file path=${q(outDir)}` }));
+      if (/^[\w-]+$/.test(j.id) && existsSync(outDir)) body.push(line(tr("--Открыть выводы задачи", "--Open job output"), { effect: `open.file path=${q(outDir)}` }));
     }
   }
 
@@ -453,23 +521,28 @@ export function render(r, { now = Date.now() } = {}) {
     bump("unknown");
     events.push("source-broken");
     body.push("---");
-    body.push(line("Источник не разобран", { color: "orange", event: "source-broken" }));
+    body.push(line(tr("Не получается прочитать данные Hermes", "Can't read Hermes data"), { color: "orange", event: "source-broken" }));
     for (const b of r.broken.slice(0, 5)) body.push(line(`--${clean(b)}`, { color: "gray" }));
   }
 
   const jobsCount = r.profiles.reduce((a, p) => a + p.jobs.length, 0);
-  const title = problems.length ? `Hermes: ${clean(problems.slice(0, 2).join(", "))}` : `Hermes: ${jobsCount} ${plural(jobsCount, "задача", "задачи", "задач")}`;
+  problems.sort((a, b) => a.rank - b.rank);
+  const title = problems.length ? clean(problems[0].text) : tr(`Hermes: ${jobsCount} ${plural(jobsCount, "задача", "задачи", "задач")} по расписанию`, `Hermes: ${jobsCount} ${plEn(jobsCount, "job", "jobs")} on schedule`);
   const sf = status === "ok" ? "bolt.horizontal.circle" : status === "wait" ? "pause.circle" : status === "unknown" ? "questionmark.circle" : "exclamationmark.triangle";
-  out.push(line(title, { status, sfimage: sf }));
+  // плитка — что происходит: сколько проблем, иначе сколько задач (не «!» — его и так показывает значок)
+  const tile = problems.length ? tr(`${problems.length} ${plural(problems.length, "проблема", "проблемы", "проблем")}`, `${problems.length} ${plEn(problems.length, "issue", "issues")}`) : tr(`${jobsCount} ${plural(jobsCount, "задача", "задачи", "задач")}`, `${jobsCount} ${plEn(jobsCount, "job", "jobs")}`);
+  out.push(line(title, { status, tile, sfimage: sf }));
   out.push("---");
+  if (problems.length > 1) for (const p of problems.slice(1, 3)) out.push(line(clean(p.text), { color: "gray" }));
   out.push(...body);
   return out.join("\n");
 }
 
 const STATUS_RU = { completed: "готово", ok: "готово", success: "готово", failed: "упала", error: "упала", running: "идёт", claimed: "в очереди", unknown: "неизвестно" };
+const STATUS_EN = { completed: "done", ok: "done", success: "done", failed: "failed", error: "failed", running: "running", claimed: "queued", unknown: "unknown" };
 export function statusRu(s) {
   if (s == null || s === "") return "";
-  return STATUS_RU[String(s).toLowerCase()] || clean(s);
+  return (EN() ? STATUS_EN : STATUS_RU)[String(s).toLowerCase()] || clean(s);
 }
 
 function plural(n, one, few, many) {
@@ -557,7 +630,7 @@ function main() {
   try {
     text = render(collect());
   } catch (e) {
-    text = [line("Hermes: ошибка разбора", { status: "unknown", event: "source-broken" }), "---", line(clean(e.message), { color: "gray" })].join("\n");
+    text = [line(envLang() === "en" ? "Can't read Hermes data" : "Не получается прочитать данные Hermes", { status: "unknown", event: "source-broken" }), "---", line(clean(e.message), { color: "gray" })].join("\n");
   }
   process.stdout.write(text + "\n");
 }
