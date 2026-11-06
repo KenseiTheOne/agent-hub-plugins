@@ -2,7 +2,7 @@
 // порча источников → unknown + source-broken, только чтение.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, cpSync, existsSync, mkdirSync, realpathSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, utimesSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, linkSync, mkdirSync, realpathSync, symlinkSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -51,9 +51,9 @@ function world({ ps = "default", power = "ac", usage = true } = {}) {
     rm(rel) {
       rmSync(join(home, rel), { recursive: true, force: true });
     },
-    run({ now = NOW } = {}) {
+    run({ now = NOW, env = {} } = {}) {
       const text = execFileSync(process.execPath, [FILE], {
-        env: { HOME: home, PATH: "/usr/bin:/bin", AGENTHUB_TEST_BIN_DIR: bin, AGENTHUB_TEST_NOW: now, ...(w.usage ? { AGENTHUB_USAGE_FILE: usageFile } : {}) },
+        env: { HOME: home, PATH: "/usr/bin:/bin", AGENTHUB_TEST_BIN_DIR: bin, AGENTHUB_TEST_NOW: now, ...(w.usage ? { AGENTHUB_USAGE_FILE: usageFile } : {}), ...env },
         encoding: "utf8",
       });
       return { text, parsed: parseOutput(text) };
@@ -475,7 +475,9 @@ test("night-runner: замок держит research (без command в замк
     const { parsed } = w.run();
     assert.doesNotMatch(parsed.header[0].title, /Ночь идёт/);
     assert.equal(parsed.status, "block", "Unity на night-worktree виден");
-    assert.ok(titles(parsed.body).some((t) => t.startsWith("Раннер занят командой «research»")));
+    // 0.5.0: замок исследования — не «раннер занят командой», а нормальное состояние «идёт исследование» (осознанная
+    // смена: исследование стало режимом плагина); блокеры ночи по-прежнему видны и главнее
+    assert.ok(titles(parsed.body).some((t) => t.startsWith("Идёт исследование рынка (вручную) с ")), titles(parsed.body).join("\n"));
     assert.equal(parsed.events.some((e) => e.startsWith("runner-crashed")), false);
     // после патча этапа 1 у ночи command="run" — это ночь
     w.setPs(readFileSync(join(FIX, "ps.txt"), "utf8").replace(/night-run\.mjs\s*$/m, "night-run.mjs run"));
@@ -521,7 +523,8 @@ test("night-runner: без замка план предлагает run (без 
     const meta = readPluginMeta(FILE).meta;
     assert.deepEqual(meta.effects, ["open.file", "open.url"]);
     const byId = Object.fromEntries(meta.actions.map((a) => [a.id, a]));
-    assert.deepEqual(Object.keys(byId).sort(), ["run", "skip", "stop"]);
+    // 0.5.0: + переключатель режима ночи (три фиксированных действия) и «Исследовать сейчас»
+    assert.deepEqual(Object.keys(byId).sort(), ["mode-research-only", "mode-tasks", "mode-tasks-research", "research", "run", "skip", "stop"]);
     assert.equal(byId.stop.level, "confirm");
     assert.equal(byId.stop.arg, undefined);
     assert.deepEqual(byId.skip.arg, { name: "taskId", pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" });
@@ -531,14 +534,14 @@ test("night-runner: без замка план предлагает run (без 
     assert.ok(meta.push.some((r) => r.key === "runner-crashed" && r.quietException === true));
     // 0.4.1: пересчёт сразу после записи кэша квоты (путь подставляет ядро), каталог ночи — как раньше
     assert.deepEqual(meta.watch.map((w) => w.split(" — ")[0]), ["~/.claude/task-runs/night", "$AGENTHUB_USAGE_FILE"]);
-    assert.equal(meta.version, "0.4.1");
+    assert.equal(meta.version, "0.5.0");
   } finally {
     w.stop();
   }
 });
 
 // Режим действия: тот же файл с `--action <id> [<taskId>]`, как его запускает ядро.
-function act(w, args, { stopFiles = true, nodeLog = null } = {}) {
+function act(w, args, { stopFiles = true, nodeLog = null, env = {} } = {}) {
   const data = join(w.home, "..", "data");
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, "config.json"), JSON.stringify(stopFiles ? { stopFiles: true } : {}));
@@ -550,7 +553,7 @@ function act(w, args, { stopFiles = true, nodeLog = null } = {}) {
   let code = 0;
   try {
     out = execFileSync(process.execPath, [FILE, "--action", ...args], {
-      env: { HOME: w.home, PATH: "/usr/bin:/bin", AGENTHUB_TEST_BIN_DIR: w.bin, AGENTHUB_PLUGIN_DATA_PATH: data },
+      env: { HOME: w.home, PATH: "/usr/bin:/bin", AGENTHUB_TEST_BIN_DIR: w.bin, AGENTHUB_PLUGIN_DATA_PATH: data, ...env },
       encoding: "utf8",
     });
   } catch (e) {
@@ -717,7 +720,7 @@ test("night-runner: метаданные — квота из кэша хаба, 
   assert.doesNotMatch(src, /kensei-statusline/);
   assert.match(src, /<agenthub\.fsRead>\$AGENTHUB_USAGE_FILE — /);
   assert.match(src, /<agenthub\.watch>\$AGENTHUB_USAGE_FILE — /);
-  assert.match(src, /<agenthub\.version>0\.4\.1<\/agenthub\.version>/);
+  assert.match(src, /<agenthub\.version>0\.5\.0<\/agenthub\.version>/);
 });
 
 test("night-runner: идёт ночь — бюджет из квоты на её старте (сводка ночи), а не по текущей неделе; «пропустит» нет", () => {
@@ -783,6 +786,773 @@ test("night-runner: кэш хаба без строк (нет входа, нет
     assert.match(w.run().text, /^Квота недоступна: нет связи с Anthropic — бюджет ночи не посчитать/m);
     w.setUsage({ version: 1, fetched_at: null, checked_at: 1, error: null, rows: [] });
     assert.match(w.run().text, /^Квота недоступна: хаб ещё не получил квоту — бюджет ночи не посчитать/m);
+  } finally {
+    w.stop();
+  }
+});
+
+// ---------- 0.5.0: режимы ночи, исследование рынка, переключатель режима, «Исследовать сейчас» ----------
+
+const CFG = "Projects/IT/night-runner/config.json";
+const readCfg = (w) => JSON.parse(readFileSync(join(w.home, CFG), "utf8"));
+// config.json раннера по образцу фикстуры с правкой проектов и research
+function setCfg(w, fn) {
+  const c = readCfg(w);
+  fn(c);
+  w.write(CFG, JSON.stringify(c, null, 2) + "\n");
+}
+const modeLine = (parsed) => parsed.header.find((i) => /^Режим ночи: /.test(i.title))?.title;
+const local = (y, mo, d, h, mi, s = 0) => new Date(y, mo - 1, d, h, mi, s).getTime();
+const p2 = (n) => String(n).padStart(2, "0");
+// каталог прогона по местному времени: <YYYYMMDD>/<HHMMSS>[суффикс]
+const runRel = (ms, suffix = "") => {
+  const d = new Date(ms);
+  return `${STATE}/${N.dateStamp(ms)}/${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}${suffix}`;
+};
+const iso = (ms) => new Date(ms).toISOString();
+
+test("night-runner 0.5.0: режим ночи — как его понимает раннер (четыре режима, v1, порча research)", () => {
+  const cfg = (projects, research) => ({ schema: 2, projects, ...(research === undefined ? {} : { research }) });
+  const on = { id: "a" };
+  const off = { id: "b", enabled: false };
+  assert.equal(N.modeOf(cfg([on, off])).mode, "tasks", "enabled по умолчанию true, research по умолчанию выключено");
+  assert.equal(N.modeOf(cfg([on], { enabled: true })).mode, "tasks-research");
+  assert.equal(N.modeOf(cfg([off], { enabled: true, focus: "x" })).mode, "research-only");
+  assert.equal(N.modeOf(cfg([off], { enabled: false })).mode, "idle");
+  // ревью: раннер не принимает пустой projects («projects — непустой список») — это порча, а не «ничего не делает»
+  assert.equal(N.modeOf(cfg([], {})).problem, "projects-empty");
+  assert.equal(N.modeOf(cfg([on], {})).mode, "tasks", "research без enabled — выключено (умолчание раннера)");
+  assert.deepEqual(N.modeOf(cfg([on, off])).enabled, ["a"]);
+  // v1 — PerfectWar включён, research v1 раннер не читает (upgradeV1)
+  const v1 = N.modeOf({ worktree: "~/PW-night", research: { enabled: true } });
+  assert.deepEqual([v1.mode, v1.v1], ["tasks", true]);
+  // порча: раннер такой конфиг не примет — это не режим, а «файлы не читаются»
+  assert.equal(N.modeOf(cfg([on], true)).problem, "research-not-object");
+  assert.equal(N.modeOf(cfg([on], { enabled: "да" })).problem, "research-enabled");
+  assert.equal(N.modeOf(cfg([{ id: "a", enabled: 1 }])).problem, "project-enabled");
+  const w = world({ ps: "no-unity" });
+  try {
+    setCfg(w, (c) => (c.research = true));
+    const r = w.run();
+    assert.equal(r.parsed.status, "unknown");
+    assert.ok(r.parsed.events.includes("source-broken"));
+    assert.match(r.text, /config\.json раннера: research — не объект/);
+    assert.match(r.text, /^Режим ночи не определён — config\.json раннера не прочитан/m);
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner 0.5.0: шапка и страница в каждом из четырёх режимов", () => {
+  const w = world(); // Unity открыт на night-worktree проекта game
+  try {
+    // «Задачи»: как раньше + строка режима в шапке
+    let r = w.run();
+    assert.equal(modeLine(r.parsed), "Режим ночи: Задачи");
+    assert.equal(r.parsed.status, "block", "Unity на night-worktree включённого проекта — блокер");
+    // «Задачи + исследование в остаток окна»
+    setCfg(w, (c) => (c.research = { enabled: true }));
+    w.setPs(readFileSync(join(FIX, "ps.txt"), "utf8").split("\n").filter((l) => !/Game-night/.test(l)).join("\n"));
+    r = w.run();
+    assert.equal(r.parsed.header[0].title, "Ночь готова · старт в 04:30 · задачи + исследование");
+    assert.equal(modeLine(r.parsed), "Режим ночи: Задачи + исследование в остаток окна");
+    assert.ok(titles(r.parsed.body).includes("Ночью — в остаток окна после задач"));
+    assert.ok(r.parsed.body.some((i) => i.title.startsWith("План на ночь (пробный прогон")), "план задач на месте");
+    // «Только исследование»: все проекты выключены. Unity на night-worktree выключенного проекта ночи не мешает.
+    w.setPs(readFileSync(join(FIX, "ps.txt"), "utf8"));
+    setCfg(w, (c) => c.projects.forEach((p) => (p.enabled = false)));
+    r = w.run();
+    assert.deepEqual(r.parsed.warnings, []);
+    assert.equal(r.parsed.status, "ok", r.text);
+    assert.equal(r.parsed.header[0].title, "Ночь готова · старт в 04:30 · только исследование");
+    assert.equal(modeLine(r.parsed), "Режим ночи: Только исследование");
+    assert.ok(!r.parsed.events.includes("source-broken"));
+    const t = titles(r.parsed.body);
+    assert.ok(t.includes("Задачи ночью не берутся: все проекты выключены — режим «Только исследование»"));
+    assert.ok(!t.some((x) => x.startsWith("План на ночь (") || x === "Плана на ночь пока нет"), "ни плана, ни «плана нет» — задач нет по режиму");
+    assert.ok(!r.parsed.body.some((i) => i.action === "run" || i.action === "skip"), "ни «запустить», ни «пропустить» задач");
+    assert.ok(t.includes("Ночью — всё окно"));
+    const plan = r.parsed.body.find((i) => i.params.stat === "План на ночь");
+    assert.deepEqual([plan.title, plan.params.note], ["исследование", "задачи не берутся"]);
+    assert.ok(t.some((x) => x.startsWith("Отложены: 3")), "отложенные с прошлых ночей видны");
+    assert.match(r.text, /^Бюджет ночи \| gauge=/m, "бюджет ночи — и для ночи только исследования");
+    // «Ночь ничего не делает»: ни проектов, ни исследования; батарея и снятое задание — не push
+    setCfg(w, (c) => (c.research = { enabled: false }));
+    w.setPower("battery");
+    w.rm("Library/LaunchAgents/com.kensei.night-runner.plist");
+    r = w.run();
+    assert.equal(r.parsed.status, "wait");
+    assert.equal(r.parsed.header[0].title, "Ночь ничего не делает: нет включённых проектов, исследование выключено");
+    assert.equal(r.parsed.header[0].params.tile, "выкл");
+    assert.equal(modeLine(r.parsed), "Режим ночи: Ночь ничего не делает");
+    assert.deepEqual(r.parsed.events.filter((e) => !e.startsWith("night-done")), [], "условия запуска ночи без дела — не события");
+    assert.ok(titles(r.parsed.body).includes("Задачи ночью не берутся: нет включённых проектов"));
+    assert.match(r.text, /раннер в 04:30 остановится с ошибкой «нет включённых проектов»/);
+    // маркер подмены остаётся блокером и в этом режиме
+    w.write(`${STATE}/git-config-changed.txt`, "подмена\n");
+    assert.ok(w.run().parsed.events.includes("tamper"));
+    // английский
+    const en = w.run({ env: { AGENTHUB_LANG: "en" } });
+    assert.equal(en.parsed.header.find((i) => /^Night mode: /.test(i.title)).title, "Night mode: Night does nothing");
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner 0.5.0: ручное исследование идёт — состояние, а не «раннер занят»; агенты по night.log", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    const now = local(2026, 11, 4, 14, 0);
+    const started = local(2026, 11, 4, 13, 30, 5);
+    w.setPs(readFileSync(join(FIX, "ps.txt"), "utf8").replace(/night-run\.mjs\s*$/m, "night-run.mjs research --minutes 120").split("\n").filter((l) => !/Game-night/.test(l)).join("\n"));
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 5000, startedAt: iso(started) }));
+    // ревью №4: openLog раннера лишь создаёт каталог, первая строка лога — после сбора чартов: каталог без night.log
+    mkdirSync(join(w.home, runRel(started + 1000, "-research")), { recursive: true });
+    let r = w.run({ now: iso(now) });
+    // ревью №2: «до ≈» — окно 120 мин + хвост отчёта (картинки и HTML после дедлайна) 10 мин
+    assert.equal(r.parsed.header[0].title, "Идёт исследование рынка (вручную) с 13:30 до ≈15:40");
+    assert.equal(r.parsed.header[0].params.tile, "рынок", "короткое: бейдж панели узкий");
+    assert.equal(r.parsed.status, "ok");
+    let t = titles(r.parsed.body);
+    assert.ok(t.includes("Идёт исследование (вручную) с 13:30, окно до ≈15:40"), t.join("\n"));
+    assert.ok(t.includes("собирает чарты App Store"));
+    assert.ok(!t.some((x) => x.startsWith("Раннер занят командой")));
+    // агенты: двое стартовали, один отработал с находкой; чужая строка «… — …» не в счёт
+    const at = (min) => iso(started + min * 60_000);
+    w.write(`${runRel(started + 1000, "-research")}/night.log`, [
+      `${at(1)} исследование: чартов 2, игр 180`,
+      `${at(1)} исследование: агент 1 — Хиты и тренды (до 25 мин)`,
+      `${at(1)} исследование: агент 2 — Монетизация — сейчас (до 25 мин)`,
+      `${at(9)} исследование: Хиты и тренды — находка`,
+      `${at(9)} исследование: Посторонняя тема — таймаут`,
+    ].join("\n") + "\n");
+    r = w.run({ now: iso(now) });
+    t = titles(r.parsed.body);
+    assert.ok(t.includes("агентов отработало 1, в работе 1, находок 1"), t.join("\n"));
+    assert.ok(!r.parsed.body.some((i) => i.action === "research" || /^mode-/.test(i.action || "")), "раннер занят — ни «исследовать», ни смены режима");
+    assert.ok(t.includes("раннер занят — запуск, когда освободится"));
+    assert.ok(t.includes("сменить режим можно, когда раннер свободен (замок ночи не занят)"));
+    assert.ok(t.some((x) => x.startsWith("Идёт исследование рынка (вручную) с 04.11 13:30")), "строка замка");
+    // night.log исследования нет — честно «не видно», без выдуманных чисел
+    w.rm(`${STATE}/${N.dateStamp(started)}`);
+    r = w.run({ now: iso(now) });
+    assert.ok(titles(r.parsed.body).includes("night.log исследования не найден — сколько агентов отработало, не видно"));
+    // ps не ответил — исследование не утверждаем
+    writeFileSync(join(w.bin, "ps"), "#!/bin/sh\nexit 1\n");
+    r = w.run({ now: iso(now) });
+    assert.doesNotMatch(r.text, /Идёт исследование/);
+    // чистые функции
+    assert.equal(N.holderMinutes("/n/node /x/night-run.mjs research --minutes 30"), 30);
+    assert.equal(N.holderMinutes("/n/node /x/night-run.mjs research"), 60);
+    assert.deepEqual(N.parseResearchLog("t исследование: не запускалось — изменена среда раннера\n"), { started: false, firstAt: null, skipped: "изменена среда раннера", charts: false, agentsStarted: 0, agentsDone: 0, findings: 0, report: null });
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner 0.5.0: ручное исследование до старта ночи — мягкий блокер без push (ночь пропустит запуск)", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    const now = local(2026, 11, 5, 3, 40);
+    const started = local(2026, 11, 5, 3, 30);
+    w.setPs(readFileSync(join(FIX, "ps.txt"), "utf8").replace(/night-run\.mjs\s*$/m, "night-run.mjs research --minutes 120").split("\n").filter((l) => !/Game-night/.test(l)).join("\n"));
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 5000, startedAt: iso(started) }));
+    const r = w.run({ now: iso(now) });
+    assert.equal(r.parsed.status, "wait");
+    assert.equal(r.parsed.header[0].title, "Ночь может не стартовать: исследование при тебе идёт до ≈05:40 — ночь пропустит запуск: замок занят");
+    assert.deepEqual(r.parsed.events, [], "у этого блокера нет push");
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner 0.5.0: исследование в остатке ночи — шапка и число агентов из night.log ночи", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    setCfg(w, (c) => (c.research = { enabled: true }));
+    const started = local(2026, 11, 4, 4, 30, 2);
+    const now = local(2026, 11, 4, 7, 50);
+    w.rm(`${STATE}/20261104`);
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 5000, startedAt: iso(started) }));
+    const at = (min) => iso(started + min * 60_000);
+    const log = `${runRel(started)}/night.log`;
+    // задачи идут — исследование «после задач»
+    w.write(log, `${at(1)} задача aaa111: старт, бюджет 120 мин\n`);
+    let r = w.run({ now: iso(now) });
+    assert.equal(r.parsed.header[0].title, "Ночь идёт с 04:30 · задача aaa111");
+    assert.ok(titles(r.parsed.body).includes("Исследование — после задач, в остаток окна ночи"));
+    // задачи кончились, исследование идёт
+    w.write(log, [
+      `${at(1)} задача aaa111: старт, бюджет 120 мин`,
+      `${at(50)} проект game, задача aaa111: accepted — published — PR открыт`,
+      `${at(190)} исследование: чартов 2, игр 150`,
+      `${at(190)} исследование: агент 1 — Хиты (до 25 мин)`,
+      `${at(190)} исследование: агент 2 — LiveOps (до 25 мин)`,
+      `${at(205)} исследование: Хиты — находка`,
+      `${at(210)} исследование: LiveOps — нет ответа по схеме (exit 1)`,
+      `${at(210)} исследование: агент 3 — Разбор игры: Синтетика (до 25 мин)`,
+    ].join("\n") + "\n");
+    r = w.run({ now: iso(now) });
+    assert.equal(r.parsed.header[0].title, "Ночь идёт с 04:30 · исследует рынок");
+    const t = titles(r.parsed.body);
+    assert.ok(t.includes(`Ночь исследует рынок с ${N.fmtTime(started + 190 * 60_000)}`), t.join("\n"));
+    assert.ok(t.includes("агентов отработало 2, в работе 1, находок 1"));
+    assert.ok(r.parsed.body.some((i) => i.action === "stop"), "ночь можно остановить, как раньше");
+    // отчёт готов — фаза закончилась (ночь доживает finish)
+    w.write(log, readFileSync(join(w.home, log), "utf8") + `${at(280)} исследование: отчёт /x/report.html\n`);
+    assert.equal(w.run({ now: iso(now) }).parsed.header[0].title, "Ночь идёт с 04:30");
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner 0.5.0: последний отчёт — дата и число находок, open.file отчёта и ленты; нет отчёта — нет кнопки", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    const R = `${STATE}/research`;
+    let r = w.run();
+    const line = r.parsed.body.find((i) => i.title.startsWith("Последний отчёт"));
+    assert.equal(line.title, "Последний отчёт 03.11: находок 3");
+    const kids = r.parsed.body.slice(r.parsed.body.indexOf(line) + 1).filter((i) => i.level === 1).slice(0, 2);
+    assert.equal(kids[0].effect, `open.file ${join(w.home, R, "latest.html")}`);
+    assert.equal(kids[1].effect, `open.file ${join(w.home, R, "index.html")}`);
+    assert.doesNotMatch(r.text, /Синтетическая находка/, "идей и находок в хабе нет — только число");
+    // нет latest.html — открывается report.html прогона; ручной прогон помечен
+    w.rm(`${R}/latest.html`);
+    w.write(`${R}/20261104-120000-research/report.html`, "<p>x</p>");
+    w.write(`${R}/20261104-120000-research/findings.json`, JSON.stringify({ meta: { date: "20261104" }, findings: [{}, {}, {}, {}, {}, {}, {}], synthesis: null }));
+    r = w.run();
+    assert.ok(titles(r.parsed.body).includes("Последний отчёт 04.11 (вручную): находок 7"));
+    assert.ok(r.parsed.body.some((i) => i.effect === `open.file ${join(w.home, R, "20261104-120000-research/report.html")}`));
+    // findings.json ещё дописывается (report.html свежий, секунды) — не порча: «находок —» и «дописывается»
+    w.write(`${R}/20261104-120000-research/findings.json`, "{oop");
+    const rep = join(w.home, R, "20261104-120000-research/report.html");
+    utimesSync(rep, new Date(Date.parse(NOW) - 10_000), new Date(Date.parse(NOW) - 10_000));
+    r = w.run();
+    assert.ok(titles(r.parsed.body).includes("findings.json ещё дописывается — число находок появится через минуту"), titles(r.parsed.body).join("\n"));
+    assert.ok(!titles(r.parsed.body).includes("findings.json не разобран — число находок неизвестно"));
+    // битый findings.json при давнем report.html — «находок —» и пояснение, но не «файлы не читаются»
+    utimesSync(rep, new Date("2026-11-01T00:00:00Z"), new Date("2026-11-01T00:00:00Z"));
+    r = w.run();
+    assert.ok(titles(r.parsed.body).includes("Последний отчёт 04.11 (вручную): находок —"));
+    assert.ok(titles(r.parsed.body).includes("findings.json не разобран — число находок неизвестно"));
+    assert.notEqual(r.parsed.status, "unknown");
+    // прогон без report.html (исследование не собрало отчёт) не в счёт; отчётов нет совсем — нет и кнопок
+    w.rm(R);
+    w.write(`${R}/20261105-043000/findings.json`, JSON.stringify({ findings: [] }));
+    r = w.run();
+    assert.ok(titles(r.parsed.body).includes("Отчётов исследования пока нет"));
+    assert.ok(!r.parsed.body.some((i) => /research\//.test(i.effect || "")), "кнопок «Открыть отчёт» и ленты нет");
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner 0.5.0: правка config.json — только нужные значения, остальной текст байт в байт", () => {
+  const text = '{\n  "schema": 2,\n  "usage": { "x": 1 },\n  "projects": [\n    { "id": "a", "title": "A \\"q\\"", "enabled": true },\n    {\n      "id": "b",\n      "repo": "o/b"\n    }\n  ]\n}\n';
+  // research нет — вставляется перед projects тем же отступом; у b нет enabled — вставляется первым ключом
+  const e = N.editConfigText(text, { research: true, projects: { a: false, b: false } });
+  assert.equal(e.ok, true);
+  assert.equal(e.text, '{\n  "schema": 2,\n  "usage": { "x": 1 },\n  "research": { "enabled": true },\n  "projects": [\n    { "id": "a", "title": "A \\"q\\"", "enabled": false },\n    {\n      "enabled": false,\n      "id": "b",\n      "repo": "o/b"\n    }\n  ]\n}\n');
+  // обратно: значения меняются на месте, вставленные ключи остаются (enabled: true — то же, что умолчание)
+  const back = N.editConfigText(e.text, { research: false, projects: { a: true, b: true } });
+  assert.equal(back.text, '{\n  "schema": 2,\n  "usage": { "x": 1 },\n  "research": { "enabled": false },\n  "projects": [\n    { "id": "a", "title": "A \\"q\\"", "enabled": true },\n    {\n      "enabled": true,\n      "id": "b",\n      "repo": "o/b"\n    }\n  ]\n}\n');
+  // уже так — без изменений
+  assert.deepEqual(N.editConfigText(text, { research: false, projects: { a: true } }), { ok: true, text, changed: false });
+  // research {} без enabled; компактный JSON в одну строку
+  assert.equal(N.editConfigText('{"research":{},"projects":[]}', { research: true }).text, '{"research":{ "enabled": true },"projects":[]}');
+  assert.equal(N.editConfigText('{"research":{"focus":"x"},"projects":[]}', { research: true }).text, '{"research":{"enabled": true, "focus":"x"},"projects":[]}');
+  assert.equal(N.editConfigText("{нет", { research: true }).reason, "bad-config");
+  assert.throws(() => N.parseJsonSpans('{"a":1,}'));
+  assert.equal(N.parseJsonSpans('{"a":[1,{"b":"\\u0041"}]}').members[0].value.items.length, 2);
+});
+
+// Действие режима: тот же файл с `--action mode <режим>`, каталог данных плагина — PluginData.
+const modeAct = (w, target, opts) => act(w, ["mode", ...(target === undefined ? [] : [target])], opts);
+
+test("night-runner 0.5.0, действие mode: туда и обратно — проекты возвращаются ровно те, прочие ключи и права файла целы", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    const path = join(w.home, CFG);
+    // web выключен владельцем: «вернуть задачи» не должно включить его
+    setCfg(w, (c) => (c.projects[1].enabled = false));
+    chmodSync(path, 0o640);
+    const before = readFileSync(path, "utf8");
+    // tasks → research-only
+    let r = modeAct(w, "research-only");
+    assert.deepEqual([r.out, r.code], ["ok", 0]);
+    let c = readCfg(w);
+    assert.deepEqual([c.research, c.projects.map((p) => p.enabled)], [{ enabled: true }, [false, false]]);
+    assert.equal(statSync(path).mode & 0o777, 0o640, "права файла сохранены");
+    // прочие ключи и порядок — как были: снимаем правку и сравниваем текст
+    const now1 = readFileSync(path, "utf8");
+    assert.equal(now1.replace('  "research": { "enabled": true },\n', "").replace('"enabled": false,\n      "repo": "owner/game"', '"enabled": true,\n      "repo": "owner/game"'), before);
+    // копия прежнего — в данных плагина (0600), память включённых — тоже
+    const backups = readdirSync(join(r.data, "config-backups"));
+    assert.equal(backups.length, 1);
+    assert.equal(readFileSync(join(r.data, "config-backups", backups[0]), "utf8"), before);
+    assert.equal(statSync(join(r.data, "config-backups", backups[0])).mode & 0o777, 0o600);
+    const mem = JSON.parse(readFileSync(join(r.data, "night-mode.json"), "utf8"));
+    assert.deepEqual(mem.projects, ["game"]);
+    assert.equal(statSync(join(r.data, "night-mode.json")).mode & 0o777, 0o600);
+    // страница видит, что вернуть задачи можно и какие проекты включатся
+    const page = w.run({ env: { AGENTHUB_PLUGIN_DATA_PATH: r.data } });
+    assert.ok(titles(page.parsed.body).includes("вернуть задачи — снова включатся проекты: game"));
+    assert.deepEqual(page.parsed.body.filter((i) => /^mode-/.test(i.action || "")).map((i) => i.action), ["mode-tasks", "mode-tasks-research"]);
+    // повтор — уже в режиме: ok без записи и без новой копии
+    assert.equal(modeAct(w, "research-only").out, "ok");
+    assert.equal(readdirSync(join(r.data, "config-backups")).length, 1);
+    // research-only → tasks-research: включается только game, research остаётся включённым
+    r = modeAct(w, "tasks-research");
+    assert.equal(r.out, "ok");
+    c = readCfg(w);
+    assert.deepEqual([c.research.enabled, c.projects.map((p) => p.enabled)], [true, [true, false]]);
+    assert.ok(!existsSync(join(r.data, "night-mode.json")), "память израсходована");
+    // tasks-research → tasks: только research.enabled
+    assert.equal(modeAct(w, "tasks").out, "ok");
+    c = readCfg(w);
+    assert.deepEqual([c.research.enabled, c.projects.map((p) => p.enabled)], [false, [true, false]]);
+    const after = readFileSync(path, "utf8");
+    assert.equal(after, before.replace('  "projects": [', '  "research": { "enabled": false },\n  "projects": ['), "обратно — тот же файл плюс research.enabled: false");
+    assert.equal(readdirSync(join(r.data, "config-backups")).length, 3);
+    assert.deepEqual(readdirSync(dirname(path)).filter((n) => n.includes(".tmp")), [], "временных файлов не осталось");
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner 0.5.0, действие mode: отказы — замок, ps, нет памяти, проекты исчезли, битый конфиг, v1, нет каталога данных", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    const path = join(w.home, CFG);
+    const keep = () => readFileSync(path, "utf8");
+    let before = keep();
+    // замок держит любая команда раннера (post) — отказ, файл не тронут
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 5000, startedAt: "2026-11-04T09:59:00.000Z", command: "post" }));
+    assert.equal(modeAct(w, "research-only").out, "reason=night-lock");
+    writeFileSync(join(w.bin, "ps"), "#!/bin/sh\nexit 1\n");
+    assert.equal(modeAct(w, "research-only").out, "reason=lock-unknown");
+    w.setPs(readFileSync(join(FIX, "ps.txt"), "utf8"));
+    w.rm(`${STATE}/night.lock`);
+    assert.equal(keep(), before);
+    // неизвестный режим и без аргумента
+    assert.equal(modeAct(w, "all").out, "reason=bad-mode");
+    assert.equal(modeAct(w).out, "reason=bad-mode");
+    // без каталога данных — копию прежнего положить некуда
+    let noData = "";
+    try {
+      execFileSync(process.execPath, [FILE, "--action", "mode", "research-only"], { env: { HOME: w.home, PATH: "/usr/bin:/bin", AGENTHUB_TEST_BIN_DIR: w.bin }, encoding: "utf8" });
+    } catch (e) {
+      noData = String(e.stdout).trim();
+    }
+    assert.equal(noData, "reason=no-data-dir");
+    // все проекты выключены вручную, памяти нет — «вернуть задачи» отказывает, а не включает всё
+    setCfg(w, (c) => {
+      c.projects.forEach((p) => (p.enabled = false));
+      c.research = { enabled: true };
+    });
+    before = keep();
+    let r = modeAct(w, "tasks");
+    assert.deepEqual([r.out, r.code], ["reason=no-remembered-projects", 3]);
+    assert.equal(modeAct(w, "tasks-research").out, "reason=no-remembered-projects");
+    assert.equal(keep(), before);
+    // страница: кнопок возврата к задачам нет, причина — словами
+    const page = w.run({ env: { AGENTHUB_PLUGIN_DATA_PATH: r.data } });
+    assert.ok(titles(page.parsed.body).includes("вернуть задачи из хаба нельзя: не запомнено, какие проекты были включены, — включите их в config.json раннера"));
+    assert.ok(!page.parsed.body.some((i) => i.action === "mode-tasks" || i.action === "mode-tasks-research"));
+    // запомненные проекты исчезли из конфига
+    writeFileSync(join(r.data, "night-mode.json"), JSON.stringify({ version: 1, projects: ["gone"], config: path }));
+    assert.equal(modeAct(w, "tasks").out, "reason=remembered-projects-gone");
+    // память от другого config.json не в счёт
+    writeFileSync(join(r.data, "night-mode.json"), JSON.stringify({ version: 1, projects: ["game"], config: "/elsewhere/config.json" }));
+    assert.equal(modeAct(w, "tasks").out, "reason=no-remembered-projects");
+    assert.equal(keep(), before);
+    // битый конфиг, research не объект, v1, нет файла
+    for (const [bad, reason] of [["{не json", "bad-config"], [JSON.stringify({ schema: 2, research: true, projects: [] }), "bad-config"], [JSON.stringify({ worktree: "~/PW-night" }), "config-v1"]]) {
+      w.write(CFG, bad);
+      assert.equal(modeAct(w, "research-only").out, `reason=${reason}`, bad);
+      assert.equal(keep(), bad);
+    }
+    w.rm(CFG);
+    assert.equal(modeAct(w, "research-only").out, "reason=no-runner-config");
+    assert.ok(!existsSync(join(r.data, "config-backups")), "ни одной копии: при отказе файл не трогается вовсе");
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner 0.5.0, действие research: «Исследовать сейчас» через двойник раннера; отказы до запуска", async () => {
+  const w = world({ ps: "no-unity" });
+  const log = join(w.home, "..", "node.log");
+  // «сейчас» — полдень: окно с хвостом отчёта до ночи в 04:30 успевает (иначе overlaps-night)
+  const env = { AGENTHUB_TEST_NOW: iso(local(2026, 11, 4, 12, 0)) };
+  try {
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 5000, startedAt: "2026-11-04T09:59:00.000Z" }));
+    assert.equal(act(w, ["research", "60"], { nodeLog: log, env }).out, "reason=night-lock");
+    writeFileSync(join(w.bin, "ps"), "#!/bin/sh\nexit 1\n");
+    assert.equal(act(w, ["research", "60"], { nodeLog: log, env }).out, "reason=lock-unknown");
+    w.setPs(readFileSync(join(FIX, "ps.txt"), "utf8"));
+    w.rm(`${STATE}/night.lock`);
+    for (const bad of ["45", "-1", "600", "abc", "060"]) assert.equal(act(w, ["research", bad], { nodeLog: log, env }).out, "reason=bad-minutes", bad);
+    assert.equal(act(w, ["research"], { nodeLog: log, env }).out, "reason=bad-minutes");
+    // окно короче резерва синтеза + одного агента раннер не примет
+    setCfg(w, (c) => (c.research = { enabled: false, synthesis_reserve_min: 25, min_agent_min: 8 }));
+    assert.equal(act(w, ["research", "30"], { nodeLog: log, env }).out, "reason=too-short");
+    // маркер подмены — раннер откажет первым делом, плагин тоже
+    w.write(`${STATE}/git-config-changed.txt`, "x\n");
+    assert.equal(act(w, ["research", "60"], { nodeLog: log, env }).out, "reason=tamper");
+    w.rm(`${STATE}/git-config-changed.txt`);
+    assert.ok(!existsSync(log), "раннер не запускался");
+    const r = act(w, ["research", "60"], { nodeLog: log, env });
+    assert.deepEqual([r.out, r.code], ["ok", 0]);
+    for (let i = 0; i < 50 && !existsSync(log); i++) await new Promise((res) => setTimeout(res, 50));
+    assert.equal(readFileSync(log, "utf8").trim(), `${realpathSync(join(w.home, "Projects/IT/night-runner"))} night-run.mjs research --minutes 60`);
+    const logs = readdirSync(r.data).filter((n) => /^research-.*\.log$/.test(n));
+    assert.equal(logs.length, 1);
+    assert.equal(statSync(join(r.data, logs[0])).mode & 0o777, 0o600);
+    // раннера нет
+    w.rm("Projects/IT/night-runner/night-run.mjs");
+    assert.equal(act(w, ["research", "60"], { nodeLog: log, env }).out, "reason=no-runner");
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner 0.5.0: метаданные — право записи config.json, переключатель и «Исследовать сейчас»; кнопки — под шаблон", async () => {
+  const { readPluginMeta } = await import("../../../scripts/lib/plugin-test.mjs");
+  const pm = readPluginMeta(FILE);
+  assert.deepEqual(pm.warnings ?? [], []);
+  const meta = pm.meta;
+  const byId = Object.fromEntries(meta.actions.map((a) => [a.id, a]));
+  for (const m of ["tasks", "tasks-research", "research-only"]) {
+    // ревью №12: режимы с исследованием тратят квоту каждую ночь — confirm-cost с ценой; «Задачи» — confirm
+    assert.equal(byId[`mode-${m}`].level, m === "tasks" ? "confirm" : "confirm-cost");
+    if (m !== "tasks") assert.match(byId[`mode-${m}`].cost, /квоту Claude/);
+    assert.equal(byId[`mode-${m}`].arg, undefined);
+    assert.equal(byId[`mode-${m}`].command, `night-runner.30s.mjs --action mode ${m}`);
+    assert.match(byId[`mode-${m}`].title, /config\.json раннера/);
+  }
+  assert.equal(byId.research.level, "confirm-cost");
+  assert.deepEqual(byId.research.arg, { name: "minutes", pattern: "^(?:30|60|120)$" });
+  assert.ok(meta.fsWrite.some((e) => e.startsWith("~/Projects/IT/night-runner/config.json — ")));
+  assert.ok(meta.exec.some((e) => e.startsWith("node night-run.mjs research --minutes <30|60|120> — ")));
+  // предложенные в выводе аргументы проходят шаблоны действий
+  const w = world({ ps: "no-unity" });
+  try {
+    const { parsed } = w.run();
+    const research = parsed.body.filter((i) => i.action === "research").map((i) => i.params.arg);
+    assert.deepEqual(research, ["30", "60", "120"]);
+    for (const a of research) assert.match(a, new RegExp(byId.research.arg.pattern));
+    for (const i of parsed.body.filter((x) => x.action)) assert.ok(byId[i.action], `объявлено: ${i.action}`);
+  } finally {
+    w.stop();
+  }
+});
+
+// ---------- 0.5.0, находки ревью (номера — по списку ревью) ----------
+
+const week = (percent, resets = "2026-11-09T04:00:00+00:00") => ({ version: 1, fetched_at: Date.parse(NOW) / 1000, error: null, rows: [{ kind: "weekly_all", group: "weekly", percent, resets_at: resets }] });
+const noUnityPs = () => readFileSync(join(FIX, "ps.txt"), "utf8").split("\n").filter((l) => !/Game-night/.test(l)).join("\n");
+const offAll = (c) => c.projects.forEach((p) => (p.enabled = false));
+
+test("ревью №1: research.stop_seven_day_pct — «Только исследование» при неделе ≥ порога: wait без push; потолок — минимум из двух", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    setCfg(w, (c) => {
+      offAll(c);
+      c.research = { enabled: true };
+    });
+    w.setUsage(week(72)); // ниже порога пропуска ночи (80), но выше порога исследования (70 по умолчанию)
+    let r = w.run();
+    assert.equal(r.parsed.status, "wait");
+    assert.equal(r.parsed.header[0].title, "Ночь может не стартовать: исследование не начнётся: неделя 72% ≥ 70% (research.stop_seven_day_pct)");
+    assert.deepEqual(r.parsed.events, [], "мягкий блокер без push");
+    // свой порог из конфига
+    setCfg(w, (c) => (c.research.stop_seven_day_pct = 75));
+    r = w.run();
+    assert.equal(r.parsed.status, "ok");
+    assert.ok(titles(r.parsed.body).includes("Агенты исследования не стартуют после недели 75%"), titles(r.parsed.body).join("\n"));
+    // «Задачи + исследование»: не блокер, а пометка в разделе «Исследование»
+    setCfg(w, (c) => {
+      c.projects[0].enabled = true;
+      c.research = { enabled: true };
+    });
+    r = w.run();
+    assert.equal(r.parsed.status, "ok");
+    assert.ok(titles(r.parsed.body).includes("Исследование не начнётся: неделя 72% ≥ 70% (research.stop_seven_day_pct)"));
+    // неделя 44%: бюджет ночи остановит её на 48% — раньше порога исследования 70%
+    w.setUsage(week(44));
+    r = w.run();
+    assert.ok(titles(r.parsed.body).includes("Агенты исследования не стартуют после недели 48%"));
+    assert.ok(titles(r.parsed.body).includes("порог исследования 70%, остановка ночи по бюджету — 48%: что раньше"));
+    // неделя сбросится до старта — к старту она новая, порог не мешает
+    w.setUsage(week(72, iso(local(2026, 11, 5, 2, 0))));
+    r = w.run({ now: iso(local(2026, 11, 4, 22, 0)) });
+    assert.ok(!titles(r.parsed.body).some((t) => t.startsWith("Исследование не начнётся")));
+  } finally {
+    w.stop();
+  }
+});
+
+test("ревью №2: «Исследовать сейчас» не срывает ночь — окна, что не успеют (с хвостом отчёта), скрыты, действие отказывает", () => {
+  const w = world({ ps: "no-unity" });
+  const log = join(w.home, "..", "node.log");
+  try {
+    // до старта 04:30 — 50 мин: успевает только 30 (+10 хвост)
+    let r = w.run({ now: iso(local(2026, 11, 5, 3, 40)) });
+    assert.deepEqual(r.parsed.body.filter((i) => i.action === "research").map((i) => i.params.arg), ["30"]);
+    assert.ok(titles(r.parsed.body).includes("окна, что не успеют до старта ночи в 04:30, скрыты: ночь не ждёт занятый замок"));
+    // 30 мин до старта — ни одно
+    r = w.run({ now: iso(local(2026, 11, 5, 4, 0)) });
+    assert.equal(r.parsed.body.filter((i) => i.action === "research").length, 0);
+    assert.ok(titles(r.parsed.body).some((t) => t.startsWith("до старта ночи в 04:30 ни одно окно не успеет")));
+    const at = (h, m) => ({ AGENTHUB_TEST_NOW: iso(local(2026, 11, 5, h, m)) });
+    assert.equal(act(w, ["research", "60"], { nodeLog: log, env: at(3, 40) }).out, "reason=overlaps-night");
+    assert.equal(act(w, ["research", "30"], { nodeLog: log, env: at(3, 50) }).out, "reason=overlaps-night", "30 + 10 мин хвоста = 04:30 — впритык не пускаем");
+    assert.ok(!existsSync(log), "раннер не запускался");
+    // ночи нечего делать — мешать нечему
+    setCfg(w, offAll);
+    r = w.run({ now: iso(local(2026, 11, 5, 4, 0)) });
+    assert.deepEqual(r.parsed.body.filter((i) => i.action === "research").map((i) => i.params.arg), ["30", "60", "120"]);
+    assert.equal(act(w, ["research", "120"], { nodeLog: log, env: at(4, 0) }).out, "ok");
+    assert.equal(N.researchFits(0, 30, 40 * 60_000 + 1, "tasks"), true);
+    assert.equal(N.researchFits(0, 30, 40 * 60_000, "tasks"), false);
+  } finally {
+    w.stop();
+  }
+});
+
+// Двойник night-run.mjs раннера из git HEAD: без команды research.
+const OLD_RUNNER = '// двойник раннера без исследования\nconst COMMANDS = ["run", "setup", "check", "install", "uninstall", "migrate-state", "post"];\nprocess.exit(3);\n';
+
+test("ревью №3: раннер без research в COMMANDS — ни переключателей с исследованием, ни «Исследовать сейчас»; mode-tasks не вписывает research", () => {
+  const w = world({ ps: "no-unity" });
+  const log = join(w.home, "..", "node.log");
+  try {
+    w.write("Projects/IT/night-runner/night-run.mjs", OLD_RUNNER);
+    const before = readFileSync(join(w.home, CFG), "utf8");
+    let r = w.run();
+    assert.ok(titles(r.parsed.body).includes("Этот раннер не умеет исследование рынка: в night-run.mjs нет команды research"));
+    assert.ok(!r.parsed.body.some((i) => i.action === "research" || i.action === "mode-tasks-research" || i.action === "mode-research-only"), r.text);
+    assert.ok(titles(r.parsed.body).includes("этот раннер не умеет исследование (в night-run.mjs нет команды research) — режимы с исследованием недоступны"));
+    assert.equal(r.parsed.status, "ok");
+    assert.equal(act(w, ["research", "60"], { nodeLog: log }).out, "reason=runner-no-research");
+    assert.equal(act(w, ["mode", "research-only"]).out, "reason=runner-no-research");
+    assert.equal(act(w, ["mode", "tasks-research"]).out, "reason=runner-no-research");
+    assert.equal(act(w, ["mode", "tasks"]).out, "ok");
+    assert.equal(readFileSync(join(w.home, CFG), "utf8"), before, "уже «Задачи»: ключ research не вписан");
+    // возврат запомненных проектов — тоже без ключа research (validateConfig HEAD отверг бы неизвестный ключ)
+    setCfg(w, offAll);
+    const data = join(w.home, "..", "data");
+    mkdirSync(data, { recursive: true });
+    writeFileSync(join(data, "night-mode.json"), JSON.stringify({ version: 1, projects: ["game"], config: join(w.home, CFG) }));
+    assert.equal(act(w, ["mode", "tasks"]).out, "ok");
+    const c = readCfg(w);
+    assert.deepEqual([c.research, c.projects.map((p) => p.enabled)], [undefined, [true, false]]);
+    // ключ research у такого раннера — порча (его проверка отвергнет конфиг)
+    setCfg(w, (x) => (x.research = { enabled: false }));
+    r = w.run();
+    assert.equal(r.parsed.status, "unknown");
+    assert.match(r.text, /ключ research, а этот раннер исследования не знает/);
+    assert.ok(!existsSync(log));
+  } finally {
+    w.stop();
+  }
+});
+
+test("ревью №5: порча режима не теряет state_dir — идущая ночь видна, «Остановить» есть и пишет STOP туда", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    // state_dir не по умолчанию: откат на умолчание потерял бы ночь
+    cpSync(join(w.home, STATE), join(w.home, "night-state"), { recursive: true });
+    w.rm(STATE);
+    setCfg(w, (c) => {
+      c.state_dir = "~/night-state";
+      c.projects[0].enabled = "да";
+    });
+    w.write("night-state/night.lock", JSON.stringify({ pid: 5000, startedAt: "2026-11-04T03:30:02.000Z" }));
+    const r = w.run();
+    assert.equal(r.parsed.status, "unknown");
+    assert.match(r.text, /enabled проекта — не true\/false/);
+    assert.match(r.parsed.header[0].title, /^Ночь идёт с \d\d:30 · задача ccc333$/);
+    assert.ok(r.parsed.body.some((i) => i.action === "stop"));
+    const s = act(w, ["stop"]);
+    assert.equal(s.out, "ok");
+    assert.ok(existsSync(join(w.home, "night-state", "STOP")));
+    // пустой projects — тоже порча, а не «ничего не делает» (раннер его не примет)
+    setCfg(w, (c) => (c.projects = []));
+    const e = w.run();
+    assert.match(e.text, /projects пуст — раннер требует непустой список/);
+    assert.equal(modeLine(e.parsed), undefined);
+  } finally {
+    w.stop();
+  }
+});
+
+test("ревью №6, №11: только для чтения, жёсткая ссылка, симлинк — отказ до побочных эффектов; переключатели скрыты с причиной", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    const path = join(w.home, CFG);
+    const data = join(w.home, "..", "data");
+    const clean = () => !existsSync(join(data, "config-backups")) && !existsSync(join(data, "night-mode.json"));
+    const before = readFileSync(path, "utf8");
+    chmodSync(path, 0o440);
+    assert.equal(act(w, ["mode", "research-only"]).out, "reason=config-readonly");
+    assert.ok(clean(), "ни копии, ни памяти");
+    let page = w.run({ env: { AGENTHUB_PLUGIN_DATA_PATH: data } });
+    assert.ok(titles(page.parsed.body).includes("config.json раннера закрыт от записи — переключение не будет его менять"));
+    assert.ok(!page.parsed.body.some((i) => /^mode-/.test(i.action || "")));
+    chmodSync(path, 0o644);
+    linkSync(path, join(w.home, "config-copy.json"));
+    assert.equal(act(w, ["mode", "research-only"]).out, "reason=config-hardlink");
+    assert.ok(clean());
+    rmSync(join(w.home, "config-copy.json"));
+    // симлинк: rename заменил бы его файлом
+    const real = join(w.home, "real-config.json");
+    writeFileSync(real, before);
+    rmSync(path);
+    symlinkSync(real, path);
+    assert.equal(act(w, ["mode", "research-only"]).out, "reason=config-symlink");
+    assert.ok(clean());
+    assert.equal(readFileSync(real, "utf8"), before);
+    page = w.run({ env: { AGENTHUB_PLUGIN_DATA_PATH: data } });
+    assert.ok(titles(page.parsed.body).includes("config.json раннера — ссылка: переключение заменило бы её файлом, правьте его сами"));
+  } finally {
+    w.stop();
+  }
+});
+
+test("ревью №7, №8, мелочи: config-changed, замок ожил перед rename, edit-failed, CRLF — без следов временного файла", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    const path = join(w.home, CFG);
+    const dir = dirname(path);
+    const tmps = () => readdirSync(dir).filter((n) => n.endsWith(".tmp"));
+    const before = readFileSync(path, "utf8");
+    // config-changed: файл поменяли между подготовкой и rename
+    const st = N.stageConfig(path, before.replace('"enabled": true', '"enabled": false'));
+    assert.equal(st.ok, true);
+    writeFileSync(path, before + " ");
+    assert.deepEqual(N.commitConfig(path, st.tmp, before), { ok: false, reason: "config-changed" });
+    assert.deepEqual(tmps(), []);
+    writeFileSync(path, before);
+    // №8: замок ожил между первой проверкой и rename — ps отвечает «держателя нет», затем «держатель жив»
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 5000, startedAt: "2026-11-04T09:59:00.000Z" }));
+    const n = join(w.home, "..", "ps-count");
+    const alive = readFileSync(join(FIX, "ps.txt"), "utf8").replaceAll("{{HOME}}", w.home);
+    const dead = alive.split("\n").filter((l) => !/night-run\.mjs/.test(l)).join("\n");
+    writeFileSync(join(w.home, "..", "ps-dead.txt"), dead);
+    writeFileSync(join(w.home, "..", "ps-alive.txt"), alive);
+    writeFileSync(join(w.bin, "ps"), `#!/bin/sh\nif [ -f '${n}' ]; then cat '${join(w.home, "..", "ps-alive.txt")}'; else touch '${n}'; cat '${join(w.home, "..", "ps-dead.txt")}'; fi\n`);
+    chmodSync(join(w.bin, "ps"), 0o755);
+    assert.equal(act(w, ["mode", "research-only"]).out, "reason=night-lock");
+    assert.equal(readFileSync(path, "utf8"), before, "файл не тронут");
+    assert.deepEqual(tmps(), []);
+    w.setPs(noUnityPs());
+    w.rm(`${STATE}/night.lock`);
+    // edit-failed: повтор ключа enabled — JSON.parse берёт последний, правка по позиции — первый: сверка ловит
+    const dup = '{"schema":2,"projects":[{"id":"game","enabled":true,"enabled":false}]}';
+    assert.equal(N.editConfigText(dup, { projects: { game: true } }).reason, "edit-failed");
+    w.write(CFG, dup);
+    assert.equal(act(w, ["mode", "tasks"]).out, "reason=edit-failed");
+    assert.equal(readFileSync(path, "utf8"), dup);
+    // CRLF: переводы строк и отступы сохраняются
+    const crlf = before.replace(/\n/g, "\r\n");
+    w.write(CFG, crlf);
+    assert.equal(act(w, ["mode", "research-only"]).out, "ok");
+    const out = readFileSync(path, "utf8");
+    assert.ok(!/[^\r]\n/.test(out), "только CRLF");
+    assert.match(out, /\r\n {2}"research": \{ "enabled": true \},\r\n {2}"projects": \[/);
+    assert.deepEqual(tmps(), []);
+  } finally {
+    w.stop();
+  }
+});
+
+test("ревью №9: `night-run.mjs --minutes 90 research` — исследование, а не ночь (значения флагов пропускаются)", () => {
+  assert.equal(N.holderSubcommand("/n/node /x/night-run.mjs --minutes 90 research"), "research");
+  assert.equal(N.holderSubcommand("/n/node /x/night-run.mjs --config /c.json --no-push run"), "run");
+  assert.equal(N.holderSubcommand("/n/node /x/night-run.mjs --task game:abc --no-push"), null);
+  const w = world({ ps: "no-unity" });
+  try {
+    w.setPs(noUnityPs().replace(/night-run\.mjs\s*$/m, "night-run.mjs --minutes 90 research"));
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 5000, startedAt: "2026-11-04T09:30:00.000Z" }));
+    const r = w.run();
+    assert.match(r.parsed.header[0].title, /^Идёт исследование рынка \(вручную\)/);
+    assert.ok(!r.parsed.body.some((i) => i.action === "stop"), "не ночь — «Остановить» не предлагается");
+  } finally {
+    w.stop();
+  }
+});
+
+test("ревью №10: Unity при включённом исследовании — пометка о задачах проекта, не «не запустится» и не вечерний push", () => {
+  const w = world(); // Unity открыт на night-worktree game
+  try {
+    setCfg(w, (c) => {
+      c.research = { enabled: true };
+      c.projects[1].enabled = false;
+    });
+    let r = w.run();
+    assert.equal(r.parsed.status, "wait");
+    assert.equal(r.parsed.header[0].title, "Ночь готова · старт в 04:30 · Unity открыт на Game — задачи проекта game не пойдут, ночь займётся исследованием");
+    assert.ok(!r.parsed.events.includes("unity-open:game"), JSON.stringify(r.parsed.events));
+    // включён и web — его задачи пойдут
+    setCfg(w, (c) => (c.projects[1].enabled = true));
+    r = w.run();
+    assert.match(r.parsed.header[0].title, /задачи проекта game не пойдут, остальное — как обычно$/);
+    // без исследования — как раньше: блокер и push
+    setCfg(w, (c) => (c.research.enabled = false));
+    r = w.run();
+    assert.equal(r.parsed.status, "block");
+    assert.ok(r.parsed.events.includes("unity-open:game"));
+  } finally {
+    w.stop();
+  }
+});
+
+test("ревью, мелочи: дробные минуты research, память при частичных проектах, latest.html старше отчёта, «ничего не делает» без бюджета, --config в launchd", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    // минуты как у раннера: дробные — тоже; 22.5 + 8 = 30.5 — окна 30 нет, действие отказывает
+    setCfg(w, (c) => (c.research = { enabled: false, synthesis_reserve_min: 22.5, min_agent_min: 8 }));
+    let r = w.run();
+    assert.deepEqual(r.parsed.body.filter((i) => i.action === "research").map((i) => i.params.arg), ["60", "120"]);
+    assert.equal(act(w, ["research", "30"], { env: { AGENTHUB_TEST_NOW: iso(local(2026, 11, 4, 12, 0)) } }).out, "reason=too-short");
+    // память: «только исследование» запомнила game и web; владелец включил web руками → «Задачи» её не стирает
+    setCfg(w, (c) => (c.research = { enabled: false }));
+    assert.equal(act(w, ["mode", "research-only"]).out, "ok");
+    const data = join(w.home, "..", "data");
+    setCfg(w, (c) => (c.projects[1].enabled = true));
+    assert.equal(act(w, ["mode", "tasks"]).out, "ok");
+    assert.deepEqual(JSON.parse(readFileSync(join(data, "night-mode.json"), "utf8")).projects, ["game", "web"]);
+    // latest.html старше report.html прогона — открывается report.html прогона
+    const R = join(w.home, STATE, "research");
+    utimesSync(join(R, "latest.html"), new Date("2026-10-01T00:00:00Z"), new Date("2026-10-01T00:00:00Z"));
+    r = w.run();
+    assert.ok(r.parsed.body.some((i) => i.effect === `open.file ${join(R, "20261103-043005", "report.html")}`), r.text);
+    // «ничего не делает»: ни карточки бюджета, ни «пропустит запуск»
+    setCfg(w, (c) => {
+      offAll(c);
+      c.research = { enabled: false };
+    });
+    w.setUsage(week(85));
+    r = w.run();
+    assert.doesNotMatch(r.text, /Бюджет ночи|пропустит запуск/);
+    // launchd запускает раннер с другим --config — режим отсюда не определить, переключение отказывает
+    const plist = (cfg) => `<?xml version="1.0"?>\n<plist version="1.0"><dict><key>Label</key><string>com.kensei.night-runner</string><key>ProgramArguments</key><array><string>/n/node</string><string>/x/bootstrap.mjs</string><string>--scheduled</string><string>04:30</string><string>--config</string><string>${cfg}</string></array></dict></plist>\n`;
+    w.write("Library/LaunchAgents/com.kensei.night-runner.plist", plist("/elsewhere/config.json"));
+    r = w.run();
+    assert.ok(titles(r.parsed.body).some((t) => t.startsWith("Задание launchd запускает раннер с --config /elsewhere/config.json")));
+    assert.equal(modeLine(r.parsed), undefined);
+    assert.ok(!r.parsed.body.some((i) => /^mode-/.test(i.action || "")));
+    assert.equal(act(w, ["mode", "tasks"]).out, "reason=config-elsewhere");
+    // тот же файл через --config — как обычно
+    w.write("Library/LaunchAgents/com.kensei.night-runner.plist", plist(join(w.home, CFG)));
+    assert.equal(modeLine(w.run().parsed), "Режим ночи: Ночь ничего не делает");
+    assert.equal(N.launchdConfigArg(w.home), join(w.home, CFG));
+    // плагин настроен на другой каталог раннера — путь вне объявленного права
+    assert.equal(N.configWhere(join(w.home, "Other/config.json"), w.home).elsewhere, true);
+    assert.equal(N.configWhere(join(w.home, CFG), w.home).elsewhere, false);
   } finally {
     w.stop();
   }

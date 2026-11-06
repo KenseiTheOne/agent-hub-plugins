@@ -1,0 +1,9 @@
+{
+  "meta": { "date": "20261103", "startedAt": 1793676000000, "endedAt": 1793685000000, "agents": 4, "failed": 1, "costUsd": 2.5, "focus": "синтетический фокус" },
+  "findings": [
+    { "id": "F1", "kind": "topic", "topic": "Синтетическая тема 1", "appId": null, "data": { "title": "Синтетическая находка 1", "ideas": [] } },
+    { "id": "F2", "kind": "topic", "topic": "Синтетическая тема 2", "appId": null, "data": { "title": "Синтетическая находка 2", "ideas": [] } },
+    { "id": "F3", "kind": "game", "topic": "Разбор игры: Синтетика", "appId": "1", "data": { "title": "Синтетическая находка 3", "ideas": [] } }
+  ],
+  "synthesis": null
+}

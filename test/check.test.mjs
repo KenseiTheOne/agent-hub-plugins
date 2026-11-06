@@ -372,9 +372,15 @@ test("--base: файлы плагина изменились, а версия т
   const { writeFileSync } = await import("node:fs");
   const { writePluginFiles } = await import("./helpers.mjs");
   const root = makeRegistry({ a: { "a.1m.mjs": pluginSource(), "README.md": README, "test/a.test.mjs": "// тест\n" } });
-  const { devNull } = await import("node:os");
-  // без системного и глобального конфига git (подпись коммитов, хуки и т.п. с машины разработчика не мешают)
-  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: devNull } });
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  // без системного и глобального конфига git (подпись коммитов, хуки и т.п. с машины разработчика не мешают).
+  // Глобальный — пустой файл, а не os.devNull: git для Windows не открывает «\\.\nul» как конфиг.
+  const cfgDir = mkdtempSync(join(tmpdir(), "ahp-gitcfg-"));
+  const emptyCfg = join(cfgDir, "gitconfig");
+  writeFileSync(emptyCfg, "");
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: emptyCfg } });
   try {
     git("init", "-q");
     git("add", "-A");
@@ -393,5 +399,6 @@ test("--base: файлы плагина изменились, а версия т
     assert.deepEqual(errorsOf(r, "a"), []);
   } finally {
     cleanup(root);
+    rmSync(cfgDir, { recursive: true, force: true });
   }
 });
