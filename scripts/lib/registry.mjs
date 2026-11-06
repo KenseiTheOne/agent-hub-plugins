@@ -13,6 +13,8 @@ import { LIMITS, packTarGz } from "../vendor/tarball.mjs";
 export const ALLOWED_EXT = new Set(["mjs", "js", "cjs", "py", "sh", "bash", "zsh"]);
 // В архив не идут: тесты и фикстуры (они для CI), dot-файлы.
 export const PACK_EXCLUDE_TOP = new Set(["test", "fixtures"]);
+// Попадает ли файл plugins/<id>/<rel> в архив плагина (без test/, fixtures/, dot-файлов и dot-каталогов).
+export const inPack = (rel) => !rel.split("/").some((s) => s.startsWith(".")) && !PACK_EXCLUDE_TOP.has(rel.split("/")[0]);
 
 export const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 
@@ -110,7 +112,7 @@ export function inspectPlugin(root, id, { official = new Set() } = {}) {
     warnings.push(...lint.warnings);
   }
   // остальные текстовые файлы плагина тоже не должны лезть в запретные места
-  const pack = files.filter((f) => !f.symlink && !f.rel.split("/").some((s) => s.startsWith(".")) && !PACK_EXCLUDE_TOP.has(f.rel.split("/")[0]));
+  const pack = files.filter((f) => !f.symlink && inPack(f.rel));
   let total = 0;
   for (const f of pack) {
     total += f.size;
@@ -165,9 +167,20 @@ function git(root, args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
 }
 
+function checkRef(ref) {
+  if (!/^[\w./~^@{}-]{1,200}$/.test(ref) || ref.startsWith("-")) throw new Error(`странная ревизия: ${ref}`);
+}
+
 // Права на ревизии git (только чтение объектов: ls-tree + show). → Map(id → permissions)
 export function permissionsAtRef(root, ref) {
-  if (!/^[\w./~^@{}-]{1,200}$/.test(ref) || ref.startsWith("-")) throw new Error(`странная ревизия: ${ref}`);
+  const out = new Map();
+  for (const [id, meta] of metaAtRef(root, ref)) out.set(id, permissionsFromMeta(meta));
+  return out;
+}
+
+// Метаданные главных файлов плагинов на ревизии git. → Map(id → meta)
+export function metaAtRef(root, ref) {
+  checkRef(ref);
   const names = git(root, ["ls-tree", "-r", "--name-only", ref, "--", "plugins"]).toString("utf8").split("\n").filter(Boolean);
   const byId = new Map();
   for (const n of names) {
@@ -181,7 +194,33 @@ export function permissionsAtRef(root, ref) {
     const mains = mainCandidates(files, id);
     if (mains.length !== 1) continue;
     const text = git(root, ["show", `${ref}:plugins/${id}/${mains[0]}`]).subarray(0, 64 * 1024).toString("utf8");
-    out.set(id, permissionsFromMeta(parseMetaText(text).meta));
+    out.set(id, parseMetaText(text).meta);
+  }
+  return out;
+}
+
+// Плагины, у которых относительно ревизии ref изменились файлы архива, а версия осталась прежней: архив
+// <id>-<версия>.tar.gz в релизе «index» перезаписался бы другим содержимым, и клиент со старым индексом получил
+// бы при установке registry:sha256. Сравнение — git diff ревизии с рабочим деревом (с учётом .gitattributes),
+// плюс неотслеживаемые файлы. → [{ id, version, files: [rel] }]
+export function unbumpedChanges(root, ref) {
+  const base = metaAtRef(root, ref);
+  const out = [];
+  for (const id of pluginIds(root)) {
+    const was = base.get(id);
+    if (!was?.version) continue;
+    const dir = join(root, "plugins", id);
+    const mains = mainCandidates(readdirSync(dir).filter((n) => lstatSync(join(dir, n)).isFile()), id);
+    if (mains.length !== 1) continue;
+    const version = parseMetaText(readFileSync(join(dir, mains[0])).subarray(0, 64 * 1024).toString("utf8")).meta.version;
+    if (version !== was.version) continue;
+    const prefix = `plugins/${id}/`;
+    const names = [
+      ...git(root, ["diff", "--name-only", ref, "--", prefix]).toString("utf8").split("\n"),
+      ...git(root, ["ls-files", "--others", "--exclude-standard", "--", prefix]).toString("utf8").split("\n"),
+    ].filter((n) => n.startsWith(prefix));
+    const files = [...new Set(names.map((n) => n.slice(prefix.length)))].filter(inPack).sort();
+    if (files.length) out.push({ id, version, files });
   }
   return out;
 }

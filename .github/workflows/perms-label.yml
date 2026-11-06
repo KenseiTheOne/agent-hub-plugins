@@ -1,49 +1,76 @@
-# Метка «permissions» на PR, где выросли права плагина (тогда нужен второй ревьюер).
+# Метка «permissions» на PR, где выросли права плагина или тронуты доверенные пути (тогда нужен второй ревьюер).
 #
-# Запускается после ci через workflow_run: код PR здесь НЕ извлекается и не исполняется — читается только
-# артефакт perms/perms.json ({pr, grew}) как данные, номер PR сверяется с head_sha запуска. Артефакт делает
-# job perms в ci.yml скриптами базовой ветки, не исполняя код PR (см. комментарий там).
+# Триггер — pull_request_target: этот файл берётся из ветки по умолчанию, а не из PR, и запускается на каждый PR
+# в main сам, ни от чего в PR не завися. (Прежний workflow_run после ci зависел от PR: для pull_request имя
+# «ci» и триггеры берутся из ci.yml самого PR, и PR из форка, переименовавший workflow, не получал ни метки за
+# рост прав, ни метки за правку .github/.)
+#
+# pull_request_target даёт токену запись, поэтому код PR здесь НЕ исполняется ни в каком виде: скрипты и node
+# запускаются из checkout ветки по умолчанию (base/), файлы PR (pr/) — только данные для
+# check.mjs --perms-only (метаданные читаются как текст; ни плагины, ни их тесты, ни скрипты, ни package.json
+# PR не исполняются и не подключаются). Секретов нет, токен — только pull-requests: write.
+#
+# Метка ставится и без роста прав, если PR трогает .github/, scripts/, official.json, blocklist.json или CODEOWNERS:
+# там решается, что считается ростом прав и кто подписывает индекс.
 
 name: perms-label
 
 on:
-  workflow_run:
-    workflows: [ci]
-    types: [completed]
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
+concurrency:
+  group: perms-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   label:
-    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      actions: read
+      contents: read
       pull-requests: write
     steps:
-      - name: Метка по диффу прав
+      # Скрипты — из ветки по умолчанию; их и исполняем.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: base
+          persist-credentials: false
+
+      # Файлы PR — только данные: отсюда ничего не запускается.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Метка по диффу прав (скрипты main над файлами PR)
+        working-directory: base
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          mkdir -p perms
-          if ! gh run download "$RUN_ID" -R "$REPO" -n perms -D perms; then
-            echo "артефакта perms нет — метку не трогаем"
-            exit 0
-          fi
-          pr=$(jq -r '.pr' perms/perms.json)
-          grew=$(jq -r '.grew' perms/perms.json)
-          [[ "$pr" =~ ^[0-9]+$ ]] || { echo "номер PR не число"; exit 1; }
+          # сбой проверки — отчёта нет, и perms-artifact считает права выросшими: лишняя метка лучше пропущенной
+          env -u NODE_OPTIONS node scripts/check.mjs --perms-only --root ../pr --base-dir . --report ../perms-report.json || true
+          env -u NODE_OPTIONS node scripts/perms-artifact.mjs ../perms-report.json "$PR_NUMBER" ../perms
+          grew=$(jq -r '.grew' ../perms/perms.json)
           [[ "$grew" == "true" || "$grew" == "false" ]] || { echo "grew не bool"; exit 1; }
-          head=$(gh pr view "$pr" -R "$REPO" --json headRefOid -q .headRefOid)
-          [[ "$head" == "$HEAD_SHA" ]] || { echo "PR $pr не от этого запуска"; exit 1; }
-          if [[ "$grew" == "true" ]]; then
-            gh pr edit "$pr" -R "$REPO" --add-label permissions
+          trusted=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' \
+            | grep -cE '^(\.github/|scripts/|official\.json$|blocklist\.json$|CODEOWNERS$)' || true)
+          echo "права выросли: $grew; доверенных файлов в PR: $trusted"
+          if [[ "$grew" == "true" || "$trusted" != "0" ]]; then
+            gh pr edit "$PR_NUMBER" -R "$REPO" --add-label permissions
           else
-            gh pr edit "$pr" -R "$REPO" --remove-label permissions || true
+            gh pr edit "$PR_NUMBER" -R "$REPO" --remove-label permissions || true
           fi

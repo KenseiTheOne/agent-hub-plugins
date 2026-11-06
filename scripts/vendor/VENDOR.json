@@ -9,10 +9,10 @@
   },
   "files": {
     "meta.mjs": "a39cc7c0cf98f40aba41e39074d24e9651c7320f0238387e97b541b0c12d5f38",
-    "output.mjs": "a60634ba46e822a1b460dd536aaf4c3a480cd07152875fab7b40af5a6f44cd16",
+    "output.mjs": "5b5a0637ac393e22d12b2ab0b0daf277a21008c703756ce93c2cdb547fdfbde8",
     "minisign.mjs": "9e098eb3d56e757eb0c7d83c071e5ee78c7ae389f32709fccc33a46a76580285",
     "tarball.mjs": "e74eed995e971c54a22bb07275caefefe91e4ad4fa506eb69360b4e0ec2b4161",
-    "perms.mjs": "59da1be9077210eb9881506652c4ce293850ed0f7c01846ef3d5e3088862efb7",
+    "perms.mjs": "eba3b23193ff2fd3d13abe3df9ec07a0a9fddb5195674d223a5f2740eba4906d",
     "native.mjs": "7b2ccbad7806c9ed8163150063f25f32ac018f5c11177c228694333dad1597ab"
   }
 }

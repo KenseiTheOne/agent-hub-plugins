@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // <agenthub.title>ClickUp</agenthub.title>
-// <agenthub.version>1.1.0</agenthub.version>
+// <agenthub.version>1.1.1</agenthub.version>
 // <agenthub.desc>Ваши тикеты ClickUp и какие из них сейчас в работе у агентов (ночь, /ticket, сессии). Только чтение</agenthub.desc>
 // <agenthub.desc lang="en">Your ClickUp tickets and which ones agents are working on (night, /ticket, sessions). Read-only</agenthub.desc>
 // <agenthub.status value="ok" label="Тикеты загружены">Список тикетов свежий</agenthub.status>
 // <agenthub.status value="ok" lang="en" label="Tickets loaded">The ticket list is up to date</agenthub.status>
-// <agenthub.status value="error" label="Токен не принят">ClickUp отклонил токен или хаб не пустил запрос</agenthub.status>
-// <agenthub.status value="error" lang="en" label="Token rejected">ClickUp rejected the token or the hub blocked a request</agenthub.status>
+// <agenthub.status value="error" label="Токен не принят или нет доступа">ClickUp отклонил токен или закрыл доступ к рабочему пространству, или хаб не пустил запрос</agenthub.status>
+// <agenthub.status value="error" lang="en" label="Token rejected / no access">ClickUp rejected the token or closed access to the workspace, or the hub blocked a request</agenthub.status>
 // <agenthub.status value="unknown" label="Не подключён или нет связи">Нет токена ClickUp или ClickUp не отвечает</agenthub.status>
 // <agenthub.status value="unknown" lang="en" label="Not connected / offline">No ClickUp token, or ClickUp isn't responding</agenthub.status>
 // <agenthub.author.name>Kensei</agenthub.author.name>
@@ -20,8 +20,8 @@
 // <agenthub.fsRead lang="en">~/.claude/task-runs — which tickets agents are working on (night runs and /ticket)</agenthub.fsRead>
 // <agenthub.fsRead>~/.claude/sessions/*.json — в каких папках идут сессии, чтобы связать их с тикетами (ключи сессий не открываются)</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.claude/sessions/*.json — which folders sessions run in, to link them to tickets (session keys are never opened)</agenthub.fsRead>
-// <agenthub.fsRead>.git/HEAD каталогов сессий — ветка сессии: по ней видно номер тикета</agenthub.fsRead>
-// <agenthub.fsRead lang="en">.git/HEAD каталогов сессий — the session's branch: it shows the ticket number</agenthub.fsRead>
+// <agenthub.fsRead><session cwd>/.git/HEAD — ветка сессии: по ней видно номер тикета</agenthub.fsRead>
+// <agenthub.fsRead lang="en"><session cwd>/.git/HEAD — the session's branch: it shows the ticket number</agenthub.fsRead>
 // <agenthub.fsRead>~/.cmuxterm/claude-hook-sessions.json — вкладка cmux сессии — для кнопки «Перейти»</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.cmuxterm/claude-hook-sessions.json — the session's cmux tab — for the Switch to tab button</agenthub.fsRead>
 // <agenthub.effects>open.url,cmux.focus</agenthub.effects>
@@ -43,7 +43,9 @@
 //   сессия  — точно, если RUN.md назвал session_id; сильно — ветка сессии содержит id тикета или совпала
 //             с веткой RUN.md в том же репо; возможно — каталог сессии совпал с репо RUN.md, ветка не совпала.
 //
-// События: auth-failed (401/403), source-broken (незнакомая форма ответа).
+// События: auth-failed (401/403 на /user — токен не принят), source-broken (незнакомая форма ответа).
+// 401/403 на тикеты одного рабочего пространства или списка при принятом токене (/user отвечает) — отказ по нему:
+// его тикеты пропускаются, остальные собираются, список рабочих пространств перезапрашивается в следующий раз.
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -51,6 +53,8 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const API_BASE = "https://api.clickup.com";
+// Команда для секрета clickup.token (служба секретов ядра: -s agent-hub.<служба> -a <запись>).
+export const SECRET_CMD = "security add-generic-password -s agent-hub.clickup -a token -T /usr/bin/security -w";
 export const ALLOWED_PATHS = [
   /^\/api\/v2\/user$/,
   /^\/api\/v2\/team$/,
@@ -122,7 +126,7 @@ function plural(n, one, few, many) {
 export class ApiError extends Error {
   constructor(kind, status, extra = {}) {
     super(`${kind}${status ? ` ${status}` : ""}`);
-    this.kind = kind; // auth | rate | http | net | shape | denied
+    this.kind = kind; // auth | rate | http | net | shape | denied | scope
     this.status = status;
     Object.assign(this, extra);
   }
@@ -176,19 +180,28 @@ export function makeClient({ token, base = API_BASE, fetchImpl = globalThis.fetc
       try {
         return await res.json();
       } catch {
-        throw new ApiError("shape", res.status, { reason: "не JSON" });
+        throw new ApiError("shape", res.status, { reason: "not-json" });
       }
     },
   };
 }
 
 // ---------- ClickUp → тикеты ----------
+// reason — код (переводит render, SHAPE_TEXT), а не готовая строка.
 function shapeError(what) {
   return new ApiError("shape", null, { reason: what });
 }
+const SHAPE_TEXT = {
+  "not-json": ["ответ не JSON", "the response isn't JSON"],
+  "task-no-id": ["задача без id/name", "a task without id/name"],
+  "user-no-id": ["/user без user.id", "/user without user.id"],
+  "team-no-teams": ["/team без teams", "/team without teams"],
+  "no-tasks": ["ответ без tasks", "a response without tasks"],
+};
+const shapeText = (code) => (SHAPE_TEXT[code] ? SHAPE_TEXT[code][EN() ? 1 : 0] : code);
 
 export function pickTask(t) {
-  if (!t || typeof t !== "object" || typeof t.id !== "string" || typeof t.name !== "string") throw shapeError("задача без id/name");
+  if (!t || typeof t !== "object" || typeof t.id !== "string" || typeof t.name !== "string") throw shapeError("task-no-id");
   const st = t.status && typeof t.status === "object" ? t.status : {};
   const url = typeof t.url === "string" && t.url.startsWith("https://app.clickup.com/") ? t.url : `https://app.clickup.com/t/${encodeURIComponent(t.id)}`;
   return {
@@ -205,18 +218,22 @@ export function pickTask(t) {
   };
 }
 
-export async function fetchTasks(client, cfg, state, now) {
+// info.denied — [{ scope: "team"|"list", id, status }]: рабочие пространства и списки, отказавшие в доступе при
+// принятом токене. Все отказали — ApiError("scope").
+export async function fetchTasks(client, cfg, state, now, info = {}, { retried = false } = {}) {
   // пользователь и рабочие пространства — раз в сутки
+  let userFresh = false;
   if (!state.user || now - state.user.at > META_TTL_MS) {
     const u = await client.get("/api/v2/user");
-    if (!u || !u.user || u.user.id == null) throw shapeError("/user без user.id");
+    if (!u || !u.user || u.user.id == null) throw shapeError("user-no-id");
     state.user = { id: String(u.user.id), name: typeof u.user.username === "string" ? u.user.username : null, at: now };
+    userFresh = true;
   }
   let teamIds = Array.isArray(cfg.teamIds) && cfg.teamIds.length ? cfg.teamIds.map(String) : null;
   if (!teamIds && !(Array.isArray(cfg.listIds) && cfg.listIds.length)) {
     if (!state.teams || now - state.teams.at > META_TTL_MS) {
       const t = await client.get("/api/v2/team");
-      if (!t || !Array.isArray(t.teams)) throw shapeError("/team без teams");
+      if (!t || !Array.isArray(t.teams)) throw shapeError("team-no-teams");
       state.teams = { ids: t.teams.map((x) => String(x.id)).filter((x) => /^\d+$/.test(x)).slice(0, 3), at: now };
     }
     teamIds = state.teams.ids;
@@ -226,14 +243,41 @@ export async function fetchTasks(client, cfg, state, now) {
   if (assignee) base["assignees[]"] = [assignee];
   const tasks = new Map();
   const add = (list) => {
-    if (!list || !Array.isArray(list.tasks)) throw shapeError("ответ без tasks");
+    if (!list || !Array.isArray(list.tasks)) throw shapeError("no-tasks");
     for (const t of list.tasks) {
       const p = pickTask(t);
       tasks.set(p.id, p);
     }
   };
-  for (const id of (cfg.listIds || []).map(String).filter((x) => /^\d+$/.test(x)).slice(0, 5)) add(await client.get(`/api/v2/list/${id}/task`, base));
-  for (const id of (teamIds || []).filter((x) => /^\d+$/.test(x))) add(await client.get(`/api/v2/team/${id}/task`, base));
+  const scopes = [
+    ...(cfg.listIds || []).map(String).filter((x) => /^\d+$/.test(x)).slice(0, 5).map((id) => ({ scope: "list", id, path: `/api/v2/list/${id}/task` })),
+    ...(teamIds || []).filter((x) => /^\d+$/.test(x)).map((id) => ({ scope: "team", id, path: `/api/v2/team/${id}/task` })),
+  ];
+  const denied = [];
+  const keyOf = (d) => `${d.scope}:${d.id}`;
+  // отказы, уже подтверждённые при проверенном токене (не старше суток), — без повторной проверки каждый запуск
+  const known = new Set(state.denied && now - state.denied.at <= META_TTL_MS && Array.isArray(state.denied.ids) ? state.denied.ids : []);
+  for (const sc of scopes) {
+    try {
+      add(await client.get(sc.path, base));
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.kind !== "auth") throw e;
+      // Токен проверен в этом запуске (/user ответил) — это отказ по рабочему пространству или списку. Пользователь
+      // из кэша — перепроверить токен заново: /user на 401 даст auth, а на другой аккаунт — новый id и новые команды.
+      if (!userFresh && !retried && !known.has(keyOf(sc))) {
+        state.user = null;
+        state.teams = null;
+        return fetchTasks(client, cfg, state, now, info, { retried: true });
+      }
+      denied.push({ scope: sc.scope, id: sc.id, status: e.status });
+    }
+  }
+  info.denied = denied;
+  const fresh = denied.filter((d) => !known.has(keyOf(d)));
+  state.denied = denied.length ? { ids: denied.map(keyOf), at: fresh.length || !state.denied ? now : state.denied.at } : null;
+  // рабочее пространство могло уйти из /team (пользователя убрали) — список команд перезапросить в следующий раз
+  if (fresh.some((d) => d.scope === "team") && state.teams && !(Array.isArray(cfg.teamIds) && cfg.teamIds.length)) state.teams = null;
+  if (scopes.length && denied.length === scopes.length) throw new ApiError("scope", denied[0].status, { denied });
   return [...tasks.values()];
 }
 
@@ -496,14 +540,16 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
         },
       });
       try {
-        const tasks = await fetchTasks(client, cfg, state, nowMs);
+        const info = {};
+        const tasks = await fetchTasks(client, cfg, state, nowMs, info);
         state.last = { at: nowMs, tasks };
         state.backoff = null;
         r.tasks = tasks;
         r.fetchedAt = nowMs;
+        r.denied = info.denied || [];
       } catch (e) {
         const kind = e instanceof ApiError ? e.kind : "net";
-        r.error = { kind, status: e.status ?? null, reason: e.reason || null };
+        r.error = { kind, status: e.status ?? null, reason: e.reason || null, denied: e.denied || null };
         if (kind === "rate") {
           const n = (state.backoff?.n || 0) + 1;
           const wait = Math.min(BACKOFF_BASE_MS * 2 ** (n - 1), BACKOFF_MAX_MS);
@@ -511,7 +557,12 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
           state.backoff = { n, until: Math.max(nowMs + wait, resetMs) };
           r.pausedUntil = state.backoff.until;
         }
-        if (kind === "auth") state.user = null;
+        // токен не принят: и пользователь, и рабочие пространства из кэша могли быть от прежнего токена
+        if (kind === "auth") {
+          state.user = null;
+          state.teams = null;
+          state.denied = null;
+        }
       }
       r.requests = client.requests;
       r.rate = state.rate || null;
@@ -525,6 +576,17 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
   return r;
 }
 
+// «рабочему пространству 111» / «списку 222» / «рабочим пространствам 111, 333»
+function deniedText(list) {
+  const items = Array.isArray(list) ? list : [];
+  const teams = items.filter((d) => d.scope === "team").map((d) => clean(d.id, 20));
+  const lists = items.filter((d) => d.scope === "list").map((d) => clean(d.id, 20));
+  const parts = [];
+  if (teams.length) parts.push(tr(`${teams.length > 1 ? "рабочим пространствам" : "рабочему пространству"} ${teams.join(", ")}`, `${teams.length > 1 ? "workspaces" : "workspace"} ${teams.join(", ")}`));
+  if (lists.length) parts.push(tr(`${lists.length > 1 ? "спискам" : "списку"} ${lists.join(", ")}`, `${lists.length > 1 ? "lists" : "list"} ${lists.join(", ")}`));
+  return parts.join(tr(" и ", " and ")) || tr("тикетам", "the tickets");
+}
+
 // Шапка отвечает на «подключён ли ClickUp и что в работе». tile= — число тикетов для плитки.
 export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LANG } = {}) {
   setLang(lang);
@@ -533,7 +595,12 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
     out.push(line(tr("ClickUp не подключён — нужен токен", "ClickUp isn't connected — a token is needed"), { status: "unknown", tile: "—", sfimage: "key.slash" }));
     out.push("---");
     out.push(line(tr("Как подключить", "How to connect"), { color: "gray" }));
-    out.push(line(tr("--Заведите персональный токен ClickUp (Settings → Apps) и сохраните его в связке ключей как секрет clickup.token (сервис agent-hub.clickup)", "--Create a personal ClickUp token (Settings → Apps) and save it in the keychain as the clickup.token secret (service agent-hub.clickup)"), { color: "gray" }));
+    // Служба секретов хаба ищет запись связки ключей: сервис agent-hub.clickup, учётная запись ровно «token»
+    // (find-generic-password -s agent-hub.clickup -a token) — запись с другим именем учётной записи не найдётся.
+    out.push(line(tr("--1. Заведите персональный токен ClickUp: Settings → Apps → API Token", "--1. Create a personal ClickUp token: Settings → Apps → API Token"), { color: "gray" }));
+    out.push(line(tr("--2. Сохраните его в связке ключей macOS командой в Терминале (она спросит токен):", "--2. Save it in the macOS keychain with this Terminal command (it asks for the token):"), { color: "gray" }));
+    out.push(line(`--${SECRET_CMD}`, { color: "gray" }));
+    out.push(line(tr("--Сервис — agent-hub.clickup, учётная запись — ровно token: с другим именем хаб запись не найдёт", "--Service agent-hub.clickup, account exactly token: under any other name the hub won't find it"), { color: "gray" }));
     return out.join("\n");
   }
   let status = "ok";
@@ -548,9 +615,14 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
       status = "unknown";
       problem = tr("ClickUp: не получилось загрузить тикеты", "ClickUp: couldn't load tickets");
       notes.push(line(tr("Ответ ClickUp не разобран", "Couldn't parse ClickUp's response"), { color: "orange", event: "source-broken" }));
-      if (r.error.reason) notes.push(line(`--${clean(r.error.reason, 80)}`, { color: "gray" }));
+      if (r.error.reason) notes.push(line(`--${clean(shapeText(r.error.reason), 80)}`, { color: "gray" }));
     } else if (r.error.kind === "rate") {
       notes.push(line(tr(`Лимит запросов ClickUp (429), пауза до ${fmtTime(r.pausedUntil, nowMs)}`, `ClickUp rate limit (429), pausing until ${fmtTime(r.pausedUntil, nowMs)}`), { color: "orange" }));
+    } else if (r.error.kind === "scope") {
+      // токен принят (/user ответил), а все рабочие пространства и списки отказали
+      status = "error";
+      problem = tr(`ClickUp: нет доступа к ${deniedText(r.error.denied)}`, `ClickUp: no access to ${deniedText(r.error.denied)}`);
+      notes.push(line(tr(`Токен принят, но ClickUp не пускает к тикетам (HTTP ${r.error.status}): проверьте, что вы ещё участник`, `The token works, but ClickUp won't show the tickets (HTTP ${r.error.status}): check you're still a member`), { color: "red" }));
     } else if (r.error.kind === "denied") {
       status = "error";
       problem = tr("Хаб не пустил запрос к ClickUp: адрес не в списке разрешённых", "The hub blocked a ClickUp request: address not allowed");
@@ -560,6 +632,9 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
     }
   } else if (r.pausedUntil) {
     notes.push(line(tr(`Пауза до ${fmtTime(r.pausedUntil, nowMs)}: бережём лимит запросов`, `Paused until ${fmtTime(r.pausedUntil, nowMs)} to save the rate limit`), { color: "gray" }));
+  }
+  if (!r.error && r.denied && r.denied.length) {
+    notes.push(line(tr(`Нет доступа к ${deniedText(r.denied)} — его тикеты пропущены`, `No access to ${deniedText(r.denied)} — its tickets are skipped`), { color: "orange" }));
   }
   const stale = !r.fetchedAt || nowMs - r.fetchedAt > STALE_MS;
   if (stale && status === "ok" && (r.error || r.pausedUntil)) status = "unknown";

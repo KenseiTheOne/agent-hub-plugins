@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // <agenthub.title>Hermes</agenthub.title>
-// <agenthub.version>1.2.0</agenthub.version>
+// <agenthub.version>1.2.1</agenthub.version>
 // <agenthub.desc>Задачи Hermes по расписанию: что упало, что подорожало, отвечает ли служба Hermes и не на паузе ли он</agenthub.desc>
 // <agenthub.desc lang="en">Hermes scheduled jobs: what failed, what got costly, whether the Hermes service responds and whether it is paused</agenthub.desc>
 // <agenthub.status value="ok" label="Задачи по расписанию">Hermes работает, задачи идут по расписанию</agenthub.status>
@@ -20,14 +20,14 @@
 // <agenthub.fsRead lang="en">~/.hermes/state/gateway.heartbeat — whether the Hermes service is responding</agenthub.fsRead>
 // <agenthub.fsRead>~/.hermes/cron, ~/.hermes/profiles/*/cron — задачи по расписанию: когда запускаются, чем закончились и сколько потратили</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.hermes/cron, ~/.hermes/profiles/*/cron — scheduled jobs: when they run, how they ended and what they spent</agenthub.fsRead>
-// <agenthub.fsRead>~/.hermes/ESTOP, ~/.hermes/profiles/*/ESTOP — не поставлен ли Hermes на паузу</agenthub.fsRead>
-// <agenthub.fsRead lang="en">~/.hermes/ESTOP, ~/.hermes/profiles/*/ESTOP — whether Hermes is paused</agenthub.fsRead>
-// <agenthub.exec>/usr/bin/sqlite3 file:…/executions.db?immutable=1 — прочитать, чем закончились запуски задач (только чтение)</agenthub.exec>
-// <agenthub.exec lang="en">/usr/bin/sqlite3 file:…/executions.db?immutable=1 — read how job runs ended (read-only)</agenthub.exec>
+// <agenthub.fsRead>~/.hermes/ESTOP, ~/.hermes/profiles/*/ESTOP — не поставлен ли на паузу весь Hermes или один его профиль</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.hermes/ESTOP, ~/.hermes/profiles/*/ESTOP — whether all of Hermes or one of its profiles is paused</agenthub.fsRead>
+// <agenthub.exec>/usr/bin/sqlite3 -readonly -json …/executions.db — прочитать, чем закончились запуски задач (только чтение: база Hermes — без блокировок; пока рядом журнал WAL — копия базы с ним во временном каталоге плагина)</agenthub.exec>
+// <agenthub.exec lang="en">/usr/bin/sqlite3 -readonly -json …/executions.db — read how job runs ended (read-only: Hermes's database without locks; while its WAL journal is there — a copy of both in the plugin's temp folder)</agenthub.exec>
 // <agenthub.exec>/bin/ps -p <pid> — жив ли процесс службы Hermes</agenthub.exec>
 // <agenthub.exec lang="en">/bin/ps -p <pid> — whether the Hermes service process is alive</agenthub.exec>
-// <agenthub.exec>~/.local/bin/hermes [-p <профиль>] cron pause|resume|run <job> — кнопки задачи «Пауза», «Возобновить», «Запустить сейчас»</agenthub.exec>
-// <agenthub.exec lang="en">~/.local/bin/hermes [-p <профиль>] cron pause|resume|run <job> — the job's Pause, Resume and Run now buttons</agenthub.exec>
+// <agenthub.exec>~/.local/bin/hermes [-p <profile>] cron pause|resume|run <job> — кнопки задачи «Пауза», «Возобновить», «Запустить сейчас»</agenthub.exec>
+// <agenthub.exec lang="en">~/.local/bin/hermes [-p <profile>] cron pause|resume|run <job> — the job's Pause, Resume and Run now buttons</agenthub.exec>
 // <agenthub.exec>~/.local/bin/hermes pause — кнопка «Поставить Hermes на паузу»</agenthub.exec>
 // <agenthub.exec lang="en">~/.local/bin/hermes pause — the Pause Hermes button</agenthub.exec>
 // <agenthub.effects>open.file</agenthub.effects>
@@ -51,13 +51,21 @@
 // с шаблоном и передаёт отдельным argv. Факты (задача есть в jobs.json своего профиля, cron pause — только не
 // на паузе, cron resume — только на паузе, pause всего Hermes — только без ESTOP в ~/.hermes) проверяет сам
 // плагин в режиме `--action`; отказ — код 3 и `reason=<код>`. Кнопка «Поставить Hermes на паузу» есть в кадре,
-// пока ESTOP нет; снять паузу — `hermes resume` в терминале (действия для этого нет).
+// пока нет ~/.hermes/ESTOP; снять паузу — `hermes resume` в терминале (действия для этого нет).
+//
+// ESTOP (agent/estop.py Hermes): `hermes pause` пишет $HERMES_HOME/ESTOP. Процесс профиля проверяет свой
+// HERMES_HOME и корень, поэтому ~/.hermes/ESTOP — пауза всего Hermes, а profiles/<n>/ESTOP — только профиля <n>
+// (снять — `hermes -p <n> resume`). Пауза профиля не гасит тишину планировщика других профилей.
 //
 // Что читаем и чего не читаем:
 //   jobs.json        — только id, name, расписание, enabled/state, last_status, failure_streak, время запусков.
 //                      Поля prompt, origin, last_error/last_failure.detail НЕ читаются и не выводятся.
-//   executions.db    — `?immutable=1` (без блокировок и без записи), только job_id, status и времена;
-//                      колонка error — только факт наличия. Колонки с токенами берём, если они есть в схеме.
+//   executions.db    — `-readonly` и `?immutable=1` (без блокировок и без записи в каталог Hermes), только job_id,
+//                      status и времена; колонка error — только факт наличия. Колонки с токенами берём, если они
+//                      есть в схеме. База Hermes в режиме WAL: при immutable файл -wal не читается, и пока у
+//                      Hermes открыто соединение, свежие запуски (в том числе провал) лежат только в нём. Поэтому
+//                      при непустом -wal читается копия базы вместе с -wal во временном каталоге (данные плагина
+//                      или системный tmp), копия удаляется сразу после чтения.
 //   usage_audit.jsonl— только числа токенов, job_id, ts, duration_ms (там же лежит расход каждого запуска).
 //   Файлы секретов и настроек Hermes, state.db, sessions/ — никогда (читаются только перечисленные выше файлы).
 //
@@ -66,8 +74,8 @@
 // ticker-silent-<профиль> (планировщик cron не тикает), estop (Hermes на паузе), source-broken.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -154,14 +162,31 @@ export function humanCron(expr) {
 }
 
 // ---------- чтение источников ----------
-class Broken extends Error {}
+// Поломка источника — кодом (переводит render, BROKEN_TEXT), а не готовой русской строкой.
+class Broken extends Error {
+  constructor(kind, arg = "") {
+    super(arg ? `${kind} ${arg}` : kind);
+    this.kind = kind;
+    this.arg = arg;
+  }
+}
+const BROKEN_TEXT = {
+  ru: { "not-json": "не JSON", "no-jobs": "нет массива jobs", "job-no-id": "задача без id", "no-column": (c) => `нет колонки ${c}`, "bad-row": "строка без job_id/status", "not-time": "не время", "no-gateway-state": "нет gateway_state" },
+  en: { "not-json": "not JSON", "no-jobs": "no jobs array", "job-no-id": "a job without an id", "no-column": (c) => `no ${c} column`, "bad-row": "a row without job_id/status", "not-time": "not a timestamp", "no-gateway-state": "no gateway_state" },
+};
+export function brokenText(b, lang = "ru") {
+  if (!b || typeof b !== "object") return String(b ?? "");
+  const t = (BROKEN_TEXT[lang] || BROKEN_TEXT.ru)[b.kind];
+  const text = typeof t === "function" ? t(b.arg) : t ?? b.kind;
+  return `${b.what}: ${text}`;
+}
 
 function readJson(path) {
   const text = readFileSync(path, "utf8");
   try {
     return JSON.parse(text);
   } catch {
-    throw new Broken(`${path}: не JSON`);
+    throw new Broken("not-json");
   }
 }
 
@@ -186,9 +211,9 @@ const JOB_FIELDS = ["id", "name", "schedule_display", "enabled", "state", "pause
 export function readJobs(path) {
   const j = readJson(path);
   const list = Array.isArray(j) ? j : j && Array.isArray(j.jobs) ? j.jobs : null;
-  if (!list) throw new Broken("jobs.json: нет массива jobs");
+  if (!list) throw new Broken("no-jobs");
   return list.map((x) => {
-    if (!x || typeof x !== "object" || typeof x.id !== "string") throw new Broken("jobs.json: задача без id");
+    if (!x || typeof x !== "object" || typeof x.id !== "string") throw new Broken("job-no-id");
     const o = {};
     for (const k of JOB_FIELDS) o[k] = x[k] ?? null;
     if (!o.schedule_display && x.schedule && typeof x.schedule === "object") o.schedule_display = x.schedule.display || x.schedule.expr || null;
@@ -197,16 +222,52 @@ export function readJobs(path) {
   });
 }
 
-export function sqlite(dbPath, sql, { bin = "/usr/bin/sqlite3" } = {}) {
-  const uri = `file:${dbPath.split("/").map(encodeURIComponent).join("/")}?immutable=1`;
+const fileUri = (path, query = "") => `file:${path.split("/").map(encodeURIComponent).join("/")}${query}`;
+
+export function sqlite(dbPath, sql, { bin = "/usr/bin/sqlite3", uri = fileUri(dbPath, "?immutable=1") } = {}) {
   const out = execFileSync(bin, ["-readonly", "-json", uri, sql], { encoding: "utf8", timeout: 2500, stdio: ["ignore", "pipe", "ignore"] });
   return out.trim() ? JSON.parse(out) : [];
 }
 
+const walSize = (dbPath) => {
+  try {
+    return statSync(`${dbPath}-wal`).size;
+  } catch {
+    return 0;
+  }
+};
+
+// Чтение базы Hermes без записи в её каталог. Журнала WAL нет — immutable (без блокировок; всё уже в базе).
+// Непустой -wal — копия базы и -wal во временном каталоге: copy открывается обычным read-only соединением,
+// и SQLite видит строки из журнала. Сбой чтения immutable, пока появился -wal (checkpoint во время чтения), —
+// повтор по копии. tmpBase — каталог данных плагина (AGENTHUB_PLUGIN_DATA_PATH) или системный tmp.
+export function withDb(dbPath, fn, { tmpBase = process.env.AGENTHUB_PLUGIN_DATA_PATH || tmpdir() } = {}) {
+  const viaCopy = () => {
+    mkdirSync(tmpBase, { recursive: true, mode: 0o700 });
+    const dir = mkdtempSync(join(tmpBase, "hermes-db-"));
+    try {
+      const copy = join(dir, "executions.db");
+      copyFileSync(dbPath, copy);
+      if (existsSync(`${dbPath}-wal`)) copyFileSync(`${dbPath}-wal`, `${copy}-wal`);
+      return fn(fileUri(copy, "?mode=ro"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  if (walSize(dbPath) > 0) return viaCopy();
+  try {
+    return fn(fileUri(dbPath, "?immutable=1"));
+  } catch (e) {
+    if (!(e instanceof Broken) && walSize(dbPath) > 0) return viaCopy();
+    throw e;
+  }
+}
+
 // executions.db: последние запуски по задачам. → Map(jobId → [{status, claimed_at, started_at, finished_at, has_error, tokens?}])
 export function readExecutions(dbPath, opts = {}) {
+  if (!opts.uri) return withDb(dbPath, (uri) => readExecutions(dbPath, { ...opts, uri }), opts);
   const cols = sqlite(dbPath, "PRAGMA table_info(executions)", opts).map((r) => r.name);
-  for (const need of ["job_id", "status", "claimed_at"]) if (!cols.includes(need)) throw new Broken(`executions.db: нет колонки ${need}`);
+  for (const need of ["job_id", "status", "claimed_at"]) if (!cols.includes(need)) throw new Broken("no-column", need);
   const ident = (c) => `"${c.replace(/"/g, '""')}"`;
   const select = ["job_id", "status", "claimed_at"];
   for (const c of ["started_at", "finished_at"]) if (cols.includes(c)) select.push(c);
@@ -216,7 +277,7 @@ export function readExecutions(dbPath, opts = {}) {
   const rows = sqlite(dbPath, `SELECT ${select.map(ident).join(", ")}${errExpr} FROM executions ORDER BY claimed_at DESC LIMIT 400`, opts);
   const by = new Map();
   for (const r of rows) {
-    if (typeof r.job_id !== "string" || typeof r.status !== "string") throw new Broken("executions.db: строка без job_id/status");
+    if (typeof r.job_id !== "string" || typeof r.status !== "string") throw new Broken("bad-row");
     const e = { status: r.status, claimed_at: r.claimed_at, started_at: r.started_at ?? null, finished_at: r.finished_at ?? null, has_error: Boolean(r.has_error) };
     let tokens = 0;
     let anyTok = false;
@@ -294,7 +355,7 @@ export function readEpochMarker(path, nowMs) {
   if (!existsSync(path)) return null;
   const parts = readFileSync(path, "utf8").trim().split(/\s+/);
   const epoch = Number(parts[0]);
-  if (!Number.isFinite(epoch) || epoch <= 0) throw new Broken(`${path}: не время`);
+  if (!Number.isFinite(epoch) || epoch <= 0) throw new Broken("not-time");
   return { ageSec: Math.max(0, nowMs / 1000 - epoch), pid: parts[1] && /^\d+$/.test(parts[1]) ? Number(parts[1]) : null };
 }
 
@@ -313,7 +374,7 @@ export function readGateway(root, nowMs, { alive = pidAlive } = {}) {
   const statePath = join(root, "gateway_state.json");
   if (!existsSync(statePath)) return { present: false };
   const s = readJson(statePath);
-  if (!s || typeof s !== "object" || typeof s.gateway_state !== "string") throw new Broken("gateway_state.json: нет gateway_state");
+  if (!s || typeof s !== "object" || typeof s.gateway_state !== "string") throw new Broken("no-gateway-state");
   const g = {
     present: true,
     state: s.gateway_state,
@@ -351,7 +412,8 @@ export function collect({ home = homedir(), now = Date.now(), sqliteBin = "/usr/
     try {
       return fn();
     } catch (e) {
-      r.broken.push(`${what}: ${e instanceof Broken ? e.message : e.code || e.message}`.slice(0, 160));
+      // системная ошибка — её код (ENOENT, EACCES …) или сообщение sqlite3: язык-нейтральны
+      r.broken.push(e instanceof Broken ? { what, kind: e.kind, arg: e.arg } : { what, kind: String(e.code || e.message).slice(0, 120) });
       return null;
     }
   };
@@ -433,14 +495,27 @@ export function render(r, { now = Date.now(), lang = envLang() } = {}) {
     body.push(line(tr("Gateway: нет gateway_state.json", "Gateway: no gateway_state.json"), { color: "gray" }));
   }
 
-  // пауза самого Hermes (~/.hermes/ESTOP — его собственный механизм, не пауза хаба)
-  if (r.estop.length) {
+  // Пауза самого Hermes (ESTOP — его собственный механизм, не пауза хаба). ~/.hermes/ESTOP — весь Hermes;
+  // profiles/<n>/ESTOP (`hermes -p <n> pause`) — только профиль <n>: остальные профили работают.
+  const rootPaused = r.estop.includes("default");
+  const pausedProfiles = new Set(rootPaused ? r.profiles.map((p) => p.name).concat(r.estop) : r.estop);
+  if (rootPaused) {
     bump("wait");
     problems.push({ rank: 3, text: tr("Hermes на паузе — задачи не запускаются", "Hermes is paused — jobs won't run") });
     events.push("estop");
-    body.push(line(tr(`Hermes на паузе — задачи не запускаются (${r.estop.join(", ")})`, `Hermes is paused — jobs won't run (${r.estop.join(", ")})`), { color: "orange", sfimage: "pause.circle", event: "estop" }));
+    body.push(line(tr("Hermes на паузе — задачи не запускаются", "Hermes is paused — jobs won't run"), { color: "orange", sfimage: "pause.circle", event: "estop" }));
     body.push(line(tr("--Снять: hermes resume в терминале", "--To resume: run hermes resume in a terminal"), { color: "gray" }));
   } else if (r.present) {
+    for (const name of r.estop) {
+      const pn = clean(name);
+      const key = `estop-${name.replace(/[^\w-]/g, "_")}`;
+      bump("wait");
+      problems.push({ rank: 3, text: tr(`Профиль ${pn} Hermes на паузе — его задачи не запускаются`, `Hermes profile ${pn} is paused — its jobs won't run`) });
+      events.push(key);
+      body.push(line(tr(`Профиль ${pn} на паузе — его задачи не запускаются`, `Profile ${pn} is paused — its jobs won't run`), { color: "orange", sfimage: "pause.circle", event: key }));
+      // имя профиля — только безопасное для команды
+      if (/^[\w.-]{1,64}$/.test(name)) body.push(line(tr(`--Снять: hermes -p ${name} resume в терминале`, `--To resume: run hermes -p ${name} resume in a terminal`), { color: "gray" }));
+    }
     // лестница остановки (дизайн §5): весь Hermes — одно объявленное действие, подтверждение — от ядра
     body.push(line(tr("Поставить Hermes на паузу", "Pause Hermes"), { action: "pause", sfimage: "pause.circle", color: "gray" }));
   }
@@ -450,7 +525,8 @@ export function render(r, { now = Date.now(), lang = envLang() } = {}) {
     body.push("---");
     const tickerSilent = p.ticker && p.ticker.ageSec > TICKER_STALE_S;
     const pn = clean(p.name);
-    if (tickerSilent && !r.estop.length) {
+    // на паузе (весь Hermes или этот профиль) тишина планировщика ожидаема
+    if (tickerSilent && !pausedProfiles.has(p.name)) {
       bump("error");
       problems.push({ rank: 2, text: tr(`Расписание профиля ${pn} остановилось`, `Profile ${pn}'s schedule has stopped`) });
       const key = `ticker-silent-${p.name.replace(/[^\w-]/g, "_")}`;
@@ -522,7 +598,7 @@ export function render(r, { now = Date.now(), lang = envLang() } = {}) {
     events.push("source-broken");
     body.push("---");
     body.push(line(tr("Не получается прочитать данные Hermes", "Can't read Hermes data"), { color: "orange", event: "source-broken" }));
-    for (const b of r.broken.slice(0, 5)) body.push(line(`--${clean(b)}`, { color: "gray" }));
+    for (const b of r.broken.slice(0, 5)) body.push(line(`--${clean(brokenText(b, LANG))}`, { color: "gray" }));
   }
 
   const jobsCount = r.profiles.reduce((a, p) => a + p.jobs.length, 0);

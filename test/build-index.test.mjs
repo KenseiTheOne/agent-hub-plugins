@@ -4,13 +4,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildIndex } from "../scripts/build-index.mjs";
 import { keygen } from "../scripts/keygen.mjs";
 import { generateKeyPair, verify } from "../scripts/vendor/minisign.mjs";
 import { readTarGz } from "../scripts/vendor/tarball.mjs";
+import { parseMetaText } from "../scripts/vendor/meta.mjs";
+import { permissionsFingerprint, permissionsFromMeta } from "../scripts/vendor/perms.mjs";
 import { cleanup, makeRegistry, pluginSource, README, tempDir } from "./helpers.mjs";
 
 const sha = (b) => createHash("sha256").update(b).digest("hex");
@@ -46,6 +48,30 @@ test("index.json: записи с sha256 и размером архивов, п�
     assert.equal(index.plugins[1].official, true);
     assert.deepEqual(readTarGz(readFileSync(join(out, index.plugins[1].archive)), { root: "quota" }).map((f) => f.path), ["quota/README.md", "quota/lib/util.mjs", "quota/quota.30s.mjs"]);
     assert.deepEqual(index.blocklist, [{ id: "evil", reason: "крадёт токены" }]);
+  } finally {
+    cleanup(root);
+    cleanup(out);
+  }
+});
+
+test("watch в индексе — в прежнем виде записи: права архива сверяются и ядром до 05.11, и новым (ревью регрессий)", () => {
+  const root = makeRegistry({
+    w: { "w.5m.mjs": pluginSource({ title: "W", extra: ["// <agenthub.watch>~/.config/w/state  --  менять кадр сразу</agenthub.watch>"] }), "README.md": README },
+  });
+  const out = tempDir("ahp-out-");
+  try {
+    const { index } = buildIndex({ root, out, generatedAt: "2026-11-04T10:00:00.000Z" });
+    const entry = JSON.parse(JSON.stringify(index.plugins[0].permissions));
+    // прежний вид: вся строка (пробелы схлопнуты), why: null — так ключ считало ядро до 05.11
+    assert.deepEqual(entry.watch, [{ what: "~/.config/w/state -- менять кадр сразу", why: null }]);
+    const gz = readFileSync(join(out, index.plugins[0].archive));
+    const main = readTarGz(gz, { root: "w" }).find((f) => f.path === "w/w.5m.mjs");
+    const { meta } = parseMetaText(main.data.toString("utf8"));
+    // новое ядро: права архива (what — путь) сверяются с записью (permissionList разбирает прежний вид)
+    assert.equal(permissionsFingerprint(permissionsFromMeta(meta)), permissionsFingerprint(entry));
+    // ядро до 05.11: ключ watch — вся строка метаданных
+    const oldKeys = (m) => (m.watch || []).map((w) => `watch:${String(w).trim().replace(/\s+/g, " ")}`);
+    assert.deepEqual(oldKeys(meta), entry.watch.map((e) => `watch:${e.what}`));
   } finally {
     cleanup(root);
     cleanup(out);
@@ -179,5 +205,26 @@ test("официальные плагины: автор — имя Kensei и л�
     for (const p of index.plugins) assert.deepEqual(p.author, { name: "Kensei", github: "KenseiTheOne" }, p.id);
   } finally {
     cleanup(out);
+  }
+});
+
+test("--published: версия, уже опубликованная с другим архивом, — ошибка сборки (архив не перезаписывается); та же — ок", () => {
+  const root = registry();
+  const a = tempDir("ahp-pub-a-");
+  const b = tempDir("ahp-pub-b-");
+  try {
+    const published = buildIndex({ root, out: a, generatedAt: "2026-11-04T10:00:00.000Z" }).index;
+    // пересборка того же содержимого — те же sha256, сборка проходит
+    assert.doesNotThrow(() => buildIndex({ root, out: b, generatedAt: "2026-11-05T10:00:00.000Z", published }));
+    // README поменяли, а версию нет
+    writeFileSync(join(root, "plugins", "hello", "README.md"), README + "\nещё строка\n");
+    assert.throws(() => buildIndex({ root, out: b, published }), /hello: версия 1\.0\.0 уже опубликована с другим архивом/);
+    // версию подняли — ок
+    writeFileSync(join(root, "plugins", "hello", "hello.5m.mjs"), pluginSource({ version: "1.0.1" }));
+    assert.doesNotThrow(() => buildIndex({ root, out: b, published }));
+  } finally {
+    cleanup(root);
+    cleanup(a);
+    cleanup(b);
   }
 });

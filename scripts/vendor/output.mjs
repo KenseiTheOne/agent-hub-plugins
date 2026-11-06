@@ -15,6 +15,14 @@ export const SEVERITY = { ok: 0, unknown: 1, wait: 2, block: 3, error: 4 };
 const FORBIDDEN = /^(bash|shell|terminal|param\d+)$/i;
 const MAX_LINES = 2000;
 const MAX_VALUE = 2000;
+// Предел строки и числа «|», которые пробует parseLine (справа налево). Каждая попытка разбирает весь хвост
+// строки, поэтому без пределов строка `x | a=b|a=b|…|a=b junk` разбиралась бы за квадратичное время и надолго
+// занимала цикл событий демона. Настоящих разделителей правее заголовка — один, «|» правее него бывают только
+// внутри значений в кавычках; 16 попыток с запасом.
+export const MAX_LINE = 16 * 1024;
+const MAX_SPLIT_TRIES = 16;
+// Сырая строка режется до этого предела ещё до trimEnd и разбора уровней (см. parseOutput).
+const RAW_LINE_CAP = MAX_LINE * 2;
 
 export function worstStatus(list) {
   let worst = "ok";
@@ -42,12 +50,14 @@ export function parseParams(text) {
 }
 
 // Одна строка → { title, params } (разделитель — последний `|`, справа от которого только параметры).
+// Длиннее MAX_LINE строка обрезается (parseOutput предупреждает), проверяются не больше MAX_SPLIT_TRIES «|».
 export function parseLine(line) {
+  if (line.length > MAX_LINE) line = line.slice(0, MAX_LINE);
   let idx = line.lastIndexOf("|");
-  while (idx >= 0) {
+  for (let tries = 0; idx >= 0 && tries < MAX_SPLIT_TRIES; tries++) {
     const { params, ok } = parseParams(line.slice(idx + 1));
     if (ok) return { title: line.slice(0, idx).trimEnd(), params };
-    idx = line.lastIndexOf("|", idx - 1);
+    idx = idx > 0 ? line.lastIndexOf("|", idx - 1) : -1;
   }
   return { title: line, params: {} };
 }
@@ -106,8 +116,12 @@ export function parseOutput(text) {
   let inBody = false;
   const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
   if (lines.length > MAX_LINES) warnings.push(`вывод обрезан до ${MAX_LINES} строк`);
-  for (const rawLine of lines.slice(0, MAX_LINES)) {
-    const line = rawLine.replace(/\s+$/, "");
+  for (let rawLine of lines.slice(0, MAX_LINES)) {
+    // Режем сырую строку до любых регулярок: `\s+$` на длинном пробельном отрезке перед непробельным символом
+    // квадратичен. Запас над MAX_LINE — под уровни `--` и отступ, которые срезаются ниже; rest режется ещё раз.
+    const rawCut = rawLine.length > RAW_LINE_CAP;
+    if (rawCut) rawLine = rawLine.slice(0, RAW_LINE_CAP);
+    const line = rawLine.trimEnd();
     if (line.trim() === "---") {
       if (!inBody) inBody = true;
       else body.push({ title: "", level: 0, separator: true, params: {} });
@@ -128,6 +142,10 @@ export function parseOutput(text) {
         continue;
       }
       rest = rest.replace(/^\s+/, "");
+    }
+    if (rawCut || rest.length > MAX_LINE) {
+      warnings.push(`строка обрезана до ${MAX_LINE} символов`);
+      rest = rest.slice(0, MAX_LINE);
     }
     const { title, params } = parseLine(rest);
     const item = { title: cap(title), level, params: {} };

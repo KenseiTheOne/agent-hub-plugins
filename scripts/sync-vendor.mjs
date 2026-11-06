@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "./lib/is-main.mjs";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const VENDOR_DIR = join(ROOT, "scripts", "vendor");
@@ -81,7 +82,7 @@ export function syncVendor(from) {
   return manifest;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const i = args.indexOf("--from");
   const from = i >= 0 ? resolve(args[i + 1]) : agentHubDir();

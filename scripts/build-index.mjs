@@ -3,6 +3,10 @@
 //
 //   node scripts/build-index.mjs [--out dist] [--root .] [--generated-at <ISO>]
 //                                [--sign-key-file <файл> | --sign-key-env <ПЕРЕМЕННАЯ>] [--flat-archives]
+//                                [--published <опубликованный index.json>]
+//
+// --published: версия, которая уже есть в опубликованном каталоге с другим sha256 архива, — ошибка сборки. Архив
+// <id>-<версия>.tar.gz иначе перезаписался бы в релизе, и клиент со старым индексом получил бы registry:sha256.
 //
 // Архивы детерминированы (scripts/vendor/tarball.mjs): одинаковые файлы → одинаковый sha256. В индексе у
 // каждого плагина — sha256 и размер архива, права с «зачем» (из тех же тегов метаданных), tier (official —
@@ -13,16 +17,18 @@
 // ключ — JSON {keyId, pkcs8}; в CI он только в секрете environment и только на push в main. Без ключа индекс
 // собирается неподписанным (для проверки в PR).
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sign } from "./vendor/minisign.mjs";
+import { indexPermissions } from "./vendor/perms.mjs";
+import { isMain } from "./lib/is-main.mjs";
 import { inspectPlugin, packPlugin, pluginIds, readBlocklist, readOfficial, sha256 } from "./lib/registry.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // flat — архивы рядом с index.json (для ассетов GitHub Release, где нет подкаталогов).
-export function buildIndex({ root = ROOT, out = join(ROOT, "dist"), generatedAt = null, secretKey = null, flat = false } = {}) {
+export function buildIndex({ root = ROOT, out = join(ROOT, "dist"), generatedAt = null, secretKey = null, flat = false, published = null } = {}) {
   const official = readOfficial(root);
   const bl = readBlocklist(root);
   if (bl.errors.length) throw new Error(bl.errors.join("; "));
@@ -56,8 +62,16 @@ export function buildIndex({ root = ROOT, out = join(ROOT, "dist"), generatedAt 
       archive: flat ? name : `archives/${name}`,
       sha256: sha256(gz),
       size: gz.length,
-      permissions: info.permissions,
+      // watch — в прежнем виде записи (вся строка с « — зачем»): иначе ядро до 05.11 не сверит права архива
+      // с записью и откажет в установке (registry:archive-permissions); новое ядро читает оба вида
+      permissions: indexPermissions(info.meta),
     });
+  }
+  // опубликованная версия не меняет содержимое: правка без новой версии — ошибка, а не тихая перезапись архива
+  const was = new Map((Array.isArray(published?.plugins) ? published.plugins : []).filter((p) => p && typeof p.id === "string").map((p) => [`${p.id}@${p.version}`, p.sha256]));
+  for (const p of plugins) {
+    const old = was.get(`${p.id}@${p.version}`);
+    if (old && old !== p.sha256) errors.push(`${p.id}: версия ${p.version} уже опубликована с другим архивом (sha256 ${String(old).slice(0, 12)}… → ${p.sha256.slice(0, 12)}…) — поднимите версию`);
   }
   if (errors.length) throw new Error(`плагины с ошибками:\n${errors.join("\n")}`);
   const index = {
@@ -83,7 +97,7 @@ export function buildIndex({ root = ROOT, out = join(ROOT, "dist"), generatedAt 
   return { index, out, signed };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2);
   const val = (k) => {
     const i = a.indexOf(k);
@@ -99,7 +113,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     }
   }
   try {
-    const r = buildIndex({ root: val("--root") ? resolve(val("--root")) : ROOT, out: val("--out") ? resolve(val("--out")) : join(ROOT, "dist"), generatedAt: val("--generated-at"), secretKey, flat: a.includes("--flat-archives") });
+    // опубликованный каталог: файла нет (первая публикация) — проверять не с чем; файл есть, но не JSON — ошибка
+    let published = null;
+    if (val("--published") && existsSync(resolve(val("--published")))) published = JSON.parse(readFileSync(resolve(val("--published")), "utf8"));
+    const r = buildIndex({ root: val("--root") ? resolve(val("--root")) : ROOT, out: val("--out") ? resolve(val("--out")) : join(ROOT, "dist"), generatedAt: val("--generated-at"), secretKey, flat: a.includes("--flat-archives"), published });
     console.log(`index.json: ${r.index.plugins.length} плагинов, blocklist ${r.index.blocklist.length}${r.signed ? ", подписан" : ", без подписи"} → ${r.out}`);
   } catch (e) {
     console.error(e.message);

@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateKeyPair } from "./vendor/minisign.mjs";
+import { isMain } from "./lib/is-main.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -27,7 +28,7 @@ export function keygen(dir) {
   return { keyFile, pubFile: join(d, "agent-hub-index.pub"), keyId: kp.keyId };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   if (!process.argv[2]) {
     console.error("укажите каталог вне репы: node scripts/keygen.mjs <каталог>");
     process.exit(2);

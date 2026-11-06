@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Данные для метки «permissions» в PR: { pr, grew } из отчёта check.mjs --report.
-// Пишется в артефакт; workflow perms-label.yml читает его как данные (код PR не исполняется).
+// Зовёт perms-label.yml (скрипты ветки по умолчанию, файлы PR — как данные) сразу после check.mjs --perms-only.
 //   node scripts/perms-artifact.mjs <report.json> <номер PR> <каталог>
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

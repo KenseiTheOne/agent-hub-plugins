@@ -308,10 +308,19 @@ test("night-runner: пустой план dry-run показывает прич�
 
 // ---------- находки ревью: падение раннера, провалы подряд, чужой держатель замка, управление ночью ----------
 
+// Каталог прогона run раннера: state_dir/<YYYYMMDD>/<HHMMSS>/night.log по местному времени (night-run.mjs, run).
+function runDirRel(iso, offsetMs = 0) {
+  const d = new Date(Date.parse(iso) + offsetMs);
+  const p2 = (n) => String(n).padStart(2, "0");
+  return `${STATE}/${N.dateStamp(d.getTime())}/${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+}
+
 test("night-runner: протухший замок ночи → «раннер упал» и событие runner-crashed:<дата>", () => {
   const w = world({ ps: "no-unity" });
   try {
     w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 777, startedAt: "2026-11-04T04:30:00.000Z" }));
+    // run заводит каталог прогона до замка (nightLock ждёт чужой замок до минуты)
+    w.write(`${runDirRel("2026-11-04T04:30:00.000Z", -20_000)}/night.log`, "2026-11-04T04:29:40.000Z старт\n");
     const { parsed } = w.run();
     assert.equal(parsed.status, "block");
     assert.match(parsed.header[0].title, /^Ночь оборвалась \(раннер упал\) — откройте night\.log$/);
@@ -323,6 +332,124 @@ test("night-runner: протухший замок ночи → «раннер у
     w.rm(`${STATE}/night.lock`);
     w.write(`${STATE}/20261104.md`, "# Ночной прогон 20261104\n\n04:30–… · квота неизвестна · остановка: прогон не завершён · задач 1 · PR 0\n");
     assert.ok(w.run().parsed.events.includes("runner-crashed:20261104"));
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner: протухший замок без command от setup / migrate-state / research (Ctrl+C) — не «раннер упал»", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    // setup днём, прерван Ctrl+C: замок без command, каталога прогона нет
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 777, startedAt: "2026-11-04T09:00:00.000Z" }));
+    let r = w.run();
+    assert.equal(r.parsed.events.some((e) => e.startsWith("runner-crashed")), false, r.text);
+    assert.notEqual(r.parsed.status, "block");
+    assert.ok(titles(r.parsed.body).some((t) => t.startsWith("Ночь не идёт; остался старый замок")));
+    // research заводит каталог с суффиксом -research — тоже не ночь
+    w.write(`${runDirRel("2026-11-04T09:00:00.000Z", -2000)}-research/night.log`, "x\n");
+    assert.equal(w.run().parsed.events.some((e) => e.startsWith("runner-crashed")), false);
+    // каталог прогона run, но заведён давно (другой прогон того дня) — не этот замок
+    w.write(`${runDirRel("2026-11-04T09:00:00.000Z", -3_600_000)}/night.log`, "x\n");
+    assert.equal(w.run().parsed.events.some((e) => e.startsWith("runner-crashed")), false);
+    // каталог прогона run перед замком — это ночь, она упала
+    w.write(`${runDirRel("2026-11-04T09:00:00.000Z", -30_000)}/night.log`, "x\n");
+    assert.ok(w.run().parsed.events.includes("runner-crashed:20261104"));
+    // после патча этапа 1 command: "run" — ночь и без каталога
+    w.rm(`${STATE}/20261104`);
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 777, startedAt: "2026-11-04T09:00:00.000Z", command: "run" }));
+    assert.ok(w.run().parsed.events.includes("runner-crashed:20261104"));
+    assert.equal(N.hasRunDir(join(w.home, STATE), "не дата"), false);
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner: ps не ответил при живой ночи (сводка «прогон не завершён») — ни night-done, ни «раннер упал»", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    w.write(`${STATE}/night.lock`, JSON.stringify({ pid: 5000, startedAt: "2026-11-04T03:30:02.000Z" }));
+    w.write(`${STATE}/20261104.md`, "# Ночной прогон 20261104\n\n04:30–… · квота неизвестна · остановка: прогон не завершён · задач 1 · PR 0\n");
+    writeFileSync(join(w.bin, "ps"), "#!/bin/sh\nexit 1\n");
+    const { parsed } = w.run();
+    assert.ok(parsed.events.includes("source-broken"));
+    assert.equal(parsed.events.some((e) => e.startsWith("night-done") || e.startsWith("runner-crashed")), false, JSON.stringify(parsed.events));
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner: неделя ≥ порога, а сброс до старта или вскоре после него — не quota-skip (как decideStart раннера)", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    // старт 04:30 местного; «сейчас» — вечер накануне, по местному времени
+    const local = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime();
+    const nowMs = local(2026, 11, 8, 21, 0);
+    const startMs = local(2026, 11, 9, 4, 30);
+    const now = new Date(nowMs).toISOString();
+    const usage = (percent, resetsMs) => ({ version: 1, fetched_at: nowMs / 1000, error: null, rows: [{ kind: "weekly_all", group: "weekly", percent, resets_at: new Date(resetsMs).toISOString() }] });
+    // сброс через 2,5 ч после старта (≤ max_wait_for_reset_min 240) — ночь подождёт
+    w.setUsage(usage(82, startMs + 150 * 60_000));
+    let r = w.run({ now });
+    assert.ok(!r.parsed.events.includes("quota-skip"), r.text);
+    assert.equal(r.parsed.status, "ok");
+    assert.equal(r.parsed.header[0].title, "Ночь готова · старт после сброса недели, в 07:01");
+    assert.match(r.text, /^Неделя 82% ≥ 80%: ночь подождёт её сброса до 07:01 и возьмёт бюджет от новой недели/m);
+    assert.doesNotMatch(r.text, /пропустит запуск:/);
+    // сброс за полчаса до старта — к старту неделя новая
+    w.setUsage(usage(82, startMs - 30 * 60_000));
+    r = w.run({ now });
+    assert.ok(!r.parsed.events.includes("quota-skip"), r.text);
+    assert.equal(r.parsed.header[0].title, "Ночь готова · старт в 04:30");
+    assert.match(r.text, /^Неделя сбросится до старта \(\d\d\.\d\d 04:00\) — бюджет ночи раннер посчитает от новой недели/m);
+    // ниже порога, но сброс до старта — бюджет не «весь остаток» по старой неделе
+    w.setUsage(usage(50, startMs - 30 * 60_000));
+    r = w.run({ now });
+    assert.doesNotMatch(r.text, /последняя ночь перед сбросом/);
+    assert.match(r.text, /^Неделя сбросится до старта/m);
+    // сброс дальше max_wait — пропуск, как раньше
+    w.setUsage(usage(82, startMs + 300 * 60_000));
+    r = w.run({ now });
+    assert.ok(r.parsed.events.includes("quota-skip"));
+    assert.match(r.parsed.header[0].title, /^Ночь не запустится: неделя 82% ≥ 80% — ночь пропустит запуск$/);
+    // max_wait_for_reset_min из config.json раннера: 0 — раннер не ждёт
+    const cfgRel = "Projects/IT/night-runner/config.json";
+    const cfg = JSON.parse(readFileSync(join(w.home, cfgRel), "utf8"));
+    cfg.schedule.max_wait_for_reset_min = 0;
+    w.write(cfgRel, JSON.stringify(cfg));
+    w.setUsage(usage(82, startMs + 150 * 60_000));
+    assert.ok(w.run({ now }).parsed.events.includes("quota-skip"));
+    // чистая функция
+    const u = { skip_seven_day_pct: 80 };
+    assert.equal(N.weekAtStart({ percent: 82, resetsMs: startMs + 240 * 60_000 }, startMs, u, 240), "wait");
+    assert.equal(N.weekAtStart({ percent: 82, resetsMs: startMs + 241 * 60_000 }, startMs, u, 240), "skip");
+    assert.equal(N.weekAtStart({ percent: 82, resetsMs: null }, startMs, u, 240), "skip");
+    assert.equal(N.weekAtStart({ percent: 82, resetsMs: startMs }, startMs, u, 240), "reset");
+    assert.equal(N.weekAtStart({ percent: 50, resetsMs: startMs + 86_400_000 }, startMs, u, 240), null);
+  } finally {
+    w.stop();
+  }
+});
+
+test("night-runner: следующий старт — тот же час по часам, и в день перехода на летнее или зимнее время", () => {
+  const code = `const N = await import(${JSON.stringify(pathToFileURL(FILE).href)}); const d = new Date(N.nextStart("04:30", Date.parse(process.argv[1]))); console.log(d.getDate() + " " + d.getHours() + ":" + d.getMinutes());`;
+  const at = (iso) => execFileSync(process.execPath, ["--input-type=module", "-e", code, iso], { env: { PATH: "/usr/bin:/bin", TZ: "Europe/Berlin" }, encoding: "utf8" }).trim();
+  assert.equal(at("2026-10-24T03:00:00Z"), "25 4:30", "переход на зимнее время 25.10");
+  assert.equal(at("2026-03-28T04:00:00Z"), "29 4:30", "переход на летнее время 29.03");
+  assert.equal(at("2026-11-04T01:00:00Z"), "4 4:30", "до старта — сегодня");
+});
+
+test("night-runner: диагностика по-английски при AGENTHUB_LANG=en", () => {
+  const w = world({ ps: "no-unity" });
+  try {
+    w.write("Projects/IT/night-runner/config.json", JSON.stringify({ schema: 2, projects: "все" }));
+    w.write(`${STATE}/20261103.md`, "что-то другое\n");
+    writeFileSync(join(w.bin, "ps"), "#!/bin/sh\nexit 1\n");
+    const en = execFileSync(process.execPath, [FILE], { env: { HOME: w.home, PATH: "/usr/bin:/bin", AGENTHUB_TEST_BIN_DIR: w.bin, AGENTHUB_TEST_NOW: NOW, AGENTHUB_USAGE_FILE: w.usageFile, AGENTHUB_LANG: "en" }, encoding: "utf8" });
+    assert.match(en, /^--the runner's config\.json: no projects list; ps didn't answer; summary 20261103\.md: unknown format$/m);
+    assert.match(en, /^Can't read runner files \| status=unknown event=source-broken/m);
+    // «что» у прав — язык-нейтральное (ключ перевода, сам не переводится)
+    assert.doesNotMatch(readFileSync(FILE, "utf8").match(/^\/\/ <agenthub\.(?:exec|fsRead|fsWrite|watch)[^>]*>[^—]*/gm).join("\n"), /[А-Яа-яЁё]/);
   } finally {
     w.stop();
   }
@@ -402,6 +529,9 @@ test("night-runner: без замка план предлагает run (без 
     assert.match(byId.skip.command, /^night-runner\.30s\.mjs --action skip \{taskId\}$/);
     assert.ok(meta.push.some((r) => r.key === "unity-open" && r.hold === "evening"));
     assert.ok(meta.push.some((r) => r.key === "runner-crashed" && r.quietException === true));
+    // 0.4.1: пересчёт сразу после записи кэша квоты (путь подставляет ядро), каталог ночи — как раньше
+    assert.deepEqual(meta.watch.map((w) => w.split(" — ")[0]), ["~/.claude/task-runs/night", "$AGENTHUB_USAGE_FILE"]);
+    assert.equal(meta.version, "0.4.1");
   } finally {
     w.stop();
   }
@@ -586,7 +716,8 @@ test("night-runner: метаданные — квота из кэша хаба, 
   const src = readFileSync(FILE, "utf8");
   assert.doesNotMatch(src, /kensei-statusline/);
   assert.match(src, /<agenthub\.fsRead>\$AGENTHUB_USAGE_FILE — /);
-  assert.match(src, /<agenthub\.version>0\.4\.0<\/agenthub\.version>/);
+  assert.match(src, /<agenthub\.watch>\$AGENTHUB_USAGE_FILE — /);
+  assert.match(src, /<agenthub\.version>0\.4\.1<\/agenthub\.version>/);
 });
 
 test("night-runner: идёт ночь — бюджет из квоты на её старте (сводка ночи), а не по текущей неделе; «пропустит» нет", () => {

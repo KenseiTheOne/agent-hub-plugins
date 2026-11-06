@@ -27,7 +27,8 @@ import { parseEffectSpec, parseOutput } from "./vendor/output.mjs";
 import { effectUnderCeiling, THIRD_PARTY_EFFECTS } from "./vendor/perms.mjs";
 import { parseFileName } from "./vendor/meta.mjs";
 import { checkVendor } from "./sync-vendor.mjs";
-import { diffMarkdown, inspectPlugin, permissionsAtDir, permissionsAtRef, permissionsDiff, pluginIds, readBlocklist, readOfficial } from "./lib/registry.mjs";
+import { isMain } from "./lib/is-main.mjs";
+import { diffMarkdown, inspectPlugin, permissionsAtDir, permissionsAtRef, permissionsDiff, pluginIds, readBlocklist, readOfficial, unbumpedChanges } from "./lib/registry.mjs";
 
 const SCRIPT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PLATFORM = { darwin: "macos", win32: "windows", linux: "linux" }[process.platform] || process.platform;
@@ -235,7 +236,16 @@ export async function runCheck(opts) {
     if (rec.errors.length) report.ok = false;
     report.plugins.push(rec);
   }
-  // 4. дифф прав
+  // 4. правка без новой версии (только с --base: нужна история git) — архив той же версии перезаписался бы
+  if (opts.base) {
+    for (const u of unbumpedChanges(opts.root, opts.base)) {
+      const rec = report.plugins.find((p) => p.id === u.id);
+      if (!rec) continue;
+      rec.errors.push(`файлы изменились относительно ${opts.base} (${u.files.slice(0, 5).join(", ")}${u.files.length > 5 ? ", …" : ""}), а версия та же (${u.version}) — поднимите версию: иначе опубликованный архив ${u.id}-${u.version}.tar.gz перезапишется другим содержимым`);
+      report.ok = false;
+    }
+  }
+  // 5. дифф прав
   if (opts.base || opts.baseDir) {
     const base = opts.baseDir ? permissionsAtDir(opts.baseDir) : permissionsAtRef(opts.root, opts.base);
     report.diff = permissionsDiff(base, permissionsAtDir(opts.root));
@@ -259,7 +269,7 @@ function printReport(r) {
   return lines.join("\n");
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   let opts;
   try {
     opts = parseArgs(process.argv.slice(2));

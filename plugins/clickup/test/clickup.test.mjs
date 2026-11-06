@@ -244,9 +244,22 @@ test("X-RateLimit-Remaining на исходе → ждём X-RateLimit-Reset б�
   }
 });
 
-test("401 → error + auth-failed; незнакомая форма → unknown + source-broken; 500 — без событий", async () => {
+test("401 на /user → error + auth-failed; незнакомая форма → unknown + source-broken; 500 — без событий", async () => {
+  {
+    const routes = okRoutes();
+    routes["/api/v2/user"] = () => ({ status: 401, body: { err: "Token invalid", ECODE: "OAUTH_025" } });
+    const d = await double(routes);
+    const { home, env } = setupHome();
+    try {
+      const { parsed } = await run({ ...env, AGENTHUB_SECRET_CLICKUP_TOKEN: TOKEN, AGENTHUB_CLICKUP_API_BASE: d.base });
+      assert.equal(parsed.status, "error");
+      assert.ok(parsed.events.includes("auth-failed"));
+    } finally {
+      await d.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
   const cases = [
-    [{ status: 401, body: { err: "Token invalid", ECODE: "OAUTH_025" } }, "error", "auth-failed"],
     [{ status: 200, body: { items: [] } }, "unknown", "source-broken"],
     [{ status: 200, body: { tasks: [{ id: 5 }] } }, "unknown", "source-broken"],
     [{ status: 200, body: "<html>не json" }, "unknown", "source-broken"],
@@ -267,6 +280,107 @@ test("401 → error + auth-failed; незнакомая форма → unknown +
       rmSync(home, { recursive: true, force: true });
     }
   }
+});
+
+test("401 на тикеты одного рабочего пространства при рабочем токене — его пропускаем, остальные собираем, /team перезапрашиваем", async () => {
+  const deny = { on: false };
+  const t1 = fix("tasks.json");
+  const routes = {
+    "/api/v2/user": () => ({ body: fix("user.json") }),
+    "/api/v2/team": () => ({ body: { teams: [{ id: "111" }, { id: "222" }] } }),
+    "/api/v2/team/111/task": () => (deny.on ? { status: 401, body: { err: "Team not authorized", ECODE: "OAUTH_027" } } : { body: { tasks: [] } }),
+    "/api/v2/team/222/task": () => ({ body: t1 }),
+  };
+  const d = await double(routes);
+  const { home, env } = setupHome();
+  try {
+    const e = { ...env, AGENTHUB_SECRET_CLICKUP_TOKEN: TOKEN, AGENTHUB_CLICKUP_API_BASE: d.base };
+    await run(e);
+    assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/user", "/api/v2/team", "/api/v2/team/111/task", "/api/v2/team/222/task"]);
+    // пользователя убрали из 111: user и team в кэше — токен перепроверяется, 111 пропускается, 222 собирается
+    deny.on = true;
+    d.log.length = 0;
+    let r = await run(e);
+    assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/team/111/task", "/api/v2/user", "/api/v2/team", "/api/v2/team/111/task", "/api/v2/team/222/task"]);
+    assert.equal(r.parsed.status, "ok", r.text);
+    assert.ok(!r.parsed.events.includes("auth-failed"), "токен рабочий");
+    assert.match(r.parsed.header[0].title, /^ClickUp: 4 тикета/);
+    assert.match(r.text, /^Нет доступа к рабочему пространству 111 — его тикеты пропущены/m);
+    // следующий запуск: /team перезапрашивается (кэш команд сброшен), /user — из кэша
+    d.log.length = 0;
+    r = await run(e);
+    assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/team", "/api/v2/team/111/task", "/api/v2/team/222/task"]);
+    // отказ уже подтверждён — без повторной проверки токена и списка команд
+    d.log.length = 0;
+    await run(e);
+    assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/team/111/task", "/api/v2/team/222/task"]);
+    // все рабочие пространства отказали — «нет доступа», а не «токен не принят»
+    routes["/api/v2/team/222/task"] = () => ({ status: 403, body: { err: "Team not authorized", ECODE: "OAUTH_027" } });
+    r = await run(e);
+    assert.equal(r.parsed.status, "error");
+    assert.match(r.parsed.header[0].title, /^ClickUp: нет доступа к рабочим пространствам 111, 222$/);
+    assert.ok(!r.parsed.events.includes("auth-failed"));
+  } finally {
+    await d.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("401 на /user (токен сменили или он отозван) сбрасывает кэш и пользователя, и рабочих пространств", async () => {
+  const bad = { on: false };
+  const routes = okRoutes();
+  const user = routes["/api/v2/user"];
+  routes["/api/v2/user"] = (req, u) => (bad.on ? { status: 401, body: { err: "Token invalid", ECODE: "OAUTH_025" } } : user(req, u));
+  routes["/api/v2/team/9000001/task"] = () => (bad.on ? { status: 401, body: { err: "Token invalid", ECODE: "OAUTH_025" } } : { body: fix("tasks.json") });
+  const d = await double(routes);
+  const { home, env } = setupHome();
+  try {
+    const e = { ...env, AGENTHUB_SECRET_CLICKUP_TOKEN: TOKEN, AGENTHUB_CLICKUP_API_BASE: d.base };
+    await run(e);
+    bad.on = true;
+    const r = await run(e);
+    assert.ok(r.parsed.events.includes("auth-failed"));
+    const state = JSON.parse(readFileSync(join(env.AGENTHUB_PLUGIN_CACHE_PATH, "state.json"), "utf8"));
+    assert.equal(state.user, null);
+    assert.equal(state.teams, null);
+    bad.on = false;
+    d.log.length = 0;
+    await run(e);
+    assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/user", "/api/v2/team", "/api/v2/team/9000001/task"]);
+  } finally {
+    await d.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("«Как подключить»: команда связки ключей с сервисом agent-hub.clickup и учётной записью token (ru и en)", async () => {
+  const { home, env } = setupHome();
+  try {
+    for (const lang of ["ru", "en"]) {
+      const { text } = await run({ ...env, AGENTHUB_LANG: lang });
+      assert.ok(text.includes("\n--security add-generic-password -s agent-hub.clickup -a token -T /usr/bin/security -w | color=gray\n"), text);
+      assert.match(text, lang === "ru" ? /учётная запись — ровно token/ : /account exactly token/);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("AGENTHUB_LANG=en: причина незнакомого ответа — по-английски; «что» у прав — без русского", async () => {
+  const routes = okRoutes();
+  routes["/api/v2/team/9000001/task"] = () => ({ body: { items: [] } });
+  const d = await double(routes);
+  const { home, env } = setupHome();
+  try {
+    const { text } = await run({ ...env, AGENTHUB_LANG: "en", AGENTHUB_SECRET_CLICKUP_TOKEN: TOKEN, AGENTHUB_CLICKUP_API_BASE: d.base });
+    assert.match(text, /^--a response without tasks \| color=gray$/m);
+  } finally {
+    await d.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+  const whats = readFileSync(PLUGIN, "utf8").match(/^\/\/ <agenthub\.(?:exec|fsRead|fsWrite|watch|net|secrets)[^>]*>[^—]*/gm);
+  assert.ok(whats.length >= 6);
+  assert.doesNotMatch(whats.join("\n"), /[А-Яа-яЁё]/);
 });
 
 test("настройки: listIds без teams, assignee: null — без фильтра по пользователю", async () => {

@@ -1,13 +1,18 @@
 # CI реестра плагинов.
 #
-# PR: только чтение — без секретов, без pull_request_target, токен contents: read, persist-credentials: false.
-#     Проверка на macOS и Windows: тесты реестра + scripts/check.sh с диффом прав относительно базы PR.
-#     Рост прав для метки считает ОТДЕЛЬНЫЙ job perms: он берёт scripts/ из базовой ветки, файлы PR
-#     извлекает в соседний каталог и читает их только как данные (check.mjs --perms-only) — ни плагины,
-#     ни их тесты, ни скрипты PR в этом job не исполняются. В job check код PR исполняется (тесты плагинов),
-#     поэтому оттуда в метку ничего не идёт. Артефакт «perms» читает perms-label.yml, не трогая код PR.
+# PR: только чтение — без секретов, без pull_request_target (он только у perms-label.yml, где код PR не
+#     исполняется), токен contents: read, persist-credentials: false.
+#     Проверка на macOS и Windows: тесты реестра + scripts/check.sh с диффом прав относительно базы PR
+#     (и правка файлов плагина без новой версии — ошибка: опубликованный архив той же версии не перезаписывается).
+#     Job perms показывает дифф прав в сводке запуска: scripts/ из базовой ветки над файлами PR как данными
+#     (check.mjs --perms-only). Метку «permissions» он НЕ ставит и артефактов не делает: для pull_request этот
+#     файл берётся из самого PR, и PR из форка мог бы переписать job. Метку ставит perms-label.yml
+#     (pull_request_target — версия из main, от ci.yml PR не зависит): сам считает рост прав скриптами main над
+#     файлами PR.
 # push в main: то же + job sign — сборка index.json, подпись ключом из environment «registry-signing»,
-#     публикация ассетами релиза «index».
+#     публикация ассетами релиза «index». Запуски на main не отменяют друг друга (иначе отмена посреди
+#     загрузки оставила бы новый index.json со старой подписью), sign — в своей очереди без отмены; архивы
+#     грузятся до индекса, index.json и подпись — последними, после загрузки они сверяются с собранными.
 #
 # Действия закреплены тегом major-версии; при публикации репы владелец закрепляет их по SHA коммита.
 
@@ -23,7 +28,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # отменять незаконченный запуск — только у PR; push в main ждёт своей очереди (sign не рвётся посреди загрузки)
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -86,21 +92,10 @@ jobs:
         with:
           node-version: 22
 
+      # Только сводка для ревьюера (GITHUB_STEP_SUMMARY); метку ставит perms-label.yml, пересчитывая сам.
       - name: Дифф прав (скрипты базы над файлами PR)
         working-directory: base
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -uo pipefail
-          env -u NODE_OPTIONS node scripts/check.mjs --perms-only --root ../pr --base-dir . --report ../perms-report.json || true
-          env -u NODE_OPTIONS node scripts/perms-artifact.mjs ../perms-report.json "$PR_NUMBER" ../perms
-
-      - name: Артефакт perms
-        uses: actions/upload-artifact@v4
-        with:
-          name: perms
-          path: perms/perms.json
-          retention-days: 7
+        run: env -u NODE_OPTIONS node scripts/check.mjs --perms-only --root ../pr --base-dir . --report ../perms-report.json
 
   sign:
     name: sign index.json
@@ -110,6 +105,10 @@ jobs:
     timeout-minutes: 10
     # Секрет INDEX_SIGNING_KEY живёт только в этом environment (защищён: только ветка main, ревьюер — владелец).
     environment: registry-signing
+    # Одна публикация за раз и без отмены: следующая ждёт, пока предыдущая догрузит индекс и подпись.
+    concurrency:
+      group: sign-index
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -121,10 +120,21 @@ jobs:
         with:
           node-version: 22
 
+      # Опубликованный сейчас index.json — чтобы версия, уже выпущенная с другим архивом, не перезаписалась.
+      - name: Опубликованный каталог
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p published
+          if gh release view index >/dev/null 2>&1; then
+            gh release download index -p index.json -D published --clobber || echo "index.json в релизе нет — первая публикация"
+          fi
+
       - name: Сборка и подпись index.json
         env:
           INDEX_SIGNING_KEY: ${{ secrets.INDEX_SIGNING_KEY }}
-        run: env -u NODE_OPTIONS node scripts/build-index.mjs --out dist --flat-archives --sign-key-env INDEX_SIGNING_KEY
+        run: env -u NODE_OPTIONS node scripts/build-index.mjs --out dist --flat-archives --sign-key-env INDEX_SIGNING_KEY --published published/index.json
 
       - name: Публикация (релиз «index»)
         env:
@@ -132,4 +142,21 @@ jobs:
         run: |
           set -euo pipefail
           gh release view index >/dev/null 2>&1 || gh release create index --title "index" --notes "Каталог плагинов Agent Hub (собирается CI)" --latest=false
-          gh release upload index dist/* --clobber
+          # архивы — раньше индекса: новый index.json не должен ссылаться на ещё не загруженный архив
+          shopt -s nullglob
+          archives=(dist/*.tar.gz)
+          if (( ${#archives[@]} )); then gh release upload index "${archives[@]}" --clobber; fi
+          # индекс и подпись — последними и подряд; затем сверка с собранными (до трёх попыток)
+          for attempt in 1 2 3; do
+            gh release upload index dist/index.json.minisig dist/index.json --clobber || true
+            rm -rf verify && mkdir verify
+            if gh release download index -p index.json -p index.json.minisig -D verify \
+              && cmp -s verify/index.json dist/index.json && cmp -s verify/index.json.minisig dist/index.json.minisig; then
+              echo "index.json и подпись опубликованы и совпадают с собранными"
+              exit 0
+            fi
+            echo "попытка $attempt: опубликованная пара index.json/.minisig не совпала с собранной — повтор"
+            sleep 5
+          done
+          echo "::error::index.json и index.json.minisig в релизе не совпадают с собранными — перезапустите job sign"
+          exit 1

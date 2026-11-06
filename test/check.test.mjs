@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { runCheck } from "../scripts/check.mjs";
 import { permissionsAtDir, permissionsDiff } from "../scripts/lib/registry.mjs";
 import { checkVendor } from "../scripts/sync-vendor.mjs";
@@ -234,7 +234,7 @@ test("--perms-only: дифф прав без запуска плагина и е
   }
 });
 
-test("ci.yml: метку прав даёт отдельный job perms без кода PR, а не job с тестами плагинов", () => {
+test("ci.yml: job perms без кода PR, без артефакта для метки; запуски main не отменяются посреди подписи", () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   const ci = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8");
   const jobs = {};
@@ -245,13 +245,39 @@ test("ci.yml: метку прав даёт отдельный job perms без �
     else if (/^\S/.test(line)) cur = null;
     if (cur) jobs[cur] = (jobs[cur] || "") + line + "\n";
   }
-  assert.ok(jobs.check && jobs.perms, "есть jobs check и perms");
-  assert.doesNotMatch(jobs.check, /perms-artifact|name: perms\b/, "job check артефакт perms не делает");
-  assert.match(jobs.perms, /perms-artifact\.mjs/);
+  assert.ok(jobs.check && jobs.perms && jobs.sign, "есть jobs check, perms и sign");
+  // для pull_request ci.yml берётся из PR: ничего из этого запуска в метку не идёт
+  assert.doesNotMatch(ci, /perms-artifact|upload-artifact/, "ci артефакт для метки не делает");
   assert.match(jobs.perms, /--perms-only/);
   assert.match(jobs.perms, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.doesNotMatch(jobs.perms, /check\.sh|node --test|working-directory: pr/, "в job perms код PR не исполняется");
   assert.doesNotMatch(ci, /^\s*pull_request_target:/m);
+  // отмена — только у PR; sign — своя очередь без отмены; архивы до индекса, пара сверяется после загрузки
+  assert.match(ci, /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}/);
+  assert.match(jobs.sign, /group: sign-index\n\s+cancel-in-progress: false/);
+  assert.match(jobs.sign, /--published published\/index\.json/);
+  const up = jobs.sign.indexOf('"${archives[@]}"');
+  assert.ok(up > 0 && up < jobs.sign.indexOf("dist/index.json.minisig dist/index.json"), "архивы грузятся раньше индекса");
+  assert.match(jobs.sign, /cmp -s verify\/index\.json dist\/index\.json/);
+});
+
+test("perms-label.yml: рост прав считает сам скриптами ветки по умолчанию над файлами PR, артефакту запуска не верит", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const y = readFileSync(join(root, ".github", "workflows", "perms-label.yml"), "utf8");
+  // запуск не зависит от ci.yml PR (имя и триггеры которого PR может сменить): pull_request_target, не workflow_run
+  assert.match(y, /^\s+pull_request_target:\n\s+branches: \[main\]/m);
+  assert.doesNotMatch(y, /^\s+workflow_run:/m);
+  assert.doesNotMatch(y, /secrets\./, "секретов нет");
+  assert.doesNotMatch(y, /^\s+(contents|actions|issues|checks|statuses): write/m, "запись — только pull-requests");
+  assert.equal((y.match(/persist-credentials: false/g) || []).length, 2, "оба checkout без токена");
+  assert.doesNotMatch(y, /gh run download|download-artifact/, "артефакт из запуска PR не читается");
+  assert.match(y, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}\n\s+path: base/);
+  assert.match(y, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n\s+path: pr/);
+  assert.match(y, /working-directory: base/);
+  assert.match(y, /node scripts\/check\.mjs --perms-only --root \.\.\/pr --base-dir \./);
+  assert.doesNotMatch(y, /working-directory: pr|check\.sh|node --test|npm /, "код PR не исполняется");
+  assert.match(y, /\^\(\\\.github\/\|scripts\/\|official\\\.json\$\|blocklist\\\.json\$\|CODEOWNERS\$\)/, "правка доверенных путей — тоже метка");
+  assert.doesNotMatch(y, /^\s*actions: read/m);
 });
 
 test("blocklist.json и official.json: форма проверяется", async () => {
@@ -313,6 +339,58 @@ test("official: action= в выводе — только объявленные 
     assert.ok(errs.some((e) => e.includes("arg=-rf")), errs.join("\n"));
     assert.ok(errs.some((e) => e.includes("action=nope не объявлено")), errs.join("\n"));
     assert.ok(errs.some((e) => e.includes("action=stop: arg не объявлен")), errs.join("\n"));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("скрипты реестра по пути через symlink (/tmp → /private/tmp) — работают, а не молча выходят с кодом 0", async () => {
+  const { mkdtempSync, rmSync, symlinkSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { spawnSync } = await import("node:child_process");
+  const { isMain } = await import("../scripts/lib/is-main.mjs");
+  const scripts = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts");
+  const dir = mkdtempSync(join(tmpdir(), "ahp-link-"));
+  try {
+    const link = join(dir, "scripts");
+    symlinkSync(scripts, link, process.platform === "win32" ? "junction" : "dir");
+    const node = (args) => spawnSync(process.execPath, args, { encoding: "utf8", env: { PATH: process.env.PATH || "/usr/bin:/bin" } });
+    const bad = node([join(link, "check.mjs"), "--bogus"]);
+    assert.equal(bad.status, 2, bad.stdout + bad.stderr);
+    assert.match(bad.stderr, /--bogus/);
+    assert.equal(node([join(link, "keygen.mjs")]).status, 2, "keygen без каталога — отказ, а не тишина");
+    assert.equal(isMain(pathToFileURL(join(scripts, "check.mjs")).href, join(link, "check.mjs")), true);
+    assert.equal(isMain(pathToFileURL(join(scripts, "check.mjs")).href, join(link, "keygen.mjs")), false);
+    assert.equal(isMain(pathToFileURL(join(scripts, "check.mjs")).href, undefined), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--base: файлы плагина изменились, а версия та же — ошибка; подняли версию или поменяли только test/ — нет", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { writeFileSync } = await import("node:fs");
+  const { writePluginFiles } = await import("./helpers.mjs");
+  const root = makeRegistry({ a: { "a.1m.mjs": pluginSource(), "README.md": README, "test/a.test.mjs": "// тест\n" } });
+  const { devNull } = await import("node:os");
+  // без системного и глобального конфига git (подпись коммитов, хуки и т.п. с машины разработчика не мешают)
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: devNull } });
+  try {
+    git("init", "-q");
+    git("add", "-A");
+    git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "base");
+    // только тест — архив тот же, версия может остаться
+    writePluginFiles(root, "a", { "test/a.test.mjs": "// другой тест\n" });
+    let r = await run(root, { base: "HEAD", skipTests: true });
+    assert.deepEqual(errorsOf(r, "a"), []);
+    // README и новый файл — архив другой
+    writePluginFiles(root, "a", { "README.md": README + "\nправка\n", "lib/x.mjs": "export const x = 1;\n" });
+    r = await run(root, { base: "HEAD", skipTests: true });
+    assert.equal(r.ok, false);
+    assert.match(errorsOf(r, "a").join("\n"), /файлы изменились относительно HEAD \(README\.md, lib\/x\.mjs\), а версия та же \(1\.0\.0\) — поднимите версию/);
+    writeFileSync(join(root, "plugins", "a", "a.1m.mjs"), pluginSource({ version: "1.0.1" }));
+    r = await run(root, { base: "HEAD", skipTests: true });
+    assert.deepEqual(errorsOf(r, "a"), []);
   } finally {
     cleanup(root);
   }

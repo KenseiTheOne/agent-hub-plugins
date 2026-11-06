@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseOutput, pluginDir, readPluginMeta, tempHome } from "../../../scripts/lib/plugin-test.mjs";
@@ -142,6 +142,81 @@ test("планировщик не тикает → ticker-silent; ESTOP → esto
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("ESTOP профиля — пауза только этого профиля: тишина планировщика корня видна, кнопка pause есть, подсказка с -p", () => {
+  const home = makeHome({ tickerAgeSec: 1000 });
+  try {
+    const root = join(home, ".hermes");
+    // у корня своё расписание, и оно встало
+    mkdirSync(join(root, "cron"), { recursive: true });
+    writeFileSync(join(root, "cron", "jobs.json"), JSON.stringify({ jobs: [] }));
+    writeFileSync(join(root, "cron", "ticker_heartbeat"), `${Date.now() / 1000 - 1200} ${process.pid}`);
+    // `hermes -p demo-bot pause`
+    writeFileSync(join(root, "profiles", "demo-bot", "ESTOP"), "");
+    const { text, parsed } = run(home);
+    assert.ok(parsed.events.includes("ticker-silent-default"), JSON.stringify(parsed.events));
+    assert.ok(!parsed.events.includes("ticker-silent-demo-bot"), "у профиля на паузе тишина ожидаема");
+    assert.ok(parsed.events.includes("estop-demo-bot"));
+    assert.ok(!parsed.events.includes("estop"), "весь Hermes не на паузе");
+    assert.doesNotMatch(parsed.header[0].title, /^Hermes на паузе/);
+    assert.match(text, /^--Снять: hermes -p demo-bot resume в терминале/m);
+    assert.doesNotMatch(text, /^--Снять: hermes resume/m);
+    assert.equal(parsed.body.filter((i) => i.action === "pause").length, 1, "кнопка паузы всего Hermes остаётся");
+    // ESTOP корня — пауза всего: ни одной тишины планировщика, кнопки нет
+    writeFileSync(join(root, "ESTOP"), "");
+    const all = run(home).parsed;
+    assert.ok(all.events.includes("estop"));
+    assert.ok(!all.events.some((e) => e.startsWith("ticker-silent")), JSON.stringify(all.events));
+    assert.ok(!all.body.some((i) => i.action === "pause"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("executions.db в режиме WAL: запуск, который лежит только в -wal (у Hermes открыто соединение), виден; база Hermes не меняется", async (t) => {
+  let DatabaseSync;
+  try {
+    ({ DatabaseSync } = await import("node:sqlite"));
+  } catch {
+    t.skip("нет node:sqlite");
+    return;
+  }
+  const home = makeHome();
+  const cron = join(home, ".hermes", "profiles", "demo-bot", "cron");
+  const dbPath = join(cron, "executions.db");
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;");
+    db.exec("INSERT INTO executions (id, job_id, source, process_id, pid, status, claimed_at, started_at, finished_at, error) VALUES ('e06','aaaa11112222','tick','p1',100,'failed','2026-11-04T22:00:20+01:00','2026-11-04T22:00:21+01:00','2026-11-04T22:01:00+01:00','x')");
+    assert.ok(statSync(`${dbPath}-wal`).size > 0, "строка — только в журнале WAL");
+    const before = readdirSync(cron).sort();
+    const main = readFileSync(dbPath);
+    const wal = readFileSync(`${dbPath}-wal`);
+    const { parsed } = run(home);
+    assert.ok(parsed.events.includes("job-failed-aaaa11112222"), JSON.stringify(parsed.events));
+    assert.ok(!parsed.events.includes("source-broken"));
+    assert.deepEqual(readdirSync(cron).sort(), before, "в каталоге Hermes ничего не появилось");
+    assert.ok(main.equals(readFileSync(dbPath)) && wal.equals(readFileSync(`${dbPath}-wal`)), "база и журнал не тронуты");
+  } finally {
+    db.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("AGENTHUB_LANG=en: поломки источников — по-английски; «что» у прав — без русского", () => {
+  const home = makeHome({ jobsText: JSON.stringify({ tasks: [] }) });
+  try {
+    const r = spawnSync(process.execPath, [PLUGIN], { env: { HOME: home, PATH: "/usr/bin:/bin", AGENTHUB_LANG: "en" }, encoding: "utf8", timeout: 10_000 });
+    assert.match(r.stdout, /^--demo-bot\/jobs\.json: no jobs array \| color=gray$/m);
+    const ru = spawnSync(process.execPath, [PLUGIN], { env: { HOME: home, PATH: "/usr/bin:/bin" }, encoding: "utf8", timeout: 10_000 });
+    assert.match(ru.stdout, /^--demo-bot\/jobs\.json: нет массива jobs \| color=gray$/m);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+  const whats = readFileSync(PLUGIN, "utf8").match(/^\/\/ <agenthub\.(?:exec|fsRead|fsWrite|watch)[^>]*>[^—]*/gm);
+  assert.ok(whats.length > 5);
+  assert.doesNotMatch(whats.join("\n"), /[А-Яа-яЁё]/);
 });
 
 test("порча jobs.json → unknown + source-broken", () => {

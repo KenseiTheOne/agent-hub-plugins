@@ -5,6 +5,9 @@
 //
 // Право — { kind, what, why }; ключ — `${kind}:${what}` (what без лишних пробелов). Рост прав — появились
 // ключи, которых не было в согласованных; смена одного `why` ростом не считается.
+// У слежения (watch) what — путь, why — пояснение после « — », как у остальных видов и как читает ядро
+// (host.mjs watchPaths). Записи прежнего вида (what — вся строка вместе с « — зачем», why: null; так их сохраняли
+// lock и индекс до 05.11) permissionList разбирает так же: ключи старых и новых записей совпадают.
 
 // Потолок effects для сторонних плагинов — тот же, что в ядре (core.mjs: THIRD_PARTY_EFFECTS, LOCAL_EFFECTS).
 export const THIRD_PARTY_EFFECTS = ["open.*", "cmux.focus"];
@@ -43,16 +46,23 @@ const norm = (s) => String(s).trim().replace(/\s+/g, " ");
 // meta — результат parseMetaText (daemon/lib/meta.mjs). → { fsRead:[{what,why}], …, effects:[…], actions:[…] }
 export function permissionsFromMeta(meta) {
   const out = {};
-  for (const k of ["fsRead", "fsWrite", "exec", "secrets", "net"]) {
+  for (const k of ["fsRead", "fsWrite", "exec", "secrets", "net", "watch"]) {
     out[k] = (meta[k] || []).map((e) => {
       const { what, why } = splitWhy(e);
       return { what: norm(what), why };
     });
   }
-  out.watch = (meta.watch || []).map((w) => ({ what: norm(w), why: null }));
   out.effects = [...new Set((meta.effects || []).map(norm))].sort();
   out.actions = (meta.actions || []).map((a) => ({ id: a.id, level: a.level, command: norm(a.command), title: a.title || null, ...(a.arg ? { arg: `${a.arg.name}:${a.arg.pattern}` } : {}) }));
   return out;
+}
+
+// Права для записи каталога (index.json): как permissionsFromMeta, но watch — в прежнем виде (what — вся строка
+// метаданных вместе с « — зачем», why: null). Демоны до 05.11 берут ключ watch из всей строки и сверяют им права
+// архива с записью каталога (plugins.mjs prepare → registry:archive-permissions); новый демон разбирает такую
+// запись через splitWhy (permissionList), ключи совпадают. Так один индекс ставится и старым, и новым ядром.
+export function indexPermissions(meta) {
+  return { ...permissionsFromMeta(meta), watch: (meta.watch || []).map((w) => ({ what: norm(w), why: null })) };
 }
 
 // Плоский список прав. → [{ kind, what, why, key }]
@@ -62,7 +72,10 @@ export function permissionList(perms) {
   for (const k of ["fsRead", "fsWrite", "watch", "exec", "secrets", "net"]) {
     for (const e of perms[k] || []) {
       if (!e || typeof e.what !== "string") continue;
-      list.push({ kind: k, what: norm(e.what), why: e.why ?? null, key: `${k}:${norm(e.what)}` });
+      let what = e.what;
+      let why = e.why ?? null;
+      if (k === "watch" && why == null) ({ what, why } = splitWhy(what));
+      list.push({ kind: k, what: norm(what), why, key: `${k}:${norm(what)}` });
     }
   }
   for (const e of perms.effects || []) if (typeof e === "string") list.push({ kind: "effects", what: norm(e), why: null, key: `effects:${norm(e)}` });
@@ -174,7 +187,8 @@ export function effectUnderCeiling(effect, ceiling) {
 
 // Упоминания запретных мест в исходнике (необъявленный доступ).
 const SOURCE_PATTERNS = [
-  [/\.claude[\\/]+projects/i, "~/.claude/projects"],
+  // «.claude/./projects», «.claude//projects» — тот же каталог (normalizePath убирает «/./» и повторные «/»)
+  [/\.claude(?:[\\/]+\.)*[\\/]+projects/i, "~/.claude/projects"],
   [/workstream\.jsonl/i, "workstream.jsonl"],
   [/auth\.json/i, "auth.json"],
   [/["'`][^"'`\n]*\.key["'`]/, "*.key"],
