@@ -17,6 +17,10 @@ const mod = await import(pathToFileURL(PLUGIN).href);
 const TOKEN = "pk_synthetic_test_token_0002";
 const fixTasks = () => JSON.parse(readFileSync(join(DIR, "fixtures", "tasks.json"), "utf8")).tasks;
 
+// Плагин зовёт хаб только по абсолютному Unix-сокету (AGENTHUB_HUB_SOCKET с «/»): на Windows хаба с сокетом нет,
+// плагин там работает по личному токену — эти случаи проверяют другие тесты.
+const HUB = { skip: process.platform === "win32" ? "сокет хаба — только macOS/Linux" : false };
+
 // Двойник хаба: ответ на POST /connections/clickup/mcp задаёт тест; запросы — в log (только путь и тело).
 async function hubDouble(reply) {
   const dir = tempHome("ahp-hub-");
@@ -92,7 +96,7 @@ test("метаданные 1.2.0: net mcp.clickup.com и api.clickup.com, push l
   assert.match(src, /<agenthub\.push key="login-expired" kind="problems" lang="en">/);
 });
 
-test("вход через хаб: один вызов clickup_filter_tasks (assignees me), токен ClickUp плагину не нужен; REST не трогается", async () => {
+test("вход через хаб: один вызов clickup_filter_tasks (assignees me), токен ClickUp плагину не нужен; REST не трогается", HUB, async () => {
   const hub = await hubDouble(() => ok());
   const rest = await restDouble();
   const { home, env } = setupHome();
@@ -120,7 +124,7 @@ test("вход через хаб: один вызов clickup_filter_tasks (assi
   }
 });
 
-test("почему реже: лимит ClickUp, бюджет суток, загрузка — в шапке и пояснениях (ru и en)", async () => {
+test("почему реже: лимит ClickUp, бюджет суток, загрузка — в шапке и пояснениях (ru и en)", HUB, async () => {
   const cases = [
     { body: ok({ why: "rate-limit", fresh: false, error: "mcp:rate-limited" }).body, ru: /ClickUp сообщил, что лимит запросов исчерпан — следующее обновление в \d\d:\d\d/, en: /ClickUp says the request limit is used up — next refresh at \d\d:\d\d/ },
     { body: ok({ why: "budget", calls24h: 96, fresh: false }).body, ru: /Бережём суточный лимит ClickUp: 96 из 100 запросов за 24 ч/, en: /Saving the ClickUp daily limit: 96 of 100 requests in 24 h/ },
@@ -142,7 +146,7 @@ test("почему реже: лимит ClickUp, бюджет суток, заг
   }
 });
 
-test("вход истёк (409 oauth:expired): «подключите снова», error + login-expired, прошлые тикеты остаются; с личным токеном — работаем по нему", async () => {
+test("вход истёк (409 oauth:expired): «подключите снова», error + login-expired, прошлые тикеты остаются; с личным токеном — работаем по нему", HUB, async () => {
   const { home, env } = setupHome();
   const hubOk = await hubDouble(() => ok());
   await run({ ...env, AGENTHUB_HUB_SOCKET: hubOk.sock });
@@ -170,7 +174,7 @@ test("вход истёк (409 oauth:expired): «подключите снова
   }
 });
 
-test("не подключён (409 not-connected): без токена — «Подключить ClickUp» и запасной путь; с токеном — личный токен", async () => {
+test("не подключён (409 not-connected): без токена — «Подключить ClickUp» и запасной путь; с токеном — личный токен", HUB, async () => {
   const hub = await hubDouble(() => ({ status: 409, body: { error: "oauth:not-connected" } }));
   const rest = await restDouble();
   const { home, env } = setupHome();
@@ -196,7 +200,7 @@ test("не подключён (409 not-connected): без токена — «П�
   }
 });
 
-test("хаб без службы oauth или не отвечает — как раньше: личный токен, без него «нужен токен»", async () => {
+test("хаб без службы oauth или не отвечает — как раньше: личный токен, без него «нужен токен»", HUB, async () => {
   const { home, env } = setupHome();
   try {
     const gone = await run({ ...env, AGENTHUB_HUB_SOCKET: join(home, "nope.sock") });
@@ -212,7 +216,7 @@ test("хаб без службы oauth или не отвечает — как �
   }
 });
 
-test("незнакомая форма ответа инструмента → unknown + source-broken; ошибка инструмента — тоже", async () => {
+test("незнакомая форма ответа инструмента → unknown + source-broken; ошибка инструмента — тоже", HUB, async () => {
   for (const result of [{ content: [{ type: "text", text: "Task summary: 3 tasks" }] }, { content: [{ type: "text", text: "{\"items\":[]}" }] }, { isError: true, content: [{ type: "text", text: "boom" }] }]) {
     const hub = await hubDouble(() => ({ status: 200, body: { ...ok().body, result } }));
     const { home, env } = setupHome();
@@ -236,7 +240,7 @@ test("разбор ответа: structuredContent, массив, статус �
 });
 
 // ревью 09.11: текст ошибки инструмента, требование workspace_id, «нет доступа» (403), тариф по бюджету ядра
-test("ошибка инструмента: текст ClickUp и подсказка про teamIds; при прошлом результате из памяти ядра — тоже", async () => {
+test("ошибка инструмента: текст ClickUp и подсказка про teamIds; при прошлом результате из памяти ядра — тоже", HUB, async () => {
   const cases = [
     // ядро 09.11+: ok:false, error mcp:tool-error, errorText
     { ...ok().body, ok: false, result: null, error: "mcp:tool-error", errorText: "Error: workspace_id required when you belong to several workspaces", why: "tool-error" },
@@ -275,7 +279,7 @@ test("ошибка инструмента: текст ClickUp и подсказ�
   }
 });
 
-test("403 у ядра (mcp:forbidden) — «нет доступа», не «подключите снова»; тариф в подписи — по бюджету ядра", async () => {
+test("403 у ядра (mcp:forbidden) — «нет доступа», не «подключите снова»; тариф в подписи — по бюджету ядра", HUB, async () => {
   const hub = await hubDouble(() => ({ status: 200, body: { ...ok().body, error: "mcp:forbidden", why: "forbidden" } }));
   const { home, env } = setupHome();
   try {
