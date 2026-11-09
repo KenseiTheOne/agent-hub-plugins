@@ -16,8 +16,10 @@ plugins/<id>/
 
 ## Официальные плагины
 
-`night-runner`, `hermes`, `clickup` — официальные (список — `official.json`, правит только владелец; в индексе —
-`tier: "official"`). Мейнтейнер — владелец реестра. Встроенные плагины Agent Hub (claude-sessions, agents, quota)
+`hermes`, `clickup` — официальные (список — `official.json`, правит только владелец; в индексе —
+`tier: "official"`). `night-runner` из реестра ушёл (09.11): раннер приватный, его плагин лежит в его же
+репозитории (`agenthub/night-runner/`) и ставится как **свой плагин** из локальной папки (`agenthub plugins install
+--from <папка>` + подтверждение в приложении; agent-hub README, «Свои плагины»). Мейнтейнер — владелец реестра. Встроенные плагины Agent Hub (claude-sessions, agents, quota)
 лежат в `agent-hub/plugins/` и в реестр не входят.
 
 Метка `official` даёт в CI и в демоне три вещи, и ревьюер смотрит все три как привилегию:
@@ -32,7 +34,7 @@ plugins/<id>/
 места — те же, что у всех. Параметризованное действие:
 
 ```
-// <agenthub.action id="skip" level="confirm" arg="taskId:^[A-Za-z0-9_-]{1,64}$" title="…">night-runner.30s.mjs --action skip {taskId}</agenthub.action>
+// <agenthub.action id="skip" level="confirm" arg="taskId:^[A-Za-z0-9_-]{1,64}$" title="…">my-plugin.30s.mjs --action skip {taskId}</agenthub.action>
 ```
 
 В выводе: `Пропустить | action=skip arg=<значение>`. Ядро сверяет значение с шаблоном (обёрнутым в `^(?:…)$`;
@@ -52,5 +54,5 @@ node scripts/keygen.mjs /tmp/ahp-key                      # тестовый к�
 node scripts/build-index.mjs --out /tmp/ahp-idx --sign-key-file /tmp/ahp-key/agent-hub-index.key
 AGENTHUB_HOME=/tmp/ah-dev node ../agent-hub/daemon/bin/agenthub install \
   --registry-pubkey /tmp/ahp-key/agent-hub-index.pub --registry-url /tmp/ahp-idx/index.json --apply --no-launchd
-AGENTHUB_HOME=/tmp/ah-dev node ../agent-hub/daemon/bin/agenthub plugins install night-runner   # окно прав в терминале
+AGENTHUB_HOME=/tmp/ah-dev node ../agent-hub/daemon/bin/agenthub plugins install hermes   # окно прав в терминале
 ```

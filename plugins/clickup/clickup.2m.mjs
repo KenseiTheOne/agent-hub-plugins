@@ -1,21 +1,23 @@
 #!/usr/bin/env node
 // <agenthub.title>ClickUp</agenthub.title>
-// <agenthub.version>1.1.1</agenthub.version>
+// <agenthub.version>1.2.0</agenthub.version>
 // <agenthub.desc>Ваши тикеты ClickUp и какие из них сейчас в работе у агентов (ночь, /ticket, сессии). Только чтение</agenthub.desc>
 // <agenthub.desc lang="en">Your ClickUp tickets and which ones agents are working on (night, /ticket, sessions). Read-only</agenthub.desc>
 // <agenthub.status value="ok" label="Тикеты загружены">Список тикетов свежий</agenthub.status>
 // <agenthub.status value="ok" lang="en" label="Tickets loaded">The ticket list is up to date</agenthub.status>
-// <agenthub.status value="error" label="Токен не принят или нет доступа">ClickUp отклонил токен или закрыл доступ к рабочему пространству, или хаб не пустил запрос</agenthub.status>
-// <agenthub.status value="error" lang="en" label="Token rejected / no access">ClickUp rejected the token or closed access to the workspace, or the hub blocked a request</agenthub.status>
-// <agenthub.status value="unknown" label="Не подключён или нет связи">Нет токена ClickUp или ClickUp не отвечает</agenthub.status>
-// <agenthub.status value="unknown" lang="en" label="Not connected / offline">No ClickUp token, or ClickUp isn't responding</agenthub.status>
+// <agenthub.status value="error" label="Подключите снова или нет доступа">Вход в ClickUp истёк или отозван, ClickUp отклонил токен или закрыл доступ к рабочему пространству, или хаб не пустил запрос</agenthub.status>
+// <agenthub.status value="error" lang="en" label="Reconnect / no access">The ClickUp sign-in expired or was revoked, ClickUp rejected the token or closed access to the workspace, or the hub blocked a request</agenthub.status>
+// <agenthub.status value="unknown" label="Не подключён или нет связи">ClickUp не подключён (ни входа, ни токена) или не отвечает</agenthub.status>
+// <agenthub.status value="unknown" lang="en" label="Not connected / offline">ClickUp isn't connected (no sign-in, no token), or isn't responding</agenthub.status>
 // <agenthub.author.name>Kensei</agenthub.author.name>
 // <agenthub.author.github>KenseiTheOne</agenthub.author.github>
 // <agenthub.platforms>macos,windows</agenthub.platforms>
-// <agenthub.secrets>clickup.token — ваш личный токен ClickUp: только чтобы читать тикеты</agenthub.secrets>
-// <agenthub.secrets lang="en">clickup.token — your personal ClickUp token: only to read tickets</agenthub.secrets>
-// <agenthub.net>api.clickup.com — запросы к ClickUp только на чтение и только по заранее заданному списку адресов</agenthub.net>
-// <agenthub.net lang="en">api.clickup.com — read-only requests to ClickUp, only to a fixed list of addresses</agenthub.net>
+// <agenthub.secrets>clickup.token — запасной путь: ваш личный токен ClickUp, только чтобы читать тикеты</agenthub.secrets>
+// <agenthub.secrets lang="en">clickup.token — fallback: your personal ClickUp token, only to read tickets</agenthub.secrets>
+// <agenthub.net>mcp.clickup.com — тикеты через вход в ClickUp («Подключить ClickUp»): запросы делает хаб, плагин токена не видит; только чтение, раз в 15 мин</agenthub.net>
+// <agenthub.net lang="en">mcp.clickup.com — tickets via the ClickUp sign-in (Connect ClickUp): the hub makes the requests, the plugin never sees the token; read-only, every 15 min</agenthub.net>
+// <agenthub.net>api.clickup.com — запасной путь по личному токену: запросы к ClickUp только на чтение и только по заранее заданному списку адресов</agenthub.net>
+// <agenthub.net lang="en">api.clickup.com — fallback with a personal token: read-only requests to ClickUp, only to a fixed list of addresses</agenthub.net>
 // <agenthub.fsRead>~/.claude/task-runs — какие тикеты сейчас делают агенты (ночь и /ticket)</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.claude/task-runs — which tickets agents are working on (night runs and /ticket)</agenthub.fsRead>
 // <agenthub.fsRead>~/.claude/sessions/*.json — в каких папках идут сессии, чтобы связать их с тикетами (ключи сессий не открываются)</agenthub.fsRead>
@@ -27,6 +29,15 @@
 // <agenthub.effects>open.url,cmux.focus</agenthub.effects>
 // <agenthub.push key="auth-failed">ClickUp: токен не принят</agenthub.push>
 // <agenthub.push key="auth-failed" lang="en">ClickUp: token rejected</agenthub.push>
+// <agenthub.push key="login-expired" kind="problems">ClickUp: вход истёк — подключите снова</agenthub.push>
+// <agenthub.push key="login-expired" kind="problems" lang="en">ClickUp: sign-in expired — reconnect</agenthub.push>
+//
+// Два пути к данным (с 1.2.0). Основной — вход в ClickUp через хаб: кнопка «Подключить ClickUp» (страница плагина,
+// «Настройки → Подключения»), официальный MCP-сервер mcp.clickup.com, OAuth делает ядро (служба oauth). Плагин зовёт
+// инструмент clickup_filter_tasks через сокет хаба (POST /connections/clickup/mcp, переменная AGENTHUB_HUB_SOCKET —
+// её ядро даёт только доверенным плагинам); токен остаётся в ядре. Частоту держит ядро: один вызов не чаще раза в
+// 15 мин (ClickUp Free — ~100 вызовов MCP в сутки), бэкофф по лимиту; плагин показывает, когда следующее обновление
+// и почему реже. Запасной путь — личный токен (REST v2), как раньше: если входа нет.
 //
 // Только GET и только пути из белого списка (ALLOWED_PATHS); записей в ClickUp нет и быть не может.
 // Токен — из секрета clickup.token (ядро кладёт его в AGENTHUB_SECRET_CLICKUP_TOKEN); в вывод, кэш и журнал
@@ -69,6 +80,9 @@ const RATE_FLOOR = 3; // осталось столько запросов — ж
 const BACKOFF_BASE_MS = 60_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
 const STALE_MS = 30 * 60_000;
+const MCP_WAIT_MS = 3600; // ответ хаба на вызов MCP (служба ждёт ClickUp до 3 с, затем отвечает «загружаю»)
+// Поля задачи, которые просим у clickup_filter_tasks (кроме id, name, url) — меньше ответ и меньше разбора.
+export const MCP_FIELDS = ["custom_id", "status", "due_date", "date_updated", "list"];
 
 // ---------- форматирование ----------
 export function clean(s, max = 120) {
@@ -197,6 +211,8 @@ const SHAPE_TEXT = {
   "user-no-id": ["/user без user.id", "/user without user.id"],
   "team-no-teams": ["/team без teams", "/team without teams"],
   "no-tasks": ["ответ без tasks", "a response without tasks"],
+  "mcp-no-result": ["хаб вернул пустой ответ", "the hub returned an empty response"],
+  "mcp-not-json": ["ответ инструмента не JSON", "the tool response isn't JSON"],
 };
 const shapeText = (code) => (SHAPE_TEXT[code] ? SHAPE_TEXT[code][EN() ? 1 : 0] : code);
 
@@ -279,6 +295,122 @@ export async function fetchTasks(client, cfg, state, now, info = {}, { retried =
   if (fresh.some((d) => d.scope === "team") && state.teams && !(Array.isArray(cfg.teamIds) && cfg.teamIds.length)) state.teams = null;
   if (scopes.length && denied.length === scopes.length) throw new ApiError("scope", denied[0].status, { denied });
   return [...tasks.values()];
+}
+
+// ---------- вход ClickUp через хаб (MCP) ----------
+// Запрос к хабу по его сокету: POST /connections/clickup/mcp. Токена у плагина нет — его подставляет ядро.
+// → { status, body } или { status: 0, error } (хаб не ответил).
+export function hubMcp(socketPath, payload, { timeoutMs = MCP_WAIT_MS, requestImpl = null } = {}) {
+  return new Promise(async (resolve) => {
+    const { request } = requestImpl || (await import("node:http"));
+    const data = JSON.stringify(payload);
+    let done = false;
+    const finish = (r) => {
+      if (!done) {
+        done = true;
+        resolve(r);
+      }
+    };
+    const rq = request(
+      { socketPath, path: "/connections/clickup/mcp", method: "POST", timeout: timeoutMs, headers: { Host: "hub", "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } },
+      (res) => {
+        let s = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => {
+          s += c;
+          if (s.length > 4 * 1024 * 1024) rq.destroy();
+        });
+        res.on("end", () => {
+          let body = null;
+          try {
+            body = JSON.parse(s);
+          } catch {}
+          finish({ status: res.statusCode, body });
+        });
+      },
+    );
+    rq.on("timeout", () => {
+      rq.destroy();
+      finish({ status: 0, error: "timeout" });
+    });
+    rq.on("error", (e) => finish({ status: 0, error: e?.code || "error" }));
+    rq.end(data);
+  });
+}
+
+// Аргументы clickup_filter_tasks: один вызов на опрос. Исполнитель «me» сервер понимает сам (без clickup_get_user).
+// Через вход берётся одно рабочее пространство — первое из teamIds (остальные — только по личному токену, README).
+export function mcpArgs(cfg) {
+  const a = { include_closed: false, subtasks: true, order_by: "updated", fields: MCP_FIELDS };
+  if (cfg.assignee !== null) a.assignees = ["me"];
+  const lists = (cfg.listIds || []).map(String).filter((x) => /^\d+$/.test(x)).slice(0, 5);
+  if (lists.length) a.list_ids = lists;
+  // несколько рабочих пространств — сервер требует workspace_id; берём первое из настроек (один вызов на опрос)
+  const team = (cfg.teamIds || []).map(String).find((x) => /^\d+$/.test(x));
+  if (team) a.workspace_id = team;
+  return a;
+}
+
+const msOf = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) return n < 1e11 ? n * 1000 : n;
+  const t = Date.parse(String(v));
+  return Number.isFinite(t) ? t : null;
+};
+
+// Задача из ответа инструмента: поля как у REST, но форма может отличаться (status — строка или объект, list — строка
+// или объект, даты — мс, секунды или ISO). Без id/name — незнакомая форма.
+export function pickMcpTask(t) {
+  if (!t || typeof t !== "object" || (typeof t.id !== "string" && typeof t.id !== "number") || typeof t.name !== "string") throw shapeError("task-no-id");
+  const id = String(t.id);
+  const st = t.status && typeof t.status === "object" ? t.status : { status: typeof t.status === "string" ? t.status : null };
+  const url = typeof t.url === "string" && t.url.startsWith("https://app.clickup.com/") ? t.url : `https://app.clickup.com/t/${encodeURIComponent(id)}`;
+  const list = t.list && typeof t.list === "object" ? t.list.name : typeof t.list === "string" ? t.list : typeof t.list_name === "string" ? t.list_name : null;
+  return {
+    id,
+    customId: typeof t.custom_id === "string" && t.custom_id ? t.custom_id : null,
+    name: t.name,
+    status: typeof st.status === "string" ? st.status : "?",
+    statusColor: typeof st.color === "string" && /^#[0-9a-f]{3,8}$/i.test(st.color) ? st.color : null,
+    statusType: typeof st.type === "string" ? st.type : null,
+    url,
+    list: typeof list === "string" ? list : null,
+    updatedMs: msOf(t.date_updated),
+    dueMs: msOf(t.due_date),
+  };
+}
+
+// Ошибка инструмента ClickUp (isError или error=mcp:tool-error от ядра) → { kind: "tool", reason: текст ClickUp,
+// workspace: сервер требует workspace_id — несколько рабочих пространств без teamIds }.
+export function toolError(text) {
+  const t = clean(text || "", 120);
+  return { kind: "tool", status: null, reason: t || null, workspace: /workspace[_ ]?id/i.test(String(text || "")) };
+}
+function resultText(result) {
+  return (Array.isArray(result?.content) ? result.content : []).map((c) => (c && typeof c.text === "string" ? c.text : "")).join(" ");
+}
+
+// Результат инструмента → задачи. structuredContent или текст с JSON: массив, {tasks}, {data: {tasks}}.
+export function tasksFromMcp(result) {
+  if (!result || typeof result !== "object") throw shapeError("mcp-no-result");
+  // ошибка инструмента — не «незнакомая форма»: текст ClickUp идёт в вывод (хаб старше 09.11 отдаёт её как результат)
+  if (result.isError) {
+    const e = toolError(resultText(result));
+    throw new ApiError("tool", null, { reason: e.reason, workspace: e.workspace });
+  }
+  let data = result.structuredContent && typeof result.structuredContent === "object" ? result.structuredContent : null;
+  if (!data) {
+    const text = (Array.isArray(result.content) ? result.content : []).find((c) => c && c.type === "text" && typeof c.text === "string")?.text;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw shapeError("mcp-not-json");
+    }
+  }
+  const list = Array.isArray(data) ? data : Array.isArray(data?.tasks) ? data.tasks : Array.isArray(data?.data?.tasks) ? data.data.tasks : null;
+  if (!list) throw shapeError("no-tasks");
+  return list.map(pickMcpTask);
 }
 
 // ---------- связь с работой ----------
@@ -516,15 +648,62 @@ function saveJson(p, o) {
 }
 
 // ---------- запуск ----------
-export async function collect({ env = process.env, home = homedir(), nowMs = Date.now(), fetchImpl = globalThis.fetch, alive = pidsAlive } = {}) {
+export async function collect({ env = process.env, home = homedir(), nowMs = Date.now(), fetchImpl = globalThis.fetch, alive = pidsAlive, hubCall = hubMcp } = {}) {
   const token = env.AGENTHUB_SECRET_CLICKUP_TOKEN;
+  // сокет хаба: переменную ядро даёт только доверенным плагинам и только при включённой службе oauth
+  const sock = typeof env.AGENTHUB_HUB_SOCKET === "string" && env.AGENTHUB_HUB_SOCKET.startsWith("/") ? env.AGENTHUB_HUB_SOCKET : null;
   const dataDir = env.AGENTHUB_PLUGIN_DATA_PATH || null;
   const cacheDir = env.AGENTHUB_PLUGIN_CACHE_PATH || null;
   const cfg = dataDir ? loadJson(join(dataDir, "config.json"), {}) : {};
   const statePath = cacheDir ? join(cacheDir, "state.json") : null;
   const state = statePath ? loadJson(statePath, {}) : {};
-  const r = { tokenMissing: !token, tasks: state.last?.tasks || [], fetchedAt: state.last?.at || null, error: null, pausedUntil: null, rate: state.rate || null, requests: 0, links: new Map(), limit: Math.min(50, Math.max(1, Number(cfg.limit) || 15)) };
-  if (token) {
+  const r = { tokenMissing: false, mode: null, oauth: null, connectInHub: Boolean(sock), tasks: state.last?.tasks || [], fetchedAt: state.last?.at || null, error: null, pausedUntil: null, rate: state.rate || null, requests: 0, links: new Map(), limit: Math.min(50, Math.max(1, Number(cfg.limit) || 15)) };
+  let dirty = false;
+  // 1. вход в ClickUp через хаб (MCP): частоту, лимит и токен держит ядро
+  if (sock) {
+    const res = await hubCall(sock, { tool: "clickup_filter_tasks", args: mcpArgs(cfg) });
+    const b = res.body && typeof res.body === "object" ? res.body : {};
+    if (res.status === 200) {
+      r.mode = "oauth";
+      r.oauth = {
+        fetchedAt: msOf(b.fetchedAt),
+        nextAt: msOf(b.nextAt),
+        why: typeof b.why === "string" ? b.why : null,
+        intervalMs: Number(b.intervalMs) || null,
+        calls24h: Number.isFinite(b.calls24h) ? b.calls24h : null,
+        dailyBudget: Number(b.dailyBudget) || null,
+        pending: b.pending === true,
+        error: typeof b.error === "string" ? b.error : null,
+        errorText: typeof b.errorText === "string" ? b.errorText : null,
+      };
+      r.rate = null;
+      if (b.ok && b.result) {
+        try {
+          const tasks = tasksFromMcp(b.result);
+          r.tasks = tasks;
+          r.fetchedAt = r.oauth.fetchedAt || nowMs;
+          state.last = { at: r.fetchedAt, tasks };
+          state.mode = "oauth";
+          dirty = true;
+        } catch (e) {
+          r.error = { kind: e instanceof ApiError ? e.kind : "shape", status: null, reason: e.reason || null, ...(e.workspace ? { workspace: true } : {}) };
+        }
+      }
+      // ошибка инструмента и «нет доступа» — даже при прошлом результате из памяти ядра: данные не обновляются
+      const hard = r.oauth.error === "mcp:tool-error" || r.oauth.error === "mcp:forbidden";
+      if (!r.error && r.oauth.error && r.oauth.error !== "mcp:rate-limited" && (hard || !(b.ok && b.result))) r.error = mcpError(r.oauth.error, r.oauth.errorText);
+    } else if (res.status === 409 && b.error === "oauth:expired") {
+      r.oauth = { expired: true };
+    } else if (res.status === 403 || res.status === 400 || res.status === 413) {
+      // хаб не пустил вызов (политика ядра: не доверенный, нет права net, инструмент не из списка)
+      r.oauth = { denied: typeof b.error === "string" ? b.error : `http-${res.status}` };
+    }
+    // 409 not-connected / unavailable, 404 (хаб без службы oauth), нет ответа — входа нет: дальше личный токен
+  }
+  // 2. запасной путь — личный токен (REST v2), если входа через хаб нет
+  if (!r.mode && token) {
+    r.mode = "token";
+    dirty = true;
     const backoffUntil = state.backoff?.until || 0;
     const rateUntil = state.rate && state.rate.remaining !== null && state.rate.remaining <= RATE_FLOOR && state.rate.resetMs > nowMs ? state.rate.resetMs : 0;
     const until = Math.max(backoffUntil, rateUntil);
@@ -543,6 +722,7 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
         const info = {};
         const tasks = await fetchTasks(client, cfg, state, nowMs, info);
         state.last = { at: nowMs, tasks };
+        state.mode = "token";
         state.backoff = null;
         r.tasks = tasks;
         r.fetchedAt = nowMs;
@@ -567,13 +747,31 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
       r.requests = client.requests;
       r.rate = state.rate || null;
     }
-    if (statePath) saveJson(statePath, state);
   }
+  if (statePath && dirty) saveJson(statePath, state);
+  // ни входа, ни токена: «не подключён» (истёкший вход — отдельная плашка «подключите снова»)
+  if (!r.mode && !r.oauth?.expired) r.tokenMissing = true;
+  if (r.tokenMissing) r.tasks = [];
   if (r.tasks.length) {
     const work = scanWork({ home, alive });
     for (const t of r.tasks) r.links.set(t.id, linksFor(t, work));
   }
   return r;
+}
+
+// Код ошибки ядра в ответе на вызов MCP → r.error.
+function mcpError(code, text) {
+  if (code === "mcp:tool-error") return toolError(text);
+  if (code === "mcp:forbidden") return { kind: "forbidden", status: null, reason: null };
+  if (code === "oauth:keychain-read") return { kind: "keychain", status: null, reason: null };
+  return { kind: "net", status: null, reason: code.replace(/^(mcp|oauth):/, "") };
+}
+
+// Суточный лимит вызовов MCP по бюджету ядра: 100 — тариф Free, 300 — Unlimited; иначе тариф не называем.
+function budgetText(budget) {
+  const n = Number(budget) || 100;
+  const plan = n === 100 ? "Free" : n === 300 ? "Unlimited" : null;
+  return plan ? tr(`на тарифе ${plan} ClickUp даёт около ${n} запросов в сутки`, `on the ${plan} plan ClickUp allows about ${n} requests a day`) : tr(`хаб тратит не больше ${n} запросов в сутки`, `the hub uses at most ${n} requests a day`);
 }
 
 // «рабочему пространству 111» / «списку 222» / «рабочим пространствам 111, 333»
@@ -592,9 +790,18 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
   setLang(lang);
   const out = [];
   if (r.tokenMissing) {
-    out.push(line(tr("ClickUp не подключён — нужен токен", "ClickUp isn't connected — a token is needed"), { status: "unknown", tile: "—", sfimage: "key.slash" }));
-    out.push("---");
-    out.push(line(tr("Как подключить", "How to connect"), { color: "gray" }));
+    if (r.connectInHub) {
+      // вход через хаб: кнопку «Подключить ClickUp» рисует оболочка (страница плагина и «Настройки → Подключения»)
+      out.push(line(tr("ClickUp не подключён", "ClickUp isn't connected"), { status: "unknown", tile: "—", sfimage: "link.badge.plus" }));
+      out.push("---");
+      out.push(line(tr("Нажмите «Подключить ClickUp» — вход и подтверждение на сайте ClickUp, токен вводить не нужно", "Click Connect ClickUp — you sign in and approve on the ClickUp site, no token to paste"), { color: "gray" }));
+      out.push(line(tr(`--Кнопка — на этой странице и в «Настройках → Подключения». Тикеты обновляются раз в 15 мин: ${budgetText(100)}`, `--The button is on this page and in Settings → Connections. Tickets refresh every 15 min: ${budgetText(100)}`), { color: "gray" }));
+      if (r.oauth?.denied) out.push(line(tr(`--Хаб не пустил запрос через вход: ${clean(r.oauth.denied, 40)}`, `--The hub blocked the sign-in request: ${clean(r.oauth.denied, 40)}`), { color: "orange" }));
+    } else {
+      out.push(line(tr("ClickUp не подключён — нужен токен", "ClickUp isn't connected — a token is needed"), { status: "unknown", tile: "—", sfimage: "key.slash" }));
+      out.push("---");
+    }
+    out.push(line(r.connectInHub ? tr("Запасной путь — личный токен (обновление раз в 2 мин)", "Fallback — a personal token (refreshes every 2 min)") : tr("Как подключить", "How to connect"), { color: "gray" }));
     // Служба секретов хаба ищет запись связки ключей: сервис agent-hub.clickup, учётная запись ровно «token»
     // (find-generic-password -s agent-hub.clickup -a token) — запись с другим именем учётной записи не найдётся.
     out.push(line(tr("--1. Заведите персональный токен ClickUp: Settings → Apps → API Token", "--1. Create a personal ClickUp token: Settings → Apps → API Token"), { color: "gray" }));
@@ -606,6 +813,26 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
   let status = "ok";
   const notes = [];
   let problem = null;
+  if (r.oauth?.expired) {
+    // вход истёк или отозван (401 от сервера, refresh нет или не вышел): плашка и push «подключите снова»
+    if (r.mode === "token") notes.push(line(tr("Вход в ClickUp истёк — пока работаю по личному токену. Нажмите «Подключить ClickUp»", "The ClickUp sign-in expired — using the personal token for now. Click Connect ClickUp"), { color: "orange" }));
+    else {
+      status = "error";
+      problem = tr("ClickUp: подключите снова", "ClickUp: reconnect");
+      notes.push(line(tr("Вход в ClickUp истёк или доступ отозван — нажмите «Подключить ClickUp»", "The ClickUp sign-in expired or access was revoked — click Connect ClickUp"), { color: "red", event: "login-expired", sfimage: "link.badge.plus" }));
+    }
+  } else if (r.oauth?.denied && r.mode === "token") {
+    notes.push(line(tr(`Хаб не пустил запрос через вход (${clean(r.oauth.denied, 40)}) — работаю по личному токену`, `The hub blocked the sign-in request (${clean(r.oauth.denied, 40)}) — using the personal token`), { color: "orange" }));
+  }
+  if (r.mode === "oauth") {
+    const o = r.oauth;
+    const at = o.nextAt ? fmtTime(o.nextAt, nowMs) : null;
+    if (o.pending && !r.fetchedAt) notes.push(line(tr("Загружаю тикеты из ClickUp…", "Loading tickets from ClickUp…"), { color: "gray" }));
+    if (o.why === "rate-limit" && at) notes.push(line(tr(`ClickUp сообщил, что лимит запросов исчерпан — следующее обновление в ${at}`, `ClickUp says the request limit is used up — next refresh at ${at}`), { color: "orange" }));
+    else if (o.why === "budget" && at) notes.push(line(tr(`Бережём суточный лимит ClickUp: ${o.calls24h ?? "?"} из ${o.dailyBudget ?? "?"} запросов за 24 ч — следующее обновление в ${at}`, `Saving the ClickUp daily limit: ${o.calls24h ?? "?"} of ${o.dailyBudget ?? "?"} requests in 24 h — next refresh at ${at}`), { color: "orange" }));
+    else if (o.why === "http-limit" && at) notes.push(line(tr(`ClickUp просит сбавить темп — следующее обновление в ${at}`, `ClickUp asks to slow down — next refresh at ${at}`), { color: "orange" }));
+    else if (o.why === "error" && at) notes.push(line(tr(`ClickUp не ответил — повтор в ${at}`, `ClickUp didn't respond — retrying at ${at}`), { color: "orange" }));
+  }
   if (r.error) {
     if (r.error.kind === "auth") {
       status = "error";
@@ -616,6 +843,21 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
       problem = tr("ClickUp: не получилось загрузить тикеты", "ClickUp: couldn't load tickets");
       notes.push(line(tr("Ответ ClickUp не разобран", "Couldn't parse ClickUp's response"), { color: "orange", event: "source-broken" }));
       if (r.error.reason) notes.push(line(`--${clean(shapeText(r.error.reason), 80)}`, { color: "gray" }));
+    } else if (r.error.kind === "tool") {
+      // ClickUp ответил ошибкой на запрос: текст ClickUp — в вывод; несколько рабочих пространств — подсказка
+      status = "unknown";
+      problem = r.error.workspace ? tr("ClickUp: укажите рабочее пространство", "ClickUp: set the workspace") : tr("ClickUp: запрос вернул ошибку", "ClickUp: the request returned an error");
+      const what = r.error.workspace
+        ? tr("У вас несколько рабочих пространств ClickUp — укажите teamIds в config.json плагина (через вход берётся одно)", "You have several ClickUp workspaces — set teamIds in the plugin's config.json (the sign-in uses one)")
+        : tr("ClickUp вернул ошибку на запрос тикетов", "ClickUp returned an error for the ticket request");
+      notes.push(line(what, { color: "orange", event: "source-broken" }));
+      if (r.error.reason) notes.push(line(`--${clean(r.error.reason, 120)}`, { color: "gray" }));
+    } else if (r.error.kind === "forbidden") {
+      status = "error";
+      problem = tr("ClickUp: нет доступа к тикетам через вход", "ClickUp: no access to tickets via the sign-in");
+      notes.push(line(tr("ClickUp не даёт этому входу доступ к задачам — проверьте права аккаунта в ClickUp; хаб повторит через час", "ClickUp doesn't give this sign-in access to the tasks — check the account's permissions in ClickUp; the hub retries in an hour"), { color: "red" }));
+    } else if (r.error.kind === "keychain") {
+      notes.push(line(tr("Хаб не смог прочитать вход из связки ключей — повтор через минуту", "The hub couldn't read the sign-in from the keychain — retrying in a minute"), { color: "orange" }));
     } else if (r.error.kind === "rate") {
       notes.push(line(tr(`Лимит запросов ClickUp (429), пауза до ${fmtTime(r.pausedUntil, nowMs)}`, `ClickUp rate limit (429), pausing until ${fmtTime(r.pausedUntil, nowMs)}`), { color: "orange" }));
     } else if (r.error.kind === "scope") {
@@ -638,6 +880,11 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
   }
   const stale = !r.fetchedAt || nowMs - r.fetchedAt > STALE_MS;
   if (stale && status === "ok" && (r.error || r.pausedUntil)) status = "unknown";
+  // вход через хаб: данные старше трёх интервалов, а ядро ждёт (лимит, ошибка) — или их ещё нет вовсе
+  if (r.mode === "oauth" && status === "ok") {
+    const old = !r.fetchedAt || nowMs - r.fetchedAt > Math.max(STALE_MS, 3 * (r.oauth.intervalMs || 0));
+    if (!r.fetchedAt || (old && r.oauth.why && r.oauth.why !== "interval")) status = "unknown";
+  }
 
   const tasks = [...r.tasks];
   const linked = (t) => (r.links.get(t.id) || []).length;
@@ -666,8 +913,14 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
   out.push("---");
   const parts = [];
   if (r.fetchedAt) parts.push(tr(`обновлено ${fmtTime(r.fetchedAt, nowMs)}`, `updated ${fmtTime(r.fetchedAt, nowMs)}`));
-  if (r.rate && r.rate.remaining !== null) parts.push(tr(`лимит API: осталось ${r.rate.remaining}`, `API limit: ${r.rate.remaining} left`));
+  if (r.mode === "oauth" && r.oauth.nextAt) parts.push(tr(`следующее в ${fmtTime(r.oauth.nextAt, nowMs)}`, `next at ${fmtTime(r.oauth.nextAt, nowMs)}`));
+  if (r.mode !== "oauth" && r.rate && r.rate.remaining !== null) parts.push(tr(`лимит API: осталось ${r.rate.remaining}`, `API limit: ${r.rate.remaining} left`));
   if (parts.length) out.push(line(parts.join(" · "), { color: "gray" }));
+  if (r.mode === "oauth") {
+    // откуда данные и почему реже, чем раньше (раз в 2 мин по личному токену)
+    const min = Math.max(1, Math.round((r.oauth.intervalMs || 15 * 60_000) / 60_000));
+    out.push(line(tr(`Через вход в ClickUp: раз в ${min} мин — ${budgetText(r.oauth.dailyBudget)}`, `Via the ClickUp sign-in: every ${min} min — ${budgetText(r.oauth.dailyBudget)}`), { color: "gray" }));
+  } else if (r.mode === "token") out.push(line(tr("По личному токену ClickUp", "Using the personal ClickUp token"), { color: "gray" }));
   return out.join("\n");
 }
 

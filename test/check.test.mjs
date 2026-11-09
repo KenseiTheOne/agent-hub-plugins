@@ -298,19 +298,38 @@ test("вендоринг: копии совпадают с VENDOR.json и с age
   assert.deepEqual(v.drift, []);
 });
 
-test("official: effects тоже под потолком, действия не ниже confirm, запретные места — ошибка (исключения нет)", async () => {
+test("official: effects тоже под потолком, immediate-действие — только без сети, запретные места — ошибка (исключения нет)", async () => {
+  // 09.11: официальному без сети immediate можно (ядро выполнит без окна, только из приложения); с сетью — нет
   const src = pluginSource({
     effects: "open.url,session.stop",
-    extra: ['// <agenthub.action id="go" level="immediate">/bin/echo go</agenthub.action>'],
+    extra: ['// <agenthub.net>api.example.com — данные</agenthub.net>', '// <agenthub.action id="go" level="immediate">/bin/echo go</agenthub.action>'],
     body: 'console.log("X | status=ok");\nconsole.log("---");\nconsole.log("// ~/.claude/projects | color=gray");\n',
   });
   const root = makeRegistry({ off: { "off.1m.mjs": src, "README.md": README + "\nЧитает `auth.json`.\n" } }, { official: ["off"] });
   try {
     const errs = errorsOf(await run(root, { skipTests: true }), "off");
     assert.ok(errs.some((e) => e.includes("session.stop") && e.includes("плагину реестра")), errs.join("\n"));
-    assert.ok(errs.some((e) => e.includes('id="go"') && e.includes("не ниже confirm")), errs.join("\n"));
+    assert.ok(errs.some((e) => e.includes('id="go"') && e.includes("immediate — только у плагина без сети")), errs.join("\n"));
     assert.ok(errs.some((e) => e.includes("~/.claude/projects")), errs.join("\n"));
     assert.ok(errs.some((e) => e.startsWith("README.md") && e.includes("auth.json")), errs.join("\n"));
+  } finally {
+    cleanup(root);
+  }
+});
+
+// Ревью 09.11 (low): «нет сети» не значит «бесплатно» — immediate с ценой (cost=) — ошибка, без цены — пометка «!»
+// для ревьюера в отчёте check.sh (проверка при этом проходит).
+test("official: immediate с cost= — ошибка; immediate без цены — предупреждение ревьюеру, проверка проходит", async () => {
+  const priced = pluginSource({ extra: ['// <agenthub.action id="go" level="immediate" cost-en="quota">/bin/echo go</agenthub.action>'] });
+  const plain = pluginSource({ extra: ['// <agenthub.action id="flip" level="immediate" title="Переключить">/bin/echo flip</agenthub.action>'] });
+  const root = makeRegistry({ pay: { "pay.1m.mjs": priced, "README.md": README }, flip: { "flip.1m.mjs": plain, "README.md": README } }, { official: ["pay", "flip"] });
+  try {
+    const r = await run(root, { skipTests: true });
+    const errs = errorsOf(r, "pay");
+    assert.ok(errs.some((e) => e.includes('id="go"') && e.includes("immediate с ценой")), errs.join("\n"));
+    const rec = r.plugins.find((p) => p.id === "flip");
+    assert.deepEqual(rec.errors, []);
+    assert.ok(rec.warnings.some((w) => w.includes('id="flip"') && w.includes("ревьюер проверяет")), rec.warnings.join("\n"));
   } finally {
     cleanup(root);
   }
@@ -400,5 +419,44 @@ test("--base: файлы плагина изменились, а версия т
   } finally {
     cleanup(root);
     rmSync(cfgDir, { recursive: true, force: true });
+  }
+});
+
+test("push: kind=\"security\" и ключи ядра хаба — предупреждение ревьюеру (проверка не падает)", async () => {
+  const root = makeRegistry({
+    hello: {
+      "hello.5m.mjs": pluginSource({ extra: ['// <agenthub.push key="tamper" kind="security">Маркер подмены</agenthub.push>', '// <agenthub.push key="app-restart-stopped">Agent Hub падает</agenthub.push>', '// <agenthub.push key="job-failed" kind="runs">Задача упала</agenthub.push>'] }),
+      "README.md": README,
+      "fixtures/home/.config/hello/state.json": "зелёный\n",
+    },
+  });
+  try {
+    const r = await run(root);
+    const w = r.plugins[0].warnings;
+    assert.ok(w.some((x) => x.includes('key="tamper" kind="security"')), w.join("\n"));
+    assert.ok(w.some((x) => x.includes('key="app-restart-stopped"') && x.includes("зарезервирован ядром")), w.join("\n"));
+    assert.ok(!w.some((x) => x.includes("job-failed")), "обычное правило — без предупреждения");
+    assert.deepEqual(errorsOf(r, "hello"), []);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("<agenthub.requires>: зависимость с https-ссылкой и путём проверки проходит; http, маска и запретное место — ошибка", async () => {
+  const good = '// <agenthub.requires name="Tool" url="https://example.com/tool" check="~/.tool">программа, чьё состояние показывает плагин</agenthub.requires>';
+  const root = makeRegistry({
+    ok: { "ok.5m.mjs": pluginSource({ extra: [good] }), "README.md": README },
+    http: { "http.5m.mjs": pluginSource({ extra: ['// <agenthub.requires name="T" url="http://example.com" check="~/.t">x</agenthub.requires>'] }), "README.md": README },
+    mask: { "mask.5m.mjs": pluginSource({ extra: ['// <agenthub.requires name="T" url="https://example.com" check="~/.t/*">x</agenthub.requires>'] }), "README.md": README },
+    secret: { "secret.5m.mjs": pluginSource({ extra: ['// <agenthub.requires name="T" url="https://example.com" check="~/.claude/projects">x</agenthub.requires>'] }), "README.md": README },
+  });
+  try {
+    const r = await run(root, { skipTests: true });
+    assert.deepEqual(errorsOf(r, "ok"), []);
+    assert.match(errorsOf(r, "http").join("\n"), /url — только https/);
+    assert.match(errorsOf(r, "mask").join("\n"), /без масок/);
+    assert.match(errorsOf(r, "secret").join("\n"), /requires name="T".*~\/\.claude\/projects/);
+  } finally {
+    cleanup(root);
   }
 });

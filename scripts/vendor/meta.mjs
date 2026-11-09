@@ -72,9 +72,12 @@ export function parseActionArg(text) {
 }
 
 // Правило push для ключа события плагина:
-//   <agenthub.push key="unity-open" hold="evening" quiet="true" macOnly="true" cooldown="7d" away="5m">Ярлык</agenthub.push>
-// Ядро и служба push берут такие правила только у встроенных и официальных плагинов (tier из подписанного
-// индекса); у остальных они игнорируются. → { key, label, hold?, quietException?, macOnly?, cooldownMs?, awayDelayMs? } | текст ошибки
+//   <agenthub.push key="unity-open" hold="evening" quiet="true" macOnly="true" cooldown="7d" away="5m" kind="night">Ярлык</agenthub.push>
+// Ядро и служба push берут такие правила только у встроенных, официальных и своих плагинов (tier из политики
+// менеджера: подписанный индекс или согласие на свой); у остальных они игнорируются. kind — вид уведомления для выключателей в «Настройках» (PUSH_KINDS;
+// "security" — исключение безопасности, не выключается). → { key, label, hold?, quietException?, macOnly?,
+// cooldownMs?, awayDelayMs?, kind? } | текст ошибки
+export const PUSH_KINDS = ["sessions", "runs", "night", "updates", "problems", "other", "security"];
 export function parsePushRule(attrs, label) {
   const key = attrs.key;
   if (!key || !/^[\w.-]{1,64}$/.test(key)) return "нет корректного key";
@@ -86,6 +89,10 @@ export function parsePushRule(attrs, label) {
   const bool = (v) => (v === "true" ? true : v === "false" ? false : undefined);
   if (attrs.quiet !== undefined) out.quietException = bool(attrs.quiet) ?? false;
   if (attrs.macOnly !== undefined) out.macOnly = bool(attrs.macOnly) ?? false;
+  if (attrs.kind !== undefined) {
+    if (!PUSH_KINDS.includes(attrs.kind)) return `${key}: kind ждём ${PUSH_KINDS.join("|")}`;
+    out.kind = attrs.kind;
+  }
   for (const [a, k] of [["cooldown", "cooldownMs"], ["away", "awayDelayMs"]]) {
     if (attrs[a] === undefined) continue;
     const ms = parseInterval(attrs[a]);
@@ -93,6 +100,19 @@ export function parsePushRule(attrs, label) {
     out[k] = ms;
   }
   return out;
+}
+
+// Зависимость плагина: <agenthub.requires name="Tool" url="https://…" check="~/.tool">зачем</agenthub.requires>.
+// name — как называть программу («Нужен Tool»), url — где её взять (только https://), check — путь, по наличию
+// которого видно, что она стоит (~/… или абсолютный; без масок). → { name, url, check, note } | текст ошибки
+export function parseRequires(attrs, note) {
+  const name = String(attrs.name || "").trim();
+  if (!name || name.length > 64 || /[\p{Cc}\p{Cf}]/u.test(name)) return "нет name (до 64 символов)";
+  const url = String(attrs.url || "").trim();
+  if (!/^https:\/\/[^\s"'<>]{1,500}$/.test(url)) return `${name}: url — только https://`;
+  const check = String(attrs.check || "").trim();
+  if (!/^(?:~\/|\/)[^\0*?[\]{}]{0,500}$/.test(check) || check.split("/").includes("..")) return `${name}: check — путь ~/… или /… без масок и «..»`;
+  return { name, url, check, note: note ? note.slice(0, 300) : null };
 }
 
 const STATUS_VALUES = ["ok", "unknown", "wait", "block", "error"];
@@ -126,6 +146,10 @@ export function parseMetaText(text) {
     // → { wait: { label, hint } }. Оболочка показывает label на плитке и в карточке, пояснение — подсказкой;
     // статуса без ярлыка — общая таблица оболочки.
     statuses: {},
+    // Зависимости — внешние программы, без которых плагин бесполезен (каталог показывает «Нужен Tool»):
+    // <agenthub.requires name="Tool" url="https://…" check="~/.tool">зачем</agenthub.requires>
+    // → [{ name, url, check, note }]. Это не право: ядро только проверяет, есть ли путь check.
+    requires: [],
     extra: {},
     // Переводы (AGENTHUB_LANG): { en: { title, desc, why: { <что>: <зачем> } } }. Теги с lang="xx" — вариант
     // на языке xx; без lang — язык плагина по умолчанию. Действия — атрибуты title-xx / cost-xx (action.i18n).
@@ -157,6 +181,11 @@ export function parseMetaText(text) {
       } else if (MULTI.has(tag)) {
         const { what, why } = splitWhy(value);
         if (why) (loc(lang).why ||= {})[what] = why;
+      } else if (tag === "requires") {
+        // перевод пояснения (и, если дан, названия) зависимости — по name правила без lang
+        const r = meta.requires.find((x) => x.name === attrs.name);
+        if (!r) warnings.push(`requires ${attrs.name || "?"} lang=${lang}: сначала тег без lang с тем же name`);
+        else ((loc(lang).requires ||= {})[r.name] = { ...(value ? { note: value.slice(0, 300) } : {}), ...(attrs.title ? { name: attrs.title.slice(0, 64) } : {}) });
       } else warnings.push(`${tag}: lang у этого тега не поддерживается`);
       continue;
     }
@@ -203,6 +232,12 @@ export function parseMetaText(text) {
       const st = parseStatusTag(attrs, value);
       if (typeof st === "string") warnings.push(st);
       else meta.statuses[st.value] = { label: st.label, hint: st.hint };
+    } else if (tag === "requires") {
+      const r = parseRequires(attrs, value);
+      if (typeof r === "string") warnings.push(`requires: ${r}`);
+      else if (meta.requires.some((x) => x.name === r.name)) warnings.push(`requires ${r.name}: повтор name`);
+      else if (meta.requires.length >= 8) warnings.push("requires: больше 8 зависимостей");
+      else meta.requires.push(r);
     } else if (tag.startsWith("author.")) {
       meta.author[tag.slice(7)] = value;
     } else if (tag === "type") {

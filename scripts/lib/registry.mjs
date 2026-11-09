@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFileName, parseMetaText } from "../vendor/meta.mjs";
-import { diffPermissions, ID_RE, lintPlugin, permissionsFromMeta, RESERVED_IDS, sourceViolations } from "../vendor/perms.mjs";
+import { diffPermissions, ID_RE, lintPlugin, permissionsFromMeta, pushWarnings, RESERVED_IDS, sourceViolations } from "../vendor/perms.mjs";
 import { LIMITS, packTarGz } from "../vendor/tarball.mjs";
 
 // В реестре — только текстовые плагины с известным интерпретатором: бинарник ревьюер не прочтёт.
@@ -25,6 +25,10 @@ export function readJson(path, fallback = undefined) {
   }
   return JSON.parse(readFileSync(path, "utf8"));
 }
+
+// Ключи событий ядра хаба и предупреждения о правилах push (kind="security", зарезервированные ключи) — общие с
+// проверкой своей папки в демоне: scripts/vendor/perms.mjs (daemon/lib/registry/perms.mjs).
+export { CORE_PUSH_KEYS, pushWarnings } from "../vendor/perms.mjs";
 
 // official.json: { "official": ["night-runner", …] } — метку ставит только владелец (CODEOWNERS).
 export function readOfficial(root) {
@@ -110,6 +114,7 @@ export function inspectPlugin(root, id, { official = new Set() } = {}) {
     const lint = lintPlugin({ id, meta, source, official: isOfficial });
     errors.push(...lint.errors);
     warnings.push(...lint.warnings);
+    warnings.push(...pushWarnings(meta));
   }
   // остальные текстовые файлы плагина тоже не должны лезть в запретные места
   const pack = files.filter((f) => !f.symlink && inPack(f.rel));

@@ -4,7 +4,11 @@
 //   ---
 //   Тело: `Заголовок | ключ=значение ключ2="значение с пробелами"`, вложенность префиксом `--`
 //
-// Наши параметры: status, effect, action, event. Оформление (color, sfimage, …) — как есть.
+// Наши параметры: status, effect, action, event, activity, needsOn. Оформление (color, sfimage, …) — как есть.
+// activity= / needsOn= (только шапка, любой уровень плагина — это не право): «у меня сейчас идёт работа» и «мне
+// понадобится включённый компьютер позже». Текст чистится (управляющие и форматирующие символы Unicode, переводы
+// строк → пробел; ZWJ между эмодзи остаётся; не больше MAX_MARKS комбинирующих знаков на графему) и режется до
+// MAX_PHRASE графем; пустое значение — «участвую в проверке, сейчас тихо».
 // `bash=`/`shell=`/`terminal=`/`paramN=` запрещены: выбрасываются с предупреждением.
 // Для streamable кадры разделяются строкой `~~~` (splitFrames / FrameSplitter).
 
@@ -23,6 +27,35 @@ export const MAX_LINE = 16 * 1024;
 const MAX_SPLIT_TRIES = 16;
 // Сырая строка режется до этого предела ещё до trimEnd и разбора уровней (см. parseOutput).
 const RAW_LINE_CAP = MAX_LINE * 2;
+
+// activity= и needsOn=: длина фразы и сколько фраз одного вида берётся из шапки.
+export const MAX_PHRASE = 120;
+export const MAX_PHRASES = 4;
+
+// Сколько комбинирующих знаков (\p{M}) оставлять на одну графему: «я́», keycap «1️⃣» и большинство письменностей
+// укладываются; сотня диакритик над одной буквой (вылезает за строку и наезжает на соседние) — нет.
+export const MAX_MARKS = 3;
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+// Фраза для вердикта «можно ли выключать»: без управляющих и форматирующих символов (bidi, нулевая ширина), без
+// U+2028/2029 — но ZWJ (U+200D) между эмодзи остаётся (👨‍👩‍👧 не рассыпается на трёх человек); не больше MAX_MARKS
+// комбинирующих знаков на графему; пробелы схлопнуты; не длиннее MAX_PHRASE графем (с «…» на конце, если обрезана).
+export function cleanPhrase(v) {
+  let s = String(v ?? "")
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, (m, off, str) => {
+      if (m === "\u200D" && /\p{Extended_Pictographic}[\uFE0F\p{Emoji_Modifier}]*$/u.test(str.slice(Math.max(0, off - 8), off)) && /^\p{Extended_Pictographic}/u.test(str.slice(off + 1, off + 3))) return m;
+      return " ";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = [];
+  for (const { segment } of GRAPHEMES.segment(s)) {
+    let k = 0;
+    parts.push(segment.replace(/\p{M}/gu, (m) => (++k > MAX_MARKS ? "" : m)));
+  }
+  if (parts.length > MAX_PHRASE) return parts.slice(0, MAX_PHRASE - 1).join("").trimEnd() + "…";
+  return parts.join("");
+}
 
 export function worstStatus(list) {
   let worst = "ok";
@@ -105,8 +138,11 @@ function cap(v) {
   return typeof v === "string" && v.length > MAX_VALUE ? v.slice(0, MAX_VALUE) : v;
 }
 
-// Разбор одного кадра. → { header: Item[], body: Item[], status, events: string[], warnings: string[] }
-// Item: { title, level, separator?, params, status?, effect?, action?, event?, href? }
+// Разбор одного кадра. → { header: Item[], body: Item[], status, events: string[], warnings: string[],
+//   activity: string[] | null, needsOn: string[] | null }
+// Item: { title, level, separator?, params, status?, effect?, action?, event?, href?, activity?, needsOn? }
+// activity / needsOn кадра: null — ключа в шапке нет (плагин в вердикте не участвует); [] — ключ есть, но пустой
+// («проверил — тихо»); иначе непустые фразы из строк шапки по порядку (без повторов, не больше MAX_PHRASES).
 export function parseOutput(text) {
   const warnings = [];
   const header = [];
@@ -114,6 +150,14 @@ export function parseOutput(text) {
   const events = [];
   let status = null;
   let inBody = false;
+  let activity = null;
+  let needsOn = null;
+  const addPhrase = (list, v) => {
+    const out = list || [];
+    const p = cleanPhrase(v);
+    if (p && !out.includes(p) && out.length < MAX_PHRASES) out.push(p);
+    return out;
+  };
   const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
   if (lines.length > MAX_LINES) warnings.push(`вывод обрезан до ${MAX_LINES} строк`);
   for (let rawLine of lines.slice(0, MAX_LINES)) {
@@ -167,6 +211,15 @@ export function parseOutput(text) {
         else warnings.push(`некорректный ключ event «${String(v).slice(0, 40)}»`);
       } else if (key === "href") {
         item.href = cap(v);
+      } else if (key === "activity" || key === "needson") {
+        const field = key === "activity" ? "activity" : "needsOn";
+        if (inBody) {
+          warnings.push(`параметр ${field}= понимается только в шапке`);
+          continue;
+        }
+        item[field] = cleanPhrase(v);
+        if (field === "activity") activity = addPhrase(activity, v);
+        else needsOn = addPhrase(needsOn, v);
       } else {
         item.params[k] = cap(v);
       }
@@ -178,8 +231,8 @@ export function parseOutput(text) {
       header.push(item);
     } else body.push(item);
   }
-  if (header.length === 0 && body.length === 0) return { header, body, status: "unknown", events, warnings, empty: true };
-  return { header, body, status: status ?? "ok", events: [...new Set(events)], warnings, empty: false };
+  if (header.length === 0 && body.length === 0) return { header, body, status: "unknown", events, warnings, empty: true, activity: null, needsOn: null };
+  return { header, body, status: status ?? "ok", events: [...new Set(events)], warnings, empty: false, activity, needsOn };
 }
 
 // Делитель потока streamable на кадры по строке `~~~`.

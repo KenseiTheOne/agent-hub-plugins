@@ -98,6 +98,18 @@ test("gateway молчит: старый пульс", () => {
   }
 });
 
+test("gateway молчит — activity= нет: что идёт у Hermes, неизвестно, в «проверено» карточки выключения он не попадает", () => {
+  const home = makeHome({ heartbeatAgeSec: 600 });
+  try {
+    const { parsed, text } = run(home);
+    assert.ok(parsed.events.includes("gateway-silent"));
+    assert.equal(parsed.activity, null, "не «участвую, тихо»");
+    assert.doesNotMatch(text.split("\n")[0], /activity=/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("gateway молчит: процесса нет при свежем пульсе", () => {
   const home = makeHome({ gatewayPid: 999_999 });
   try {
@@ -308,6 +320,27 @@ test("действия: профиль задачи из jobs.json, pause/resume
     writeFileSync(join(home, ".hermes", "ESTOP"), "");
     assert.deepEqual(act(home, ["pause"]), { out: "reason=already-paused", code: 3, calls: [] });
     assert.equal(act(home, ["bogus"]).out, "reason=unknown-action");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("1.2.2: activity= для вердикта хаба «можно ли выключать» — задачи в работе; нет таких — пусто", () => {
+  const quiet = makeHome();
+  try {
+    assert.deepEqual(run(quiet).parsed.activity, [], "задач в работе нет — плагин участвует, у него тихо");
+  } finally {
+    rmSync(quiet, { recursive: true, force: true });
+  }
+  const jobs = JSON.parse(readFileSync(join(FIX, "jobs.json"), "utf8"));
+  jobs.jobs.push({ ...jobs.jobs[0], id: "dddd77778888", name: "demo: идёт сейчас", state: "running", last_failure: null, last_run_at: null });
+  const home = makeHome({ jobsText: JSON.stringify(jobs) });
+  try {
+    const { parsed } = run(home);
+    assert.deepEqual(parsed.activity, ["Hermes: 1 задача в работе"]);
+    assert.deepEqual(parsed.needsOn, null, "needsOn Hermes не сообщает");
+    const r = spawnSync(process.execPath, [PLUGIN], { env: { HOME: home, PATH: "/usr/bin:/bin", AGENTHUB_LANG: "en" }, encoding: "utf8", timeout: 10_000 });
+    assert.deepEqual(parseOutput(r.stdout).activity, ["Hermes: 1 job running"]);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // <agenthub.title>Hermes</agenthub.title>
-// <agenthub.version>1.2.1</agenthub.version>
+// <agenthub.version>1.2.2</agenthub.version>
 // <agenthub.desc>Задачи Hermes по расписанию: что упало, что подорожало, отвечает ли служба Hermes и не на паузе ли он</agenthub.desc>
 // <agenthub.desc lang="en">Hermes scheduled jobs: what failed, what got costly, whether the Hermes service responds and whether it is paused</agenthub.desc>
 // <agenthub.status value="ok" label="Задачи по расписанию">Hermes работает, задачи идут по расписанию</agenthub.status>
@@ -14,6 +14,8 @@
 // <agenthub.author.name>Kensei</agenthub.author.name>
 // <agenthub.author.github>KenseiTheOne</agenthub.author.github>
 // <agenthub.platforms>macos</agenthub.platforms>
+// <agenthub.requires name="Hermes" url="https://github.com/NousResearch/hermes-agent" check="~/.hermes">агент с задачами по расписанию, которые показывает плагин: без него плагину нечего показывать</agenthub.requires>
+// <agenthub.requires lang="en" name="Hermes">the agent whose scheduled jobs this plugin shows: without it there is nothing to show</agenthub.requires>
 // <agenthub.fsRead>~/.hermes/gateway_state.json — запущена ли служба Hermes</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.hermes/gateway_state.json — whether the Hermes service is running</agenthub.fsRead>
 // <agenthub.fsRead>~/.hermes/state/gateway.heartbeat — отвечает ли служба Hermes</agenthub.fsRead>
@@ -35,11 +37,11 @@
 // <agenthub.action id="cron-resume" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: возобновить задачу" title-en="Hermes: resume job" cost="задача снова будет запускаться по расписанию (расход квоты)" cost-en="the job runs on schedule again (uses quota)">hermes.60s.mjs --action cron-resume {job}</agenthub.action>
 // <agenthub.action id="cron-run" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: запустить вне расписания задачу" title-en="Hermes: run job now" cost="внеочередной запуск задачи — расход квоты" cost-en="an extra run of the job — uses quota">hermes.60s.mjs --action cron-run {job}</agenthub.action>
 // <agenthub.action id="pause" level="confirm" title="Поставить Hermes на паузу" title-en="Pause Hermes">hermes.60s.mjs --action pause</agenthub.action>
-// <agenthub.push key="job-failed">Hermes: задача упала</agenthub.push>
-// <agenthub.push key="job-costly">Hermes: задача потратила вдвое больше обычного</agenthub.push>
-// <agenthub.push key="ticker-silent">Hermes: расписание остановилось</agenthub.push>
-// <agenthub.push key="gateway-silent" macOnly="true">Hermes: служба молчит</agenthub.push>
-// <agenthub.push key="estop">Hermes на паузе</agenthub.push>
+// <agenthub.push key="job-failed" kind="runs">Hermes: задача упала</agenthub.push>
+// <agenthub.push key="job-costly" kind="runs">Hermes: задача потратила вдвое больше обычного</agenthub.push>
+// <agenthub.push key="ticker-silent" kind="runs">Hermes: расписание остановилось</agenthub.push>
+// <agenthub.push key="gateway-silent" macOnly="true" kind="runs">Hermes: служба молчит</agenthub.push>
+// <agenthub.push key="estop" kind="runs">Hermes на паузе</agenthub.push>
 // <agenthub.push key="job-failed" lang="en">Hermes: job failed</agenthub.push>
 // <agenthub.push key="job-costly" lang="en">Hermes: job used twice the usual</agenthub.push>
 // <agenthub.push key="ticker-silent" lang="en">Hermes: schedule stopped</agenthub.push>
@@ -607,7 +609,14 @@ export function render(r, { now = Date.now(), lang = envLang() } = {}) {
   const sf = status === "ok" ? "bolt.horizontal.circle" : status === "wait" ? "pause.circle" : status === "unknown" ? "questionmark.circle" : "exclamationmark.triangle";
   // плитка — что происходит: сколько проблем, иначе сколько задач (не «!» — его и так показывает значок)
   const tile = problems.length ? tr(`${problems.length} ${plural(problems.length, "проблема", "проблемы", "проблем")}`, `${problems.length} ${plEn(problems.length, "issue", "issues")}`) : tr(`${jobsCount} ${plural(jobsCount, "задача", "задачи", "задач")}`, `${jobsCount} ${plEn(jobsCount, "job", "jobs")}`);
-  out.push(line(title, { status, tile, sfimage: sf }));
+  // activity= — для вердикта хаба «можно ли выключать» (ядро ≥ 07.11): задачи, которые идут сейчас; пусто — тихо
+  const runningN = r.profiles.reduce((a, p) => a + p.jobs.filter((j) => j.running).length, 0);
+  const activity = runningN ? tr(`Hermes: ${runningN} ${plural(runningN, "задача", "задачи", "задач")} в работе`, `Hermes: ${runningN} ${plEn(runningN, "job", "jobs")} running`) : "";
+  // служба молчит или данные не читаются — что у Hermes идёт, неизвестно: «тихо» не говорим, ключа нет (плагин не
+  // участвует в вердикте), иначе карточка выключения ставила бы ему галку рядом с красной плиткой
+  const blind = events.some((e) => e === "gateway-silent" || e === "source-broken" || e.startsWith("ticker-silent"));
+  const head = line(title, { status, tile, sfimage: sf, activity });
+  out.push(activity || blind ? head : `${head} activity=""`);
   out.push("---");
   if (problems.length > 1) for (const p of problems.slice(1, 3)) out.push(line(clean(p.text), { color: "gray" }));
   out.push(...body);

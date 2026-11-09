@@ -1,5 +1,0 @@
-    1     0 /sbin/launchd
- 4242     1 /Applications/Unity/Hub/Editor/6000.0.1f1/Unity.app/Contents/MacOS/Unity -projectPath {{HOME}}/Projects/Game-night/Client/Game
- 4250  4242 /Applications/Unity/Hub/Editor/6000.0.1f1/Unity.app/Contents/MacOS/Unity -adb2 -batchMode -noUpm -name AssetImportWorker0 -projectPath {{HOME}}/Projects/Game-night/Client/Game
- 4300     1 /Applications/Unity/Hub/Editor/6000.0.1f1/Unity.app/Contents/MacOS/Unity -projectpath {{HOME}}/Projects/Game/Client/Game
- 5000     1 /opt/homebrew/bin/node {{HOME}}/Projects/IT/night-runner/night-run.mjs

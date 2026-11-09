@@ -201,8 +201,28 @@ test("официальные плагины: автор — имя Kensei и л�
   const out = tempDir("ahp-out-");
   try {
     const { index } = buildIndex({ out, generatedAt: "2026-11-04T10:00:00.000Z" });
-    assert.ok(index.plugins.length >= 3);
+    // hermes и clickup; night-runner из реестра ушёл (09.11) — приватный, ставится своим источником
+    assert.ok(index.plugins.length >= 2);
     for (const p of index.plugins) assert.deepEqual(p.author, { name: "Kensei", github: "KenseiTheOne" }, p.id);
+  } finally {
+    cleanup(out);
+  }
+});
+
+test("зависимость <agenthub.requires>: в индексе — name, url, check, note и перевод; у hermes — «Нужен Hermes»; night-runner в реестре нет", () => {
+  const out = tempDir("ahp-out-");
+  try {
+    const { index } = buildIndex({ out, generatedAt: "2026-11-04T10:00:00.000Z" });
+    assert.equal(index.plugins.some((p) => p.id === "night-runner"), false);
+    const h = index.plugins.find((p) => p.id === "hermes");
+    assert.equal(h.requires.length, 1);
+    assert.deepEqual(Object.keys(h.requires[0]).sort(), ["check", "name", "note", "url"]);
+    assert.equal(h.requires[0].name, "Hermes");
+    assert.equal(h.requires[0].check, "~/.hermes");
+    assert.match(h.requires[0].url, /^https:\/\//);
+    assert.ok(h.i18n.en.requires.Hermes.note);
+    // плагин без зависимостей — без поля
+    assert.equal("requires" in index.plugins.find((p) => p.id === "clickup"), false);
   } finally {
     cleanup(out);
   }

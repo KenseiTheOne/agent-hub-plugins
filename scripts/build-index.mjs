@@ -65,6 +65,8 @@ export function buildIndex({ root = ROOT, out = join(ROOT, "dist"), generatedAt 
       // watch — в прежнем виде записи (вся строка с « — зачем»): иначе ядро до 05.11 не сверит права архива
       // с записью и откажет в установке (registry:archive-permissions); новое ядро читает оба вида
       permissions: indexPermissions(info.meta),
+      // зависимости (<agenthub.requires>): менеджер хаба показывает «Нужен Hermes» со ссылкой и проверяет путь check
+      ...(info.meta.requires?.length ? { requires: info.meta.requires.map((r) => ({ name: r.name, url: r.url, check: r.check, note: r.note })) } : {}),
     });
   }
   // опубликованная версия не меняет содержимое: правка без новой версии — ошибка, а не тихая перезапись архива
@@ -131,6 +133,7 @@ function i18nOf(meta) {
     if (v.title) e.title = v.title;
     if (v.desc) e.desc = v.desc;
     if (v.why && Object.keys(v.why).length) e.why = { ...v.why };
+    if (v.requires && Object.keys(v.requires).length) e.requires = { ...v.requires };
     if (Object.keys(e).length) out[lang] = e;
   }
   for (const a of meta.actions || []) {
