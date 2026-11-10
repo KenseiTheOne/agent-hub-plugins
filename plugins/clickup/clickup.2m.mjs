@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // <agenthub.title>ClickUp</agenthub.title>
-// <agenthub.version>1.3.0</agenthub.version>
+// <agenthub.version>1.4.0</agenthub.version>
 // <agenthub.contract>2</agenthub.contract>
 // <agenthub.icon symbol="checklist" color="#FF375F"></agenthub.icon>
 // <agenthub.desc>Ваши тикеты ClickUp и какие из них сейчас в работе у агентов (ночь, /ticket, сессии). Только чтение</agenthub.desc>
@@ -88,7 +88,7 @@ const BACKOFF_MAX_MS = 30 * 60_000;
 const STALE_MS = 30 * 60_000;
 const MCP_WAIT_MS = 3600; // ответ хаба на вызов MCP (служба ждёт ClickUp до 3 с, затем отвечает «загружаю»)
 // Поля задачи, которые просим у clickup_filter_tasks (кроме id, name, url) — меньше ответ и меньше разбора.
-export const MCP_FIELDS = ["custom_id", "status", "due_date", "date_updated", "list"];
+export const MCP_FIELDS = ["custom_id", "status", "due_date", "date_updated", "list", "priority"];
 
 // ---------- форматирование ----------
 export function clean(s, max = 120) {
@@ -222,6 +222,15 @@ const SHAPE_TEXT = {
 };
 const shapeText = (code) => (SHAPE_TEXT[code] ? SHAPE_TEXT[code][EN() ? 1 : 0] : code);
 
+// Приоритет ClickUp: объект {priority: "urgent"|"high"|"normal"|"low"}, строка или число 1…4 (1 — urgent) → код или null.
+const PRIORITIES = ["urgent", "high", "normal", "low"];
+export function pickPriority(v) {
+  const x = v && typeof v === "object" ? (v.priority ?? v.id) : v;
+  if (typeof x === "string" && PRIORITIES.includes(x.toLowerCase())) return x.toLowerCase();
+  const n = Number(x);
+  return Number.isInteger(n) && n >= 1 && n <= 4 ? PRIORITIES[n - 1] : null;
+}
+
 export function pickTask(t) {
   if (!t || typeof t !== "object" || typeof t.id !== "string" || typeof t.name !== "string") throw shapeError("task-no-id");
   const st = t.status && typeof t.status === "object" ? t.status : {};
@@ -237,6 +246,7 @@ export function pickTask(t) {
     list: t.list && typeof t.list.name === "string" ? t.list.name : null,
     updatedMs: Number(t.date_updated) || null,
     dueMs: Number(t.due_date) || null,
+    priority: pickPriority(t.priority),
   };
 }
 
@@ -384,6 +394,7 @@ export function pickMcpTask(t) {
     list: typeof list === "string" ? list : null,
     updatedMs: msOf(t.date_updated),
     dueMs: msOf(t.due_date),
+    priority: pickPriority(t.priority),
   };
 }
 
@@ -605,14 +616,14 @@ export function linksFor(task, work) {
     const sid = day.session_id && /^[\w-]{8,64}$/.test(day.session_id) ? day.session_id : null;
     const exact = sid && work.sessions.find((s) => s.sessionId === sid);
     if (exact) {
-      links.push({ kind: "session", confidence: "certain", sessionId: exact.sessionId, surface: exact.surface, text: tr(`сессия ${sessionLabel(exact)} (из RUN.md)`, `session ${sessionLabel(exact)} (from RUN.md)`) });
+      links.push({ kind: "session", confidence: "certain", sessionId: exact.sessionId, surface: exact.surface, label: sessionLabel(exact), text: tr(`сессия ${sessionLabel(exact)} (из RUN.md)`, `session ${sessionLabel(exact)} (from RUN.md)`) });
       seenSessions.add(exact.sessionId);
     }
     const root = day.worktree && isAbsolute(day.worktree.split(/\s/)[0]) ? day.worktree.split(/\s/)[0] : day.repo_root;
     for (const s of work.sessions) {
       if (seenSessions.has(s.sessionId) || !within(s.cwd, root)) continue;
       if (day.branch && s.branch && s.branch === day.branch.split(/\s/)[0]) {
-        links.push({ kind: "session", confidence: "likely", sessionId: s.sessionId, surface: s.surface, text: tr(`сессия ${sessionLabel(s)}: ветка ${clean(s.branch, 60)} как в RUN.md`, `session ${sessionLabel(s)}: branch ${clean(s.branch, 60)} as in RUN.md`) });
+        links.push({ kind: "session", confidence: "likely", sessionId: s.sessionId, surface: s.surface, label: sessionLabel(s), text: tr(`сессия ${sessionLabel(s)}: ветка ${clean(s.branch, 60)} как в RUN.md`, `session ${sessionLabel(s)}: branch ${clean(s.branch, 60)} as in RUN.md`) });
         seenSessions.add(s.sessionId);
       }
     }
@@ -622,14 +633,14 @@ export function linksFor(task, work) {
     if (seenSessions.has(s.sessionId)) continue;
     const hit = ids.find((id) => (s.branch && idRe(id).test(s.branch)) || idRe(id).test(s.cwd));
     if (hit) {
-      links.push({ kind: "session", confidence: "likely", sessionId: s.sessionId, surface: s.surface, text: `${tr("сессия", "session")} ${sessionLabel(s)}: ${s.branch && idRe(hit).test(s.branch) ? tr(`ветка ${clean(s.branch, 60)}`, `branch ${clean(s.branch, 60)}`) : tr("каталог", "folder")}` });
+      links.push({ kind: "session", confidence: "likely", sessionId: s.sessionId, surface: s.surface, label: sessionLabel(s), text: `${tr("сессия", "session")} ${sessionLabel(s)}: ${s.branch && idRe(hit).test(s.branch) ? tr(`ветка ${clean(s.branch, 60)}`, `branch ${clean(s.branch, 60)}`) : tr("каталог", "folder")}` });
       seenSessions.add(s.sessionId);
     }
   }
   if (day && !links.some((l) => l.kind === "session")) {
     const root = day.repo_root;
     const s = work.sessions.find((x) => within(x.cwd, root));
-    if (s && now() - day.mtimeMs < 6 * 3600_000) links.push({ kind: "session", confidence: "possible", sessionId: s.sessionId, surface: s.surface, text: tr(`сессия ${sessionLabel(s)} в том же репо`, `session ${sessionLabel(s)} in the same repo`) });
+    if (s && now() - day.mtimeMs < 6 * 3600_000) links.push({ kind: "session", confidence: "possible", sessionId: s.sessionId, surface: s.surface, label: sessionLabel(s), text: tr(`сессия ${sessionLabel(s)} в том же репо`, `session ${sessionLabel(s)} in the same repo`) });
   }
   return links;
 }
@@ -791,7 +802,115 @@ function deniedText(list) {
   return parts.join(tr(" и ", " and ")) || tr("тикетам", "the tickets");
 }
 
-// Шапка отвечает на «подключён ли ClickUp и что в работе». tile= — число тикетов для плитки.
+// ---------- страница: группы тикетов (1.4.0) ----------
+const DAY_MS = 24 * 3600_000;
+const DUE_SOON_DAYS = 3; // «Срок горит»: просрочен или срок в ближайшие 3 дня
+const WEEK_DAYS = 7;
+const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2, low: 3 };
+const prioRank = (t) => PRIORITY_RANK[t.priority] ?? 2;
+// Статус как значок: open — пустой круг, custom (в работе, ревью…) — наполовину, done/closed — галочка.
+export function statusSymbol(t) {
+  if (t.statusType === "open") return "circle";
+  if (t.statusType === "custom") return "circle.lefthalf.filled";
+  if (t.statusType === "done" || t.statusType === "closed") return "checkmark.circle";
+  return "circle.dashed";
+}
+// Разница в календарных днях (по местному времени): 0 — сегодня, 1 — завтра, -1 — вчера.
+function dayDiff(ms, nowMs) {
+  const a = new Date(ms);
+  const b = new Date(nowMs);
+  return Math.round((new Date(a.getFullYear(), a.getMonth(), a.getDate()) - new Date(b.getFullYear(), b.getMonth(), b.getDate())) / DAY_MS);
+}
+export function dueWord(ms, nowMs) {
+  const d = dayDiff(ms, nowMs);
+  if (d === 0) return tr("сегодня", "today");
+  if (d === 1) return tr("завтра", "tomorrow");
+  if (d === -1) return tr("вчера", "yesterday");
+  return fmtDate(ms, nowMs);
+}
+const priorityText = (p) => (p === "urgent" ? tr("срочно", "urgent") : p === "high" ? tr("высокий приоритет", "high priority") : null);
+
+// → { agents, due, rest, overdueCount, weekCount, nearestDue }. agents — тикеты, с которыми связана работа агентов
+// (ночь, /ticket, сессия); due — остальные с просроченным или близким сроком; rest — всё прочее.
+export function groupTasks(r, nowMs) {
+  const links = (t) => r.links.get(t.id) || [];
+  const byPrio = (a, b) => prioRank(a) - prioRank(b) || (b.updatedMs || 0) - (a.updatedMs || 0);
+  const agents = r.tasks.filter((t) => links(t).length).sort(byPrio);
+  const taken = new Set(agents.map((t) => t.id));
+  const due = r.tasks.filter((t) => !taken.has(t.id) && t.dueMs && t.dueMs - nowMs <= DUE_SOON_DAYS * DAY_MS).sort((a, b) => a.dueMs - b.dueMs || prioRank(a) - prioRank(b));
+  for (const t of due) taken.add(t.id);
+  const rest = r.tasks.filter((t) => !taken.has(t.id)).sort(byPrio);
+  const overdue = r.tasks.filter((t) => t.dueMs && t.dueMs < nowMs).sort((a, b) => a.dueMs - b.dueMs);
+  const week = r.tasks.filter((t) => t.dueMs && t.dueMs >= nowMs && t.dueMs - nowMs <= WEEK_DAYS * DAY_MS).sort((a, b) => a.dueMs - b.dueMs);
+  return { agents, due, rest, overdueCount: overdue.length, oldestOverdue: overdue[0] || null, weekCount: week.length, nearestDue: week[0] || null };
+}
+
+// Остальные по статусам: в работе (custom) → открытые (open) → прочие; внутри — порядок, в котором пришли.
+export function byStatus(tasks) {
+  const rank = (t) => (t.statusType === "custom" ? 0 : t.statusType === "open" ? 1 : 2);
+  const groups = new Map();
+  for (const t of tasks) {
+    const k = t.status || "?";
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(t);
+  }
+  return [...groups.entries()].sort((a, b) => rank(a[1][0]) - rank(b[1][0]));
+}
+
+export function headerText(n, working, overdue) {
+  if (EN()) return [`ClickUp: ${n} ${plEn(n, "ticket", "tickets")}`, working ? `${working} with agents` : null, overdue ? `${overdue} overdue` : null].filter(Boolean).join(" · ");
+  return [`ClickUp: ${n} ${plural(n, "тикет", "тикета", "тикетов")}`, working ? `у агентов ${working}` : null, overdue ? `просрочено ${overdue}` : null].filter(Boolean).join(" · ");
+}
+// Плитка — число, которое требует внимания: у агентов, затем просроченные, иначе всего открытых.
+export function tileText(n, working, overdue) {
+  if (working) return tr(`${working} у агентов`, `${working} with agents`);
+  if (overdue) return tr(overdue === 1 ? "1 просрочен" : `${overdue} просрочено`, `${overdue} overdue`);
+  return String(n);
+}
+
+// Ряд карточек-цифр: у агентов, просрочено, срок на неделе, открытых.
+const KIND_TEXT = { night: ["ночь", "night"], ticket: ["/ticket", "/ticket"], session: ["сессия", "session"] };
+function statCards(g, n, nowMs, links) {
+  const kinds = new Set();
+  for (const t of g.agents) for (const l of links.get(t.id) || []) kinds.add(l.kind);
+  const kindText = ["night", "ticket", "session"].filter((k) => kinds.has(k)).map((k) => KIND_TEXT[k][EN() ? 1 : 0]).join(", ");
+  const out = [];
+  out.push(line(String(g.agents.length), { stat: tr("У агентов", "With agents"), note: kindText || tr("никто не взял", "none taken") }));
+  const o = g.oldestOverdue;
+  out.push(line(String(g.overdueCount), o ? { stat: tr("Просрочено", "Overdue"), note: `${clean(o.customId || o.id, 20)}, ${tr("срок", "due")} ${dueWord(o.dueMs, nowMs)}`, color: "red" } : { stat: tr("Просрочено", "Overdue"), note: tr("всё в срок", "all on time") }));
+  const w = g.nearestDue;
+  out.push(line(String(g.weekCount), { stat: tr("Срок на неделе", "Due this week"), note: w ? tr(`ближайший — ${dueWord(w.dueMs, nowMs)}`, `next — ${dueWord(w.dueMs, nowMs)}`) : tr("сроков нет", "no due dates"), ...(w && w.dueMs - nowMs <= DUE_SOON_DAYS * DAY_MS ? { color: "orange" } : {}) }));
+  out.push(line(String(n), { stat: tr("Открытых", "Open"), note: tr("без закрытых", "closed excluded") }));
+  return out;
+}
+
+// Тикет: название (значок статуса, статус пометкой), строка «номер · список · приоритет · срок», что делает агент,
+// кнопки «Открыть в ClickUp» и «Перейти во вкладку».
+function taskBlock(t, links, nowMs, { due = false } = {}) {
+  const ref = clean(t.customId || t.id, 30);
+  const out = [line(clean(t.name, 80), { sfimage: statusSymbol(t), badge: clean(t.status, 24) })];
+  const meta = [ref, t.list ? clean(t.list, 40) : null, priorityText(t.priority)];
+  // срок: просроченный или в «Срок горит» — своей цветной строкой, иначе — в строке номера
+  const loud = t.dueMs && (due || t.dueMs < nowMs);
+  if (t.dueMs && !loud) meta.push(`${tr("срок", "due")} ${dueWord(t.dueMs, nowMs)}`);
+  out.push(line(`--${meta.filter(Boolean).join(" · ")}`, {}));
+  if (loud) {
+    const late = t.dueMs < nowMs;
+    out.push(line(`--${late ? tr(`просрочен: срок ${dueWord(t.dueMs, nowMs)}`, `overdue: was due ${dueWord(t.dueMs, nowMs)}`) : tr(`срок ${dueWord(t.dueMs, nowMs)}`, `due ${dueWord(t.dueMs, nowMs)}`)}`, { color: late ? "red" : "orange" }));
+  }
+  for (const l of links) out.push(line(`--→ ${l.text} · ${confText(l.confidence)}`, l.confidence === "possible" ? { color: "gray" } : {}));
+  out.push(line(`--${tr("Открыть в ClickUp", "Open in ClickUp")}`, { href: t.url, sfimage: "arrow.up.right.square" }));
+  // переход во вкладку сессии (cmux.focus; ядро сверит вкладку со своими фактами) — по кнопке на сессию
+  const seen = new Set();
+  for (const l of links) {
+    if (!l.surface || seen.has(l.surface.surfaceId)) continue;
+    seen.add(l.surface.surfaceId);
+    out.push(line(`--${tr(`Перейти: сессия ${l.label || ""}`, `Switch to session ${l.label || ""}`).trim()}`, { effect: `cmux.focus ${l.surface.surfaceId} workspaceId=${l.surface.workspaceId}`, sfimage: "arrow.right.square" }));
+  }
+  return out;
+}
+
+// Шапка отвечает на «нужно ли что-то делать»: сколько у агентов и сколько просрочено. tile= — то, что требует внимания.
 export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LANG } = {}) {
   setLang(lang);
   const out = [];
@@ -807,7 +926,8 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
       out.push(line(tr("ClickUp не подключён — нужен токен", "ClickUp isn't connected — a token is needed"), { status: "unknown", tile: "—", sfimage: "key.slash" }));
       out.push("---");
     }
-    out.push(line(r.connectInHub ? tr("Запасной путь — личный токен (обновление раз в 2 мин)", "Fallback — a personal token (refreshes every 2 min)") : tr("Как подключить", "How to connect"), { color: "gray" }));
+    // есть вход через хаб — запасной путь свёрнут в «Подробности», чтобы не заслонять кнопку оболочки
+    out.push(line(r.connectInHub ? tr("Запасной путь — личный токен (обновление раз в 2 мин)", "Fallback — a personal token (refreshes every 2 min)") : tr("Как подключить", "How to connect"), r.connectInHub ? { details: "true" } : { color: "gray" }));
     // Служба секретов хаба ищет запись связки ключей: сервис agent-hub.clickup, учётная запись ровно «token»
     // (find-generic-password -s agent-hub.clickup -a token) — запись с другим именем учётной записи не найдётся.
     out.push(line(tr("--1. Заведите персональный токен ClickUp: Settings → Apps → API Token", "--1. Create a personal ClickUp token: Settings → Apps → API Token"), { color: "gray" }));
@@ -892,31 +1012,44 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
     if (!r.fetchedAt || (old && r.oauth.why && r.oauth.why !== "interval")) status = "unknown";
   }
 
-  const tasks = [...r.tasks];
-  const linked = (t) => (r.links.get(t.id) || []).length;
-  tasks.sort((a, b) => (linked(b) > 0) - (linked(a) > 0) || (b.updatedMs || 0) - (a.updatedMs || 0));
-  const working = tasks.filter((t) => (r.links.get(t.id) || []).some((l) => l.kind === "session" || l.kind === "ticket")).length;
-  const n = tasks.length;
-  const title = problem || (EN() ? `ClickUp: ${n} ${plEn(n, "ticket", "tickets")}${working ? `, ${working} in progress` : ""}` : `ClickUp: ${n} ${plural(n, "тикет", "тикета", "тикетов")}${working ? `, в работе ${working}` : ""}`);
-  out.push(line(title, { status, tile: String(n), sfimage: "checklist" }));
+  // Группы страницы (дизайн 1.4.0): «Сейчас у агентов» → «Срок горит» → «Остальные» по статусам.
+  const g = groupTasks(r, nowMs);
+  const n = r.tasks.length;
+  const working = g.agents.length;
+  const overdue = g.overdueCount;
+  const title = problem || headerText(n, working, overdue);
+  out.push(line(title, { status, tile: tileText(n, working, overdue), sfimage: "checklist" }));
   out.push("---");
   out.push(...notes);
   if (notes.length) out.push("---");
-  if (!tasks.length) out.push(line(r.fetchedAt ? tr("Открытых тикетов нет", "No open tickets") : tr("Тикеты ещё не загружены", "Tickets not loaded yet"), { color: "gray" }));
-  for (const t of tasks.slice(0, limit)) {
-    const ref = t.customId || t.id;
-    out.push(line(`${clean(ref, 30)} ${clean(t.name, 80)} — ${clean(t.status, 30)}`, { href: t.url, color: t.statusColor }));
-    for (const l of r.links.get(t.id) || []) {
-      const params = l.confidence === "possible" ? { color: "gray" } : {};
-      // строка связи с сессией — сразу переход во вкладку (cmux.focus; ядро сверит вкладку со своими фактами)
-      if (l.surface) params.effect = `cmux.focus ${l.surface.surfaceId} workspaceId=${l.surface.workspaceId}`;
-      out.push(line(`--${l.text} · ${confText(l.confidence)}`, params));
+  if (!n) out.push(line(r.fetchedAt ? tr("Открытых тикетов нет", "No open tickets") : tr("Тикеты ещё не загружены", "Tickets not loaded yet"), { color: "gray" }));
+  else {
+    out.push(...statCards(g, n, nowMs, r.links));
+    out.push("---");
+    let shown = 0;
+    if (g.agents.length) {
+      out.push(line(tr(`У агентов · ${g.agents.length}`, `With agents · ${g.agents.length}`), { sfimage: "person.2.fill", color: "#7CC4FF" }));
+      for (const t of g.agents) out.push(...taskBlock(t, r.links.get(t.id) || [], nowMs, { agents: true })), shown++;
+      out.push("---");
     }
-    if (t.list) out.push(line(tr(`--Список: ${clean(t.list, 60)}`, `--List: ${clean(t.list, 60)}`), { color: "gray" }));
-    if (t.dueMs) out.push(line(tr(`--Срок: ${fmtDate(t.dueMs, nowMs)}`, `--Due: ${fmtDate(t.dueMs, nowMs)}`), t.dueMs < nowMs ? { color: "red" } : { color: "gray" }));
+    if (g.due.length) {
+      out.push(line(tr(`Срок горит · ${g.due.length}`, `Due soon · ${g.due.length}`), { sfimage: "clock.badge.exclamationmark", color: "#FF8A65" }));
+      for (const t of g.due) out.push(...taskBlock(t, [], nowMs, { due: true })), shown++;
+      out.push("---");
+    }
+    if (g.rest.length) {
+      // остальные — коротко: строка статуса и по капсуле-ссылке на тикет (название целиком, без номера и статуса)
+      const room = Math.max(0, limit - shown);
+      const visible = g.rest.slice(0, room);
+      out.push(line(tr(`Остальные · ${g.rest.length}`, `Others · ${g.rest.length}`), { sfimage: "tray.full" }));
+      for (const [st, list] of byStatus(visible)) {
+        out.push(line(`${clean(st, 40)} · ${list.length}`, { sfimage: statusSymbol(list[0]), color: "gray" }));
+        for (const t of list) out.push(line(clean(t.name, 80), { href: t.url }));
+      }
+      if (g.rest.length > visible.length) out.push(line(tr(`…и ещё ${g.rest.length - visible.length} — в ClickUp`, `…and ${g.rest.length - visible.length} more — in ClickUp`), { color: "gray" }));
+      out.push("---");
+    }
   }
-  if (tasks.length > limit) out.push(line(tr(`…и ещё ${tasks.length - limit}`, `…and ${tasks.length - limit} more`), { color: "gray" }));
-  out.push("---");
   const parts = [];
   if (r.fetchedAt) parts.push(tr(`обновлено ${fmtTime(r.fetchedAt, nowMs)}`, `updated ${fmtTime(r.fetchedAt, nowMs)}`));
   if (r.mode === "oauth" && r.oauth.nextAt) parts.push(tr(`следующее в ${fmtTime(r.oauth.nextAt, nowMs)}`, `next at ${fmtTime(r.oauth.nextAt, nowMs)}`));

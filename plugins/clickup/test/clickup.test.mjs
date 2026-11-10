@@ -155,22 +155,25 @@ test("тикеты на пользователя, ссылки open.url, свя�
     assert.deepEqual(q.getAll("assignees[]"), ["1000001"]);
     assert.equal(q.get("include_closed"), "false");
     assert.equal(parsed.status, "ok");
-    assert.match(parsed.header[0].title, /ClickUp: 4 тикета, в работе 2/);
+    assert.equal(parsed.header[0].title, "ClickUp: 4 тикета · у агентов 3 · просрочено 1");
     const items = parsed.body;
-    const t1 = items.findIndex((i) => i.title.startsWith("86aaa0001 "));
+    const t1 = items.findIndex((i) => i.title === "Синтетика: починить экран загрузки");
     assert.ok(t1 >= 0);
-    assert.equal(items[t1].href, "https://app.clickup.com/t/86aaa0001");
-    assert.match(text, /\/ticket: шаг review \(fix\) · точно/);
+    assert.equal(items[t1].params.badge, "in progress", "статус — пометкой у названия");
+    assert.match(text, /\n--86aaa0001 · Синтетический список\n/, "номер и список — строкой под названием");
+    assert.ok(items.some((i) => i.href === "https://app.clickup.com/t/86aaa0001" && /Открыть в ClickUp/.test(i.title)));
+    assert.match(text, /→ \/ticket: шаг review \(fix\) · точно/);
     assert.match(text, /сессия «синт-тикет»: ветка fix\/86aaa0001-loading как в RUN\.md · вероятно/);
     const focus = items.find((i) => i.effect && i.effect.startsWith("cmux.focus"));
     assert.equal(focus.effect, `cmux.focus ${SURF} workspaceId=${WS}`, "связь с сессией ведёт во вкладку");
-    assert.match(text, /SYN-42 Синтетика: ночная задача — review/);
+    assert.equal(focus.title, "Перейти: сессия «синт-тикет»");
+    assert.match(text, /\nСинтетика: ночная задача \| sfimage=circle\.lefthalf\.filled badge=review\n--SYN-42 · Синтетический список\n--просрочен: срок 14\.11\.2023 \| color=red\n/);
     assert.match(text, /ночь: PR открыт, 03\.11 · точно/);
     assert.match(text, /сессия 00000000: ветка feature\/86aaa0003-session · вероятно/);
     assert.ok(!text.includes("dead-86aaa0004"), "мёртвая сессия не связывается");
     assert.ok(text.includes("в сессии ¦ с чертой"), "черта в названии не ломает разбор");
-    const t4 = items.find((i) => i.title.startsWith("86aaa0004 "));
-    assert.equal(t4.href, "https://app.clickup.com/t/86aaa0004", "небезопасный url заменён");
+    const t4 = items.find((i) => i.title === "Синтетика: без связи");
+    assert.equal(t4.href, "https://app.clickup.com/t/86aaa0004", "небезопасный url заменён; остальные — капсулой-ссылкой");
     assert.match(text, /лимит API: осталось 96/);
     // второй запуск: user/team из кэша — один запрос
     d.log.length = 0;
@@ -409,4 +412,51 @@ test("parseRunMd: только ключи верхнего уровня из с�
 test("живость pid без /bin/ps (kill(pid, 0) — работает и на Windows)", () => {
   assert.deepEqual([...mod.pidsAlive([process.pid, 99_999_999, 0, -1])], [process.pid]);
   assert.doesNotMatch(readFileSync(PLUGIN, "utf8"), /\/bin\/ps/);
+});
+
+test("страница 1.4.0: у агентов → срок горит → остальные по статусам; плитка — что требует внимания; приоритет; лимит", () => {
+  const now = Date.parse("2026-11-10T12:00:00Z");
+  const day = 24 * 3600_000;
+  const T = (id, o = {}) => ({ id, customId: null, name: `Тикет ${id}`, status: "to do", statusColor: null, statusType: "open", url: `https://app.clickup.com/t/${id}`, list: "Спринт", updatedMs: now - 1000, dueMs: null, priority: null, ...o });
+  const tasks = [
+    T("a1", { status: "in progress", statusType: "custom" }),
+    T("d1", { dueMs: now - day, priority: "urgent" }),
+    T("d2", { dueMs: now + 2 * day }),
+    T("w1", { dueMs: now + 5 * day }),
+    T("r1", { status: "in progress", statusType: "custom" }),
+    T("r2", { priority: "high", updatedMs: now - 5000 }),
+    T("r3"),
+  ];
+  const links = new Map([["a1", [{ kind: "night", confidence: "certain", text: "ночь: прогон идёт" }]]]);
+  const r = { tasks, links, fetchedAt: now, mode: "token", rate: null, error: null, oauth: null, denied: null };
+  const p = parseOutput(mod.render(r, { nowMs: now, lang: "ru" }));
+  assert.equal(p.header[0].title, "ClickUp: 7 тикетов · у агентов 1 · просрочено 1");
+  assert.equal(p.header[0].params.tile, "1 у агентов");
+  const t = p.body.map((i) => i.title);
+  const at = (s) => t.indexOf(s);
+  assert.ok(at("У агентов · 1") < at("Тикет a1") && at("Тикет a1") < at("Срок горит · 2"));
+  assert.ok(at("Тикет d1") < at("Тикет d2"), "срок горит — по сроку");
+  assert.ok(p.body.some((i) => i.title === "просрочен: срок вчера" && i.params.color === "red"));
+  assert.ok(p.body.some((i) => i.title === "d1 · Спринт · срочно"), "приоритет — в строке номера");
+  assert.ok(at("Остальные · 4") > at("Тикет d2"));
+  assert.ok(at("in progress · 1") < at("to do · 3"), "в работе — раньше открытых");
+  assert.ok(at("Тикет r2") < at("Тикет w1") && at("Тикет r2") < at("Тикет r3"), "высокий приоритет — выше");
+  const cards = p.body.filter((i) => i.params.stat);
+  assert.deepEqual(cards.map((c) => [c.params.stat, c.title]), [["У агентов", "1"], ["Просрочено", "1"], ["Срок на неделе", "2"], ["Открытых", "7"]]);
+  assert.equal(cards[2].params.note, "ближайший — 12.11");
+  // плитка без агентов — просроченные, без них — число открытых
+  assert.equal(mod.tileText(5, 0, 2), "2 просрочено");
+  assert.equal(mod.tileText(5, 0, 0), "5");
+  // лимит: у агентов и срок горит видны всегда, остальные режутся
+  const small = parseOutput(mod.render(r, { nowMs: now, lang: "ru", limit: 4 }));
+  assert.ok(small.body.some((i) => i.title === "…и ещё 3 — в ClickUp"));
+  // en
+  const en = parseOutput(mod.render(r, { nowMs: now, lang: "en" }));
+  assert.equal(en.header[0].title, "ClickUp: 7 tickets · 1 with agents · 1 overdue");
+  assert.ok(en.body.some((i) => i.title === "Due soon · 2"));
+  // приоритет из ответа ClickUp: объект, строка, число
+  assert.equal(mod.pickPriority({ priority: "urgent", color: "#f00" }), "urgent");
+  assert.equal(mod.pickPriority("HIGH"), "high");
+  assert.equal(mod.pickPriority(3), "normal");
+  assert.equal(mod.pickPriority({ priority: "мусор" }), null);
 });

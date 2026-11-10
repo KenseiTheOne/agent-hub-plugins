@@ -88,7 +88,7 @@ const titles = (p) => [...p.header, ...p.body].map((i) => i.title);
 test("метаданные 1.3.0 (контракт 2): net mcp.clickup.com и api.clickup.com, подключение объявляет сам плагин, значок, сбои входа — общий вид problems (своего переключателя нет)", () => {
   const pm = readPluginMeta(PLUGIN);
   assert.deepEqual(pm.warnings, []);
-  assert.equal(pm.meta.version, "1.3.0");
+  assert.equal(pm.meta.version, "1.4.0");
   assert.equal(pm.meta.contract, 2);
   assert.deepEqual(pm.meta.icon, { symbol: "checklist", color: "#FF375F" });
   const nets = pm.meta.net.map((x) => x.split(" — ")[0]);
@@ -248,7 +248,7 @@ test("незнакомая форма ответа инструмента → un
 
 test("разбор ответа: structuredContent, массив, статус строкой, даты ISO и секунды; аргументы из настроек", () => {
   const t = mod.tasksFromMcp({ structuredContent: { tasks: [{ id: 42, name: "A", status: "open", list: "Бэклог", date_updated: "2026-11-09T10:00:00Z", due_date: 1_800_000_000 }] } });
-  assert.deepEqual(t[0], { id: "42", customId: null, name: "A", status: "open", statusColor: null, statusType: null, url: "https://app.clickup.com/t/42", list: "Бэклог", updatedMs: Date.parse("2026-11-09T10:00:00Z"), dueMs: 1_800_000_000_000 });
+  assert.deepEqual(t[0], { id: "42", customId: null, name: "A", status: "open", statusColor: null, statusType: null, url: "https://app.clickup.com/t/42", list: "Бэклог", updatedMs: Date.parse("2026-11-09T10:00:00Z"), dueMs: 1_800_000_000_000, priority: null });
   assert.equal(mod.tasksFromMcp({ content: [{ type: "text", text: JSON.stringify([{ id: "x", name: "B", url: "https://evil.example/" }]) }] })[0].url, "https://app.clickup.com/t/x");
   assert.throws(() => mod.tasksFromMcp({ content: [{ type: "text", text: JSON.stringify({ tasks: [{ name: "без id" }] }) }] }), (e) => e.reason === "task-no-id");
   assert.deepEqual(mod.mcpArgs({ assignee: null, listIds: ["12", "x"], teamIds: ["900", "901"] }), { include_closed: false, subtasks: true, order_by: "updated", fields: mod.MCP_FIELDS, list_ids: ["12"], workspace_id: "900" });
