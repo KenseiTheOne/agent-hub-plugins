@@ -1,23 +1,29 @@
-// Архив плагина: tar (ustar) + gzip, только node:*. Писатель детерминирован (сортировка, mtime 0, uid/gid 0,
-// права 0644/0755), читатель строгий: только обычные файлы и каталоги внутри <id>/, без ссылок, `..`,
-// абсолютных путей и обратных слешей, с пределами на размер и число файлов.
+// Plugin archive: tar (ustar) + gzip, node:* only. The writer is deterministic (sorting, mtime 0, uid/gid 0,
+// modes 0644/0755), the reader is strict: only regular files and directories inside <id>/, no links, `..`,
+// absolute paths or backslashes, with limits on size and file count.
 //
-// Модуль самодостаточен: его же копирует реестр agent-hub-plugins (scripts/vendor/) для сборки архивов.
+// The module is self-contained: the agent-hub-plugins registry copies it (scripts/vendor/) to build archives.
 
 import { gunzipSync, gzipSync } from "node:zlib";
 
 const BLOCK = 512;
 export const LIMITS = Object.freeze({ maxFiles: 200, maxFileBytes: 2 * 1024 * 1024, maxTotalBytes: 8 * 1024 * 1024 });
 
+// Reader errors: an English message plus msgKey/params — the hub shows them in its language (lib/i18n.mjs errText, keys
+// tar.*); the module stays self-contained.
+function tarError(msgKey, params, text) {
+  return Object.assign(new Error(text), { msgKey: `tar.${msgKey}`, params });
+}
+
 function writeStr(buf, off, len, s) {
   const b = Buffer.from(s, "utf8");
-  if (b.length > len) throw new Error(`поле tar длиннее ${len}: ${s}`);
+  if (b.length > len) throw new Error(`tar field longer than ${len}: ${s}`);
   b.copy(buf, off);
 }
 
 function writeOctal(buf, off, len, n) {
   const s = n.toString(8).padStart(len - 1, "0");
-  if (s.length > len - 1) throw new Error("число не влезает в поле tar");
+  if (s.length > len - 1) throw new Error("number does not fit the tar field");
   writeStr(buf, off, len, s + "\0");
 }
 
@@ -29,7 +35,7 @@ function splitName(path) {
     const name = path.slice(j + 1);
     if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(name) <= 100) return { name, prefix };
   }
-  throw new Error(`путь слишком длинный для ustar: ${path}`);
+  throw new Error(`path too long for ustar: ${path}`);
 }
 
 function header(path, { size, mode, type }) {
@@ -52,7 +58,7 @@ function header(path, { size, mode, type }) {
   return h;
 }
 
-// Безопасный относительный путь архива: a/b/c, без пустых сегментов, `.`/`..`, `\`, NUL, двоеточий.
+// A safe relative archive path: a/b/c, no empty segments, `.`/`..`, `\`, NUL or colons.
 export function safeRelPath(p) {
   if (typeof p !== "string" || !p || p.length > 255) return false;
   if (p.startsWith("/") || p.includes("\\") || p.includes("\0") || p.includes(":")) return false;
@@ -65,7 +71,7 @@ export function packTarGz(entries) {
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const dirs = new Set();
   for (const f of files) {
-    if (!safeRelPath(f.path)) throw new Error(`недопустимый путь: ${f.path}`);
+    if (!safeRelPath(f.path)) throw new Error(`invalid path: ${f.path}`);
     const segs = f.path.split("/");
     for (let i = 1; i < segs.length; i++) dirs.add(segs.slice(0, i).join("/") + "/");
   }
@@ -80,7 +86,7 @@ export function packTarGz(entries) {
   }
   parts.push(Buffer.alloc(BLOCK * 2, 0));
   const gz = gzipSync(Buffer.concat(parts), { level: 9 });
-  gz[9] = 3; // байт ОС в заголовке gzip: всегда «Unix», чтобы архив не зависел от платформы сборки
+  gz[9] = 3; // OS byte in the gzip header: always "Unix", so the archive doesn't depend on the build platform
   return gz;
 }
 
@@ -91,18 +97,18 @@ function readStr(buf, off, len) {
 
 function readOctal(buf, off, len) {
   const s = readStr(buf, off, len).trim();
-  if (!/^[0-7]*$/.test(s)) throw new Error("tar: число не восьмеричное");
+  if (!/^[0-7]*$/.test(s)) throw tarError("octal", {}, "tar: number is not octal");
   return s ? parseInt(s, 8) : 0;
 }
 
-// → [{ path, data: Buffer, mode }] — только файлы; бросает Error при любой странности.
-// root — обязательный первый сегмент всех путей (id плагина).
+// → [{ path, data: Buffer, mode }] — files only; throws Error on any oddity.
+// root — a mandatory first segment of all paths (the plugin id).
 export function readTarGz(gz, { root, limits = LIMITS } = {}) {
   let tar;
   try {
     tar = gunzipSync(gz, { maxOutputLength: limits.maxTotalBytes + 64 * 1024 + limits.maxFiles * 2 * BLOCK });
   } catch (e) {
-    throw new Error(`gzip: ${e.code === "ERR_BUFFER_TOO_LARGE" ? "слишком большой" : "битый"}`);
+    throw e.code === "ERR_BUFFER_TOO_LARGE" ? tarError("gzipBig", {}, "gzip: too large") : tarError("gzipBroken", {}, "gzip: corrupt");
   }
   const out = [];
   const seen = new Set();
@@ -114,8 +120,8 @@ export function readTarGz(gz, { root, limits = LIMITS } = {}) {
     const stored = readOctal(h, 148, 8);
     let sum = 0;
     for (let i = 0; i < BLOCK; i++) sum += i >= 148 && i < 156 ? 0x20 : h[i];
-    if (sum !== stored) throw new Error("tar: контрольная сумма заголовка");
-    if (readStr(h, 257, 6) !== "ustar") throw new Error("tar: не ustar");
+    if (sum !== stored) throw tarError("checksum", {}, "tar: header checksum");
+    if (readStr(h, 257, 6) !== "ustar") throw tarError("notUstar", {}, "tar: not ustar");
     const type = String.fromCharCode(h[156] || 0x30);
     const prefix = readStr(h, 345, 155);
     const name = readStr(h, 0, 100);
@@ -125,20 +131,20 @@ export function readTarGz(gz, { root, limits = LIMITS } = {}) {
     off += BLOCK;
     if (type === "5") {
       const d = full.replace(/\/$/, "");
-      if (!safeRelPath(d) || (root && d.split("/")[0] !== root)) throw new Error(`tar: каталог вне ${root}: ${full}`);
-      if (size !== 0) throw new Error("tar: каталог с размером");
+      if (!safeRelPath(d) || (root && d.split("/")[0] !== root)) throw tarError("dirOutside", { root, path: full }, `tar: directory outside ${root}: ${full}`);
+      if (size !== 0) throw tarError("dirSize", {}, "tar: directory with a size");
       continue;
     }
-    if (type !== "0") throw new Error(`tar: тип записи «${type}» запрещён (только файлы и каталоги): ${full}`);
-    if (!safeRelPath(full)) throw new Error(`tar: недопустимый путь ${full}`);
-    if (root && (full.split("/")[0] !== root || !full.includes("/"))) throw new Error(`tar: путь вне ${root}/: ${full}`);
-    if (seen.has(full)) throw new Error(`tar: повтор ${full}`);
-    if (size > limits.maxFileBytes) throw new Error(`tar: файл больше предела: ${full}`);
+    if (type !== "0") throw tarError("type", { type, path: full }, `tar: entry type "${type}" is not allowed (files and directories only): ${full}`);
+    if (!safeRelPath(full)) throw tarError("path", { path: full }, `tar: invalid path ${full}`);
+    if (root && (full.split("/")[0] !== root || !full.includes("/"))) throw tarError("outside", { root, path: full }, `tar: path outside ${root}/: ${full}`);
+    if (seen.has(full)) throw tarError("dup", { path: full }, `tar: duplicate ${full}`);
+    if (size > limits.maxFileBytes) throw tarError("fileBig", { path: full }, `tar: file over the limit: ${full}`);
     total += size;
-    if (total > limits.maxTotalBytes) throw new Error("tar: архив больше предела");
-    if (off + size > tar.length) throw new Error("tar: обрезан");
+    if (total > limits.maxTotalBytes) throw tarError("totalBig", {}, "tar: archive over the limit");
+    if (off + size > tar.length) throw tarError("truncated", {}, "tar: truncated");
     seen.add(full);
-    if (seen.size > limits.maxFiles) throw new Error("tar: слишком много файлов");
+    if (seen.size > limits.maxFiles) throw tarError("tooMany", {}, "tar: too many files");
     out.push({ path: full, data: Buffer.from(tar.subarray(off, off + size)), mode: mode & 0o111 ? 0o755 : 0o644 });
     off += Math.ceil(size / BLOCK) * BLOCK;
   }

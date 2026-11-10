@@ -1,11 +1,15 @@
-# Фикстуры плагина claude-code
+# claude-code plugin fixtures
 
-Синтетические данные, ничего настоящего: id сессий, pid, пути `/work/*`, стили и плагин `demo-plugin` выдуманы.
+Synthetic data, nothing real: session ids, pids, the `/work/*` paths, the styles and the `demo-plugin` plugin are made
+up.
 
-- `home/` — HOME для пробного запуска `scripts/check.sh` и тестов: `.local/bin/claude` (пустой файл — «Claude Code
-  установлен»), `.claude/settings.json` (с маркерами `fixture-secret-do-not-print` — плагин не должен их печатать),
-  `.claude/output-styles`, `.claude/plugins` (`installPath` содержит `HOME_PLACEHOLDER` — тесты подставляют путь),
-  `.claude/sessions/*.json`, `.cmuxterm/claude-hook-sessions.json` (маркер текста переписки в `lastBody`).
-- `hub-sessions.json` — файл хаба с моделью и effort сессий (`$AGENTHUB_CLAUDE_SESSIONS_FILE`, заявка хабу 10.11).
+- `home/` — HOME for the `scripts/check.sh` trial run and the tests: `.local/bin/claude` (an empty file — "Claude Code
+  is installed"), `.claude/settings.json` (with `fixture-secret-do-not-print` markers — the plugin must not print
+  them), `.claude/output-styles`, `.claude/plugins` (`installPath` contains `HOME_PLACEHOLDER` — the tests substitute
+  the path), `.claude/sessions/*.json`, `.cmuxterm/claude-hook-sessions.json` (a trap: since 1.1.0 the plugin doesn't
+  read terminal files; the conversation text marker in `lastBody` must not reach the output).
+- `hub-sessions.json` — the hub's file with the sessions' model and effort (`$AGENTHUB_CLAUDE_SESSIONS_FILE`,
+  contract 3).
 
-Процессы (`ps`) и cmux в тестах — двойники-скрипты в `AGENTHUB_TEST_BIN_DIR`.
+Processes (`ps`) in the tests are a double script in `AGENTHUB_TEST_BIN_DIR`; the hub's terminal is a hub socket
+double that the test starts in HOME (`hub.sock`).

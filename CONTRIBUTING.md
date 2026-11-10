@@ -1,159 +1,169 @@
-# Как прислать плагин
+# How to submit a plugin
 
-Контракт плагина — что хаб понимает в метаданных и выводе — лежит копией в [docs/contract/](docs/contract/README.md)
-(копия документации agent-hub, обновляет `node scripts/sync-vendor.mjs`; руками не править). Ссылки
-`docs/extension-points.md` и т. п. ниже — на эту копию.
+**Start with the plugin author guide: [docs/contract/writing-plugins.md](docs/contract/writing-plugins.md).**
 
-## Что можно стороннему плагину
+The plugin contract — what the hub understands in metadata and output — is kept as a copy in
+[docs/contract/](docs/contract/README.md) (a copy of the agent-hub documentation, updated by
+`node scripts/sync-vendor.mjs`; do not edit by hand). References to `docs/extension-points.md` and the like below
+point to this copy.
 
-- Показывать статусы: вывод в формате SwiftBar (`Заголовок | ключ=значение`, шапка до `---`).
-- Предлагать только безопасные примитивы ядра: `open.*` (открыть ссылку/файл) и `cmux.focus` (перейти во
-  вкладку) — у всех плагинов реестра, в том числе официальных. Ответы сессиям, остановки и запуски сессий —
-  примитивы ядра только для встроенных плагинов приложения. Объявленные действия `<agenthub.action>` — только у
-  плагинов с меткой `official` (`official.json`, правит владелец), уровень не ниже `confirm`. Тоже только у
-  `official`: правила push `<agenthub.push>` (у стороннего хаб их игнорирует, события идут видом «Прочее», только
-  macOS и без текста плагина) и подключения `<agenthub.connection>` (у стороннего — ошибка линтера). Уровень (tier)
-  демон берёт из подписанного индекса, не из метаданных; потолок держит сам, что бы ни стояло в метаданных.
-- Запретные места (`~/.claude/projects`, `*.key`, `.env`, `auth.json`, `workstream.jsonl`) — ошибка линтера для
-  всех, исключений по метке нет (README и прочие файлы архива тоже проверяются).
-- `bash=`, `shell=`, `terminal=` в выводе не работают: вывод не может запустить команду.
+## What a third-party plugin may do
 
-## Структура
+- Show statuses: output in SwiftBar format (`Title | key=value`, header up to `---`).
+- Offer only safe core primitives: `open.*` (open a link/file) and `session.focus` (switch to a session's tab) — for
+  all registry plugins, official ones included. Use `session.focus <sessionId>` (contract 3): the hub finds the tab
+  itself. `cmux.focus <surfaceId>` is still allowed but deprecated, kept for compatibility with already installed
+  plugins. Replies to sessions, stopping and launching sessions are core primitives only for the app's built-in
+  plugins. Declared actions `<agenthub.action>` — only for plugins labelled `official` (`official.json`, edited by
+  the owner), level no lower than `confirm`. Also only for `official`: push rules `<agenthub.push>` (for a third-party
+  plugin the hub ignores them; events go as kind "Other", macOS only and without the plugin's text) and connections
+  `<agenthub.connection>` (for a third-party plugin — a linter error). The daemon takes the tier from the signed
+  index, not from the metadata; it enforces the ceiling itself, whatever the metadata says.
+- Forbidden locations (`~/.claude/projects`, `*.key`, `.env`, `auth.json`, `workstream.jsonl`) are a linter error
+  for everyone, with no exceptions by label (README and other archive files are checked too).
+- `bash=`, `shell=`, `terminal=` in the output do not work: output cannot run a command.
+
+## Structure
 
 ```
 plugins/<id>/
-  <id>.<интервал>.<расширение>   ← .mjs/.js/.cjs/.py/.sh/.bash/.zsh — только текст, бинарники не принимаются
+  <id>.<interval>.<extension>   ← .mjs/.js/.cjs/.py/.sh/.bash/.zsh — text only, binaries are not accepted
   README.md
-  fixtures/home/                 ← синтетический HOME: файлы той же формы, что настоящие, но без личных данных
+  fixtures/home/                 ← synthetic HOME: files of the same shape as the real ones, but without personal data
   test/*.test.mjs
 ```
 
-`id` — `a-z`, `0-9`, `-`, до 64 символов; имя папки = `id` = имя файла до интервала.
+`id` — `a-z`, `0-9`, `-`, up to 64 characters; folder name = `id` = file name before the interval.
 
-## Метаданные и права
+## Metadata and permissions
 
 ```
-# <agenthub.title>Мой плагин</agenthub.title>  <agenthub.version>1.0.0</agenthub.version>
-# <agenthub.author.name>Имя</agenthub.author.name>  <agenthub.author.github>login</agenthub.author.github>
+# <agenthub.title>My plugin</agenthub.title>  <agenthub.version>1.0.0</agenthub.version>
+# <agenthub.author.name>Name</agenthub.author.name>  <agenthub.author.github>login</agenthub.author.github>
 # <agenthub.platforms>macos,windows</agenthub.platforms>
-# <agenthub.fsRead>~/.config/tool/state.json — показать состояние</agenthub.fsRead>
-# <agenthub.net>api.example.com — статус сервиса</agenthub.net>
+# <agenthub.fsRead>~/.config/tool/state.json — show the state</agenthub.fsRead>
+# <agenthub.net>api.example.com — service status</agenthub.net>
 # <agenthub.effects>open.url</agenthub.effects>
 ```
 
-- Автор: `author.github` обязателен (логин GitHub — менеджер плагинов делает из него ссылку на профиль),
-  `author.name` — как подписываться в карточке каталога (показывается первым; без него — логин).
-- Каждое право (`fsRead`, `fsWrite`, `exec`, `secrets`, `net`) — с пояснением после ` — `: его видит
-  пользователь в окне прав.
-- Запрещено объявлять и упоминать в коде: `~/.claude/projects` (текст переписки), `*.key`, `.env`,
-  `auth.json`, `~/.cmuxterm/workstream.jsonl`, а также каталоги и маски, которые их охватывают
-  (`~/.claude`, `~/.claude/*`, `~/.claude/sessions` целиком).
-- Рост прав в обновлении (новое право, новый effect) виден в PR как дифф и требует второго ревьюера; у
-  пользователя обновление не применится, пока он снова не согласится. Право — это «что» до ` — `: оно же ключ,
-  переводится только «зачем» (`lang="en"`). Поэтому «что» пишите язык-нейтрально — путь, команда, хост
-  (`<session cwd>/.git/HEAD`, `--task <project>:<id>`), без русских слов; смена «что» — тоже рост прав.
-- Зависимость — внешняя программа, без которой плагин бесполезен:
-  `<agenthub.requires name="Hermes" url="https://…" check="~/.hermes">зачем</agenthub.requires>` (перевод —
-  тот же тег с `lang="en"` и тем же `name`). Каталог в менеджере покажет «Нужен Hermes» со ссылкой `url`; нет пути
-  `check` в домашнем каталоге — кнопка «Установить» приглушена с подсказкой (поставить всё равно можно). Это не
-  право: хаб только проверяет, есть ли путь. `url` — только `https://`, `check` — `~/…` или абсолютный путь без
-  масок; запретные места (выше) и здесь — ошибка линтера.
-- Любая правка файлов, попадающих в архив (код, README, `lib/` — всё, кроме `test/`, `fixtures/` и dot-файлов),
-  требует новой `version`: CI сверяет с базой PR, а сборка каталога — с опубликованным индексом.
+- Author: `author.github` is required (the GitHub login — the plugin manager turns it into a profile link),
+  `author.name` — how to sign in the catalog card (shown first; without it — the login).
+- Every permission (`fsRead`, `fsWrite`, `exec`, `secrets`, `net`) comes with an explanation after ` — `: the user
+  sees it in the permissions window.
+- It is forbidden to declare or mention in code: `~/.claude/projects` (conversation text), `*.key`, `.env`,
+  `auth.json`, `~/.cmuxterm/workstream.jsonl`, as well as directories and masks that cover them
+  (`~/.claude`, `~/.claude/*`, `~/.claude/sessions` as a whole).
+- Permission growth in an update (a new permission, a new effect) shows up in the PR as a diff and needs a second
+  reviewer; for the user, the update does not apply until they agree again. The permission is the "what" before
+  ` — `: it is also the key, only the "why" is translated (`lang="en"`). So write the "what" language-neutrally — a
+  path, a command, a host (`<session cwd>/.git/HEAD`, `--task <project>:<id>`), without Russian words; changing the
+  "what" is permission growth too.
+- A dependency is an external program without which the plugin is useless:
+  `<agenthub.requires name="Hermes" url="https://…" check="~/.hermes">why</agenthub.requires>` (translation — the
+  same tag with `lang="en"` and the same `name`). The catalog in the manager shows "Requires Hermes" with the `url`
+  link; if the `check` path is missing in the home directory, the "Install" button is dimmed with a hint (installing
+  is still possible). This is not a permission: the hub only checks whether the path exists. `url` — `https://` only,
+  `check` — `~/…` or an absolute path without masks; forbidden locations (above) are a linter error here too.
+- Any change to files that go into the archive (code, README, `lib/` — everything except `test/`, `fixtures/` and dot
+  files) requires a new `version`: CI compares with the PR base, and the catalog build with the published index.
 
-## Контракт 2: что плагин объявляет о себе сам
+## Contract 2: what a plugin declares about itself
 
-Хаб не знает ни одного конкретного плагина — ни названий, ни значков, ни видов уведомлений, ни текстов ошибок
-(`docs/contract/extension-points.md`, «Версии контракта»). Всё плагинное — из метаданных и вывода. `<agenthub.contract>`
-и `<agenthub.icon>` — для любого плагина; `<agenthub.push>`, `<agenthub.connection>` и `message=` у действий — только
-для официальных (выше, «Что можно стороннему плагину»):
+The hub does not know any specific plugin — no names, icons, notification kinds or error texts
+(`docs/contract/extension-points.md`, "Contract versions"). Everything plugin-specific comes from metadata and output.
+`<agenthub.contract>` and `<agenthub.icon>` — for any plugin; `<agenthub.push>`, `<agenthub.connection>` and
+`message=` on actions — only for official ones (above, "What a third-party plugin may do"):
 
 ```
-# <agenthub.contract>2</agenthub.contract>                               ← минимальная версия контракта хаба
-# <agenthub.icon symbol="checklist" color="#FF375F"></agenthub.icon>     ← значок плитки (SF Symbol, #RRGGBB)
-# <agenthub.push key="job-failed" kind="plugin">Задача упала</agenthub.push>   ← свой переключатель уведомлений
-# <agenthub.connection id="<id>" type="mcp" url="https://…" scope="read" tools="…" interval="15m" budget="100" title="…">зачем</agenthub.connection>
+# <agenthub.contract>2</agenthub.contract>                               ← minimum hub contract version
+# <agenthub.icon symbol="checklist" color="#FF375F"></agenthub.icon>     ← tile icon (SF Symbol, #RRGGBB)
+# <agenthub.push key="job-failed" kind="plugin">Job failed</agenthub.push>   ← own notification toggle
+# <agenthub.connection id="<id>" type="mcp" url="https://…" scope="read" tools="…" interval="15m" budget="100" title="…">why</agenthub.connection>
 ```
 
-- `<agenthub.contract>2` — объявляйте, если пользуетесь чем-то из контракта 2: хаб версии 2 и новее с контрактом
-  старше покажет «Нужен хаб новее» и не поставит, а не примет плагин молча. Хабы контракта 1 (до 10.11) тег не знают и
-  поставят плагин, потеряв новые теги, — такие плагины публикуются только после обновления хаба
-  (`docs/contract/extension-points.md`, «Версии контракта»). `scripts/check.sh` предупреждает, если возможность контракта 2 есть, а
-  тега нет.
-- `<agenthub.icon>` — без него у плитки нейтральный серый значок. Тег закрывать обязательно.
-- `kind="plugin"` у `<agenthub.push>` (только `official`) — строка с названием плагина в «Настройках → Уведомления»
-  (её хаб строит из установленного доверенного плагина; у стороннего правила игнорируются). Устаревшие `kind="runs"` / `kind="night"` работают с предупреждением; при переходе пишите
-  `kind="plugin" was="runs|night"` — выбор пользователя, выключившего прежний вид, перенесётся.
-- `<agenthub.connection>` (только `official`; у стороннего — ошибка линтера) — вход в сервис и вызовы его MCP-сервера
-  ведёт хаб, плагин токена не видит. `id` — id плагина (по умолчанию) или `<id плагина>.<имя>` (имя: a-z, 0-9, «-»,
-  с буквы, до 32; целиком — с буквы, до 64). `url` — https на имени хоста (не IP-адрес), без порта; хост `url` и
-  `hosts` обязаны быть в `<agenthub.net>`, `tools` — только инструменты, которые плагин действительно зовёт. Это право вида
-  `connections`: новое подключение или новый инструмент — рост прав (окно согласия).
-- Отказ действия (действия — только у `official`): перед последней строкой `reason=<код>` печатайте `message=<текст>` на языке хаба
-  (`AGENTHUB_LANG`), до 120 знаков, без названия кнопки — оболочка покажет «"кнопка": текст». Без `message=` человек
-  увидит только «плагин отказал (<код>)».
+- `<agenthub.contract>2` — declare it if you use anything from contract 2: a hub of version 2 or newer with an older
+  contract shows "Newer hub required" and does not install, rather than accepting the plugin silently. Contract 1 hubs
+  (before 10.11) do not know the tag and install the plugin, losing the new tags — such plugins are published only
+  after the hub is updated (`docs/contract/extension-points.md`, "Contract versions"). `scripts/check.sh` warns if a
+  contract 2 feature is used but the tag is missing.
+- `<agenthub.icon>` — without it, the tile gets a neutral grey icon. The tag must be closed.
+- `kind="plugin"` on `<agenthub.push>` (`official` only) — a row with the plugin's name in "Settings → Notifications"
+  (the hub builds it from the installed trusted plugin; for a third-party plugin the rules are ignored). The legacy
+  `kind="runs"` / `kind="night"` work with a warning; when migrating, write `kind="plugin" was="runs|night"` — the
+  choice of a user who turned off the old kind carries over.
+- `<agenthub.connection>` (`official` only; for a third-party plugin — a linter error) — the hub handles signing in
+  to the service and calls to its MCP server; the plugin never sees the token. `id` — the plugin id (by default) or
+  `<plugin id>.<name>` (name: a-z, 0-9, "-", starting with a letter, up to 32; whole id — starting with a letter, up
+  to 64). `url` — https on a host name (not an IP address), without a port; the `url` host and `hosts` must be in
+  `<agenthub.net>`, `tools` — only the tools the plugin actually calls. This is a permission of the `connections`
+  kind: a new connection or a new tool is permission growth (consent window).
+- Action refusal (actions — `official` only): before the last line `reason=<code>`, print `message=<text>` in the
+  hub's language (`AGENTHUB_LANG`), up to 120 characters, without the button name — the shell shows
+  "\"button\": text". Without `message=` the person only sees "plugin refused (<code>)".
 
-## Данные хаба
+## Hub data
 
-- Квота подписки Claude — из кэша хаба, а не из чужих кэшей (kensei-statusline и т.п.): служба ядра `usage` раз в
-  3 мин пишет `<home>/Cache/usage.json`, и хаб передаёт путь в `AGENTHUB_USAGE_FILE` — **только встроенным и
-  официальным** плагинам (сообществу и `Plugins/local` переменной нет). Формат: `{version: 1, fetched_at,
-  checked_at, error, rows: [{kind, group, percent, severity, resets_at, scope?: {model: {display_name}}, label?}]}`;
-  `fetched_at`/`checked_at` — секунды эпохи, `error` — код (`no-token`, `token-expired`, `http-429`, `network`, …)
-  или `null`. Токенов в файле нет. При ошибке служба оставляет строки прошлого успеха: строку, чей `resets_at` уже
-  прошёл, не учитывайте (неделя сброшена), а возраст данных берите из `fetched_at`. Нет переменной — служба выключена или хаб старый: покажите «квота
-  недоступна», не ищите файл сами. Право объявляйте так:
-  `<agenthub.fsRead>$AGENTHUB_USAGE_FILE — зачем</agenthub.fsRead>`. В тестах кладите синтетический файл и
-  передавайте путь в `AGENTHUB_USAGE_FILE`.
+- The Claude subscription quota comes from the hub's cache, not from other tools' caches (kensei-statusline etc.):
+  the core `usage` service writes `<home>/Cache/usage.json` every 3 min, and the hub passes the path in
+  `AGENTHUB_USAGE_FILE` — **only to built-in and official** plugins (community plugins and `Plugins/local` do not get
+  the variable). Format: `{version: 1, fetched_at, checked_at, error, rows: [{kind, group, percent, severity,
+  resets_at, scope?: {model: {display_name}}, label?}]}`; `fetched_at`/`checked_at` — epoch seconds, `error` — a code
+  (`no-token`, `token-expired`, `http-429`, `network`, …) or `null`. There are no tokens in the file. On error the
+  service keeps the rows of the last success: ignore a row whose `resets_at` has already passed (the week was reset),
+  and take the data age from `fetched_at`. No variable — the service is off or the hub is old: show "quota
+  unavailable", do not look for the file yourself. Declare the permission like this:
+  `<agenthub.fsRead>$AGENTHUB_USAGE_FILE — why</agenthub.fsRead>`. In tests, put a synthetic file in place and pass
+  its path in `AGENTHUB_USAGE_FILE`.
 
-## Язык и понятный вывод
+## Language and clear output
 
-- Хаб передаёт плагину `AGENTHUB_LANG=ru|en` — язык, выбранный в приложении (Настройки → Язык: Системный /
-  Русский / English). При смене языка хаб перезапускает плагин. Плагин без перевода показывается как есть.
-- Переводы метаданных — тот же тег с `lang="xx"` (тег без `lang` — язык плагина по умолчанию):
+- The hub passes the plugin `AGENTHUB_LANG=ru|en` — the language chosen in the app (Settings → Language: System /
+  Russian / English). When the language changes, the hub restarts the plugin. A plugin without a translation is shown
+  as is.
+- Metadata translations — the same tag with `lang="xx"` (a tag without `lang` is the plugin's default language):
   ```
   # <agenthub.title>Мой плагин</agenthub.title>
   # <agenthub.title lang="en">My plugin</agenthub.title>
   # <agenthub.desc lang="en">What it shows, in one line</agenthub.desc>
-  # <agenthub.fsRead lang="en">~/.config/tool/state.json — show the state</agenthub.fsRead>   (только пояснение)
+  # <agenthub.fsRead lang="en">~/.config/tool/state.json — show the state</agenthub.fsRead>   (explanation only)
   # <agenthub.status value="wait" label="Сервис тормозит">пояснение</agenthub.status>
   # <agenthub.status value="wait" lang="en" label="Service is slow">explanation</agenthub.status>
   ```
-  У действия — атрибуты `title-en`, `cost-en`; у правила push — повтор `<agenthub.push key="…" lang="en">`.
-  `build-index.mjs` переносит в индекс (`i18n`) переводы названия, описания, «зачем» у прав (`why`) и названий
-  действий (`actions`); окно прав в хабе показывает их на языке хаба. У официального плагина у каждого права и
-  действия должен быть английский вариант (тест `build-index.test.mjs`). Сами права (что читается, что
-  запускается) от перевода не зависят: вариант с `lang` прав не добавляет. «Зачем» пишите для человека — какую
-  кнопку или строку это право обслуживает, без имён внутренних файлов и полей.
-- Шапка (первая строка) отвечает на «нужно ли мне что-то делать и что происходит» простыми словами, без
-  внутреннего жаргона. Параметр шапки `tile="…"` — короткое значение для плитки поповера: что происходит
-  (`04:30`, `2 ждут`, `62%`, `3 задачи`, `1 проблема`), а не `!` — тревогу и так показывает значок статуса.
-- Технические детали (номера процессов, cron-строки, id) — во второй уровень, свёрнутым: строка
-  `--Подробности | details=true`, под ней `----процесс 123`.
-- Раскладка страницы плагина (по прототипу): `stat="Подпись"` — карточка-цифра (заголовок строки — значение,
-  `note=` — строка под ним, `color=` — её цвет; подряд идущие — рядом); `gauge=0…100` — карточка с полосой
-  (`note=` справа), в первой строке шапки — кольцо (`gaugeLabel=` под числом); `strip=true` — дети строки лентой
-  ячеек (`sfimage`, заголовок, `note`).
-- Свои ярлыки статусов (`<agenthub.status>`) делайте однозначными для своего плагина: «ждёт» у квоты и у
-  сессий значит разное.
+  For an action — the `title-en`, `cost-en` attributes; for a push rule — a repeated
+  `<agenthub.push key="…" lang="en">`. `build-index.mjs` carries into the index (`i18n`) the translations of the
+  title, the description, the "why" of permissions (`why`) and action titles (`actions`); the hub's permissions window
+  shows them in the hub's language. An official plugin must have an English variant for every permission and action
+  (test `build-index.test.mjs`). The permissions themselves (what is read, what is run) do not depend on the
+  translation: a `lang` variant adds no permissions. Write the "why" for a person — which button or line this
+  permission serves, without names of internal files and fields.
+- The header (first line) answers "do I need to do anything and what is going on" in plain words, without internal
+  jargon. The header parameter `tile="…"` is a short value for the popover tile: what is happening (`04:30`,
+  `2 waiting`, `62%`, `3 tasks`, `1 problem`), not `!` — the status icon already shows the alarm.
+- Technical details (process numbers, cron strings, ids) go to the second level, collapsed: a line
+  `--Details | details=true`, under it `----process 123`.
+- Plugin page layout (per the prototype): `stat="Label"` — a number card (the line title is the value, `note=` — the
+  line under it, `color=` — its colour; consecutive ones sit side by side); `gauge=0…100` — a card with a bar
+  (`note=` on the right), in the first header line — a ring (`gaugeLabel=` under the number); `strip=true` — the
+  line's children as a strip of cells (`sfimage`, title, `note`).
+- Make your own status labels (`<agenthub.status>`) unambiguous for your plugin: "waiting" means different things for
+  a quota and for sessions.
 
-## Тесты
+## Tests
 
-- Плагин должен работать на синтетическом HOME из `fixtures/home` — CI запускает его с `HOME`, указывающим
-  на копию этой папки, с очищенным окружением, как демон.
-- Тесты (`test/*.test.mjs`, `node:test`) получают `HOME`, `AGENTHUB_PLUGIN_FILE` (путь к плагину) и
-  `AGENTHUB_FIXTURES`. **Без сети и без секретов**: в PR их нет.
-- Фикстуры — синтетические: никаких реальных идентификаторов сессий, путей с именами людей, токенов, текста
-  переписки.
+- The plugin must work on the synthetic HOME from `fixtures/home` — CI runs it with `HOME` pointing to a copy of
+  this folder, with a cleared environment, like the daemon.
+- Tests (`test/*.test.mjs`, `node:test`) get `HOME`, `AGENTHUB_PLUGIN_FILE` (path to the plugin) and
+  `AGENTHUB_FIXTURES`. **No network and no secrets**: a PR has none.
+- Fixtures are synthetic: no real session identifiers, paths with people's names, tokens or conversation text.
 
-## Проверка перед PR
+## Checks before a PR
 
 ```sh
 scripts/check.sh --only <id>
 scripts/check.sh --base origin/main
 ```
 
-## Ревью
+## Review
 
-PR смотрит владелец (CODEOWNERS). Новые плагины и рост прав — второй ревьюер. `official.json`,
-`blocklist.json`, `scripts/`, `.github/` правит только владелец.
+PRs are reviewed by the owner (CODEOWNERS). New plugins and permission growth — a second reviewer. `official.json`,
+`blocklist.json`, `scripts/`, `.github/` are edited only by the owner.

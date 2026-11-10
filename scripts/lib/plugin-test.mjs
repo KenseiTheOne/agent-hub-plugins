@@ -1,5 +1,5 @@
-// Помощники тестов плагинов реестра (plugins/<id>/test/*.test.mjs): каталог плагина, временный HOME,
-// разборщики ядра из scripts/vendor/ (те же, что у демона). Тесты работают без сети и секретов.
+// Helpers for registry plugin tests (plugins/<id>/test/*.test.mjs): the plugin directory, a temporary HOME,
+// the core parsers from scripts/vendor/ (the same ones the daemon uses). Tests run without network or secrets.
 
 import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,19 +9,19 @@ import { fileURLToPath } from "node:url";
 export { parseOutput } from "../vendor/output.mjs";
 export { readPluginMeta, parseMetaText } from "../vendor/meta.mjs";
 
-// Каталог плагина по import.meta.url теста (plugins/<id>/test/x.test.mjs → plugins/<id>).
+// The plugin directory from the test's import.meta.url (plugins/<id>/test/x.test.mjs → plugins/<id>).
 export function pluginDir(testUrl) {
   return resolve(dirname(fileURLToPath(testUrl)), "..");
 }
 
-// Короткий реальный путь (/tmp → /private/tmp): плагины сравнивают пути по realpath.
+// A short real path (/tmp → /private/tmp): plugins compare paths by realpath.
 export function tempHome(prefix = "ahp-") {
   return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
 }
 
-// Окружение запуска плагина в тесте: синтетический HOME (и USERPROFILE — os.homedir() на Windows читает его, а не
-// HOME), PATH, extra поверх. На Windows — ещё SystemRoot/windir/COMSPEC/PATHEXT: без SystemRoot не
-// инициализируются сокеты (WSAEPROVIDERFAILEDINIT) и не стартуют процессы. Секретов здесь нет.
+// The environment for running a plugin in a test: a synthetic HOME (and USERPROFILE — on Windows os.homedir() reads it,
+// not HOME), PATH, with extra on top. On Windows also SystemRoot/windir/COMSPEC/PATHEXT: without SystemRoot sockets
+// don't initialize (WSAEPROVIDERFAILEDINIT) and processes don't start. No secrets here.
 export function testEnv(home, extra = {}) {
   const env = { HOME: home, PATH: process.platform === "win32" ? process.env.PATH || "" : "/usr/bin:/bin" };
   if (process.platform === "win32") {

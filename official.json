@@ -1,5 +1,5 @@
 {
-  "note": "Плагины с меткой official (tier official в подписанном индексе). Список правит только владелец реестра (CODEOWNERS).",
+  "note": "Plugins labelled official (tier official in the signed index). The list is edited only by the registry owner (CODEOWNERS).",
   "official": [
     "claude-code",
     "clickup",

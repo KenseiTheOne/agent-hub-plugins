@@ -1,6 +1,6 @@
-// clickup 1.2.0+: тикеты через вход в ClickUp (MCP) — запросы делает хаб, плагин зовёт его по сокету
-// (POST /connections/clickup/mcp). Хаб здесь — двойник на Unix-сокете во временном каталоге; в сеть не ходим.
-// Запуск: cd agent-hub-plugins && env -u NODE_OPTIONS node --test plugins/clickup/test/*.test.mjs
+// clickup 1.2.0+: tickets via the ClickUp sign-in (MCP) — the hub makes the requests, the plugin calls it over the socket
+// (POST /connections/clickup/mcp). The hub here is a double on a Unix socket in a temp folder; no network.
+// Run: cd agent-hub-plugins && env -u NODE_OPTIONS node --test plugins/clickup/test/*.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,11 +17,11 @@ const mod = await import(pathToFileURL(PLUGIN).href);
 const TOKEN = "pk_synthetic_test_token_0002";
 const fixTasks = () => JSON.parse(readFileSync(join(DIR, "fixtures", "tasks.json"), "utf8")).tasks;
 
-// Плагин зовёт хаб только по абсолютному Unix-сокету (AGENTHUB_HUB_SOCKET с «/»): на Windows хаба с сокетом нет,
-// плагин там работает по личному токену — эти случаи проверяют другие тесты.
-const HUB = { skip: process.platform === "win32" ? "сокет хаба — только macOS/Linux" : false };
+// The plugin calls the hub only over an absolute Unix socket (AGENTHUB_HUB_SOCKET starting with "/"): on Windows there
+// is no hub socket and the plugin works with a personal token there — other tests cover those cases.
+const HUB = { skip: process.platform === "win32" ? "hub socket — macOS/Linux only" : false };
 
-// Двойник хаба: ответ на POST /connections/clickup/mcp задаёт тест; запросы — в log (только путь и тело).
+// Hub double: the test sets the reply to POST /connections/clickup/mcp; requests go to log (path and body only).
 async function hubDouble(reply) {
   const dir = tempHome("ahp-hub-");
   const sock = join(dir, "hub.sock");
@@ -44,7 +44,7 @@ async function hubDouble(reply) {
   return { sock, log, close: () => new Promise((r) => srv.close(() => (rmSync(dir, { recursive: true, force: true }), r()))) };
 }
 
-// REST-двойник личного токена: любое обращение записывается (вход через хаб не должен до него доходить).
+// REST double for the personal token: every request is logged (the hub sign-in path must never reach it).
 async function restDouble() {
   const log = [];
   const srv = createServer((req, res) => {
@@ -77,7 +77,7 @@ function run(env) {
       if (err) return reject(Object.assign(err, { stderr }));
       const parsed = parseOutput(stdout);
       assert.deepEqual(parsed.warnings, []);
-      for (const m of ["СИНТЕТИЧЕСКОЕ-ОПИСАНИЕ", TOKEN, "synthetic@example"]) assert.ok(!stdout.includes(m), `в выводе нет «${m}»`);
+      for (const m of ["СИНТЕТИЧЕСКОЕ-ОПИСАНИЕ", TOKEN, "synthetic@example"]) assert.ok(!stdout.includes(m), `output does not contain "${m}"`);
       resolve({ text: stdout, parsed });
     });
   });
@@ -85,33 +85,33 @@ function run(env) {
 
 const titles = (p) => [...p.header, ...p.body].map((i) => i.title);
 
-test("метаданные 1.3.0 (контракт 2): net mcp.clickup.com и api.clickup.com, подключение объявляет сам плагин, значок, сбои входа — общий вид problems (своего переключателя нет)", () => {
+test("metadata 1.5.0 (contract 3): net mcp.clickup.com and api.clickup.com, the plugin declares the connection itself, icon, sign-in failures use the shared problems kind (no own toggle)", () => {
   const pm = readPluginMeta(PLUGIN);
   assert.deepEqual(pm.warnings, []);
-  assert.equal(pm.meta.version, "1.4.0");
-  assert.equal(pm.meta.contract, 2);
+  assert.equal(pm.meta.version, "1.5.0");
+  assert.equal(pm.meta.contract, 3);
   assert.deepEqual(pm.meta.icon, { symbol: "checklist", color: "#FF375F" });
   const nets = pm.meta.net.map((x) => x.split(" — ")[0]);
   assert.deepEqual(nets.sort(), ["api.clickup.com", "mcp.clickup.com"]);
-  assert.ok(pm.meta.secrets.some((s) => s.startsWith("clickup.token")), "личный токен — запасной путь");
-  // всё, что ядро до контракта 2 знало про ClickUp, — теперь в объявлении плагина; инструмент — только тот, что зовёт плагин
+  assert.ok(pm.meta.secrets.some((s) => s.startsWith("clickup.token")), "the personal token is the fallback");
+  // everything the core knew about ClickUp before contract 2 is now in the plugin's declaration; the only tool is the one the plugin calls
   assert.equal(pm.meta.connections.length, 1);
   const c = pm.meta.connections[0];
   assert.deepEqual(
     { id: c.id, type: c.type, url: c.url, scope: c.scope, tools: c.tools, intervalMs: c.intervalMs, budget: c.budget, title: c.title },
     { id: "clickup", type: "mcp", url: "https://mcp.clickup.com/mcp", scope: "read", tools: ["clickup_filter_tasks"], intervalMs: 900_000, budget: 100, title: "ClickUp" },
   );
-  assert.ok(nets.includes(c.host), "хост подключения объявлен в <agenthub.net>");
-  assert.ok(c.note && pm.meta.i18n.en.connections.clickup.note, "«зачем» на двух языках");
+  assert.ok(nets.includes(c.host), "the connection host is declared in <agenthub.net>");
+  assert.ok(c.note && pm.meta.i18n.en.connections.clickup.note, "the \"why\" is in both languages");
   const src = readFileSync(PLUGIN, "utf8");
-  assert.equal((src.match(/tool: "([a-z_]+)"/g) || []).every((m) => c.tools.includes(m.slice(7, -1))), true, "плагин зовёт только инструменты из белого списка");
-  // сбой входа — общий вид ядра «Сбои и предупреждения» (kind="problems"), как до 1.3.0: выключенные человеком «Сбои»
-  // гасят и эти события; своего переключателя у ClickUp нет, устаревших видов нет
+  assert.equal((src.match(/tool: "([a-z_]+)"/g) || []).every((m) => c.tools.includes(m.slice(7, -1))), true, "the plugin calls only allowlisted tools");
+  // a sign-in failure uses the core's shared "Problems and warnings" kind (kind="problems"), as before 1.3.0: turning off
+  // "Problems" silences these events too; ClickUp has no toggle of its own and no legacy kinds
   assert.deepEqual(pm.meta.push.map((r) => [r.key, r.kind, r.legacyKind ?? null]), [["auth-failed", "problems", null], ["login-expired", "problems", null]]);
   assert.deepEqual(pm.meta.push.map((r) => Boolean(r.labels?.en)), [true, true]);
 });
 
-test("вход через хаб: один вызов clickup_filter_tasks (assignees me), токен ClickUp плагину не нужен; REST не трогается", HUB, async () => {
+test("hub sign-in: one clickup_filter_tasks call (assignees me), the plugin needs no ClickUp token; REST is not touched", HUB, async () => {
   const hub = await hubDouble(() => ok());
   const rest = await restDouble();
   const { home, env } = setupHome();
@@ -124,8 +124,8 @@ test("вход через хаб: один вызов clickup_filter_tasks (assi
     assert.deepEqual(hub.log[0].body.args.assignees, ["me"]);
     assert.equal(hub.log[0].body.args.include_closed, false);
     assert.deepEqual(hub.log[0].body.args.fields, mod.MCP_FIELDS);
-    assert.ok(!JSON.stringify(hub.log[0].body).includes(TOKEN), "токен в хаб не уходит");
-    assert.deepEqual(rest.log, [], "есть вход — личный токен не используется");
+    assert.ok(!JSON.stringify(hub.log[0].body).includes(TOKEN), "the token is not sent to the hub");
+    assert.deepEqual(rest.log, [], "with a sign-in the personal token is not used");
     assert.equal(parsed.status, "ok");
     assert.match(parsed.header[0].title, /^ClickUp: 4 тикета/);
     const all = titles(parsed).join("\n");
@@ -139,7 +139,7 @@ test("вход через хаб: один вызов clickup_filter_tasks (assi
   }
 });
 
-test("почему реже: лимит ClickUp, бюджет суток, загрузка — в шапке и пояснениях (ru и en)", HUB, async () => {
+test("why less often: ClickUp limit, daily budget, loading — in the header and notes (ru and en)", HUB, async () => {
   const cases = [
     { body: ok({ why: "rate-limit", fresh: false, error: "mcp:rate-limited" }).body, ru: /ClickUp сообщил, что лимит запросов исчерпан — следующее обновление в (?:\d\d\.\d\d )?\d\d:\d\d/, en: /ClickUp says the request limit is used up — next refresh at (?:[A-Z][a-z]{2} \d{1,2} )?\d\d:\d\d/ },
     { body: ok({ why: "budget", calls24h: 96, fresh: false }).body, ru: /Бережём суточный лимит ClickUp: 96 из 100 запросов за 24 ч/, en: /Saving the ClickUp daily limit: 96 of 100 requests in 24 h/ },
@@ -161,7 +161,7 @@ test("почему реже: лимит ClickUp, бюджет суток, заг
   }
 });
 
-test("вход истёк (409 oauth:expired): «подключите снова», error + login-expired, прошлые тикеты остаются; с личным токеном — работаем по нему", HUB, async () => {
+test("sign-in expired (409 oauth:expired): \"reconnect\", error + login-expired, previous tickets remain; with a personal token — use it", HUB, async () => {
   const { home, env } = setupHome();
   const hubOk = await hubDouble(() => ok());
   await run({ ...env, AGENTHUB_HUB_SOCKET: hubOk.sock });
@@ -173,10 +173,10 @@ test("вход истёк (409 oauth:expired): «подключите снова
     assert.equal(parsed.status, "error");
     assert.equal(parsed.header[0].title, "ClickUp: подключите снова");
     assert.deepEqual(parsed.events, ["login-expired"]);
-    assert.ok(titles(parsed).some((t) => /Синтетика/.test(t)), "прошлые тикеты на месте");
+    assert.ok(titles(parsed).some((t) => /Синтетика/.test(t)), "previous tickets are still there");
     const en = await run({ ...env, AGENTHUB_HUB_SOCKET: hub.sock, AGENTHUB_LANG: "en" });
     assert.equal(en.parsed.header[0].title, "ClickUp: reconnect");
-    // с личным токеном — данные по нему и оранжевая заметка, без события
+    // with a personal token — data from it and an orange note, no event
     const withPat = await run({ ...env, AGENTHUB_HUB_SOCKET: hub.sock, AGENTHUB_SECRET_CLICKUP_TOKEN: TOKEN, AGENTHUB_CLICKUP_API_BASE: rest.base });
     assert.deepEqual(rest.log, ["/api/v2/user", "/api/v2/team", "/api/v2/team/9000001/task"]);
     assert.equal(withPat.parsed.status, "ok");
@@ -189,7 +189,7 @@ test("вход истёк (409 oauth:expired): «подключите снова
   }
 });
 
-test("не подключён (409 not-connected): без токена — «Подключить ClickUp» и запасной путь; с токеном — личный токен", HUB, async () => {
+test("not connected (409 not-connected): without a token — \"Connect ClickUp\" and the fallback; with a token — the personal token", HUB, async () => {
   const hub = await hubDouble(() => ({ status: 409, body: { error: "oauth:not-connected" } }));
   const rest = await restDouble();
   const { home, env } = setupHome();
@@ -215,7 +215,7 @@ test("не подключён (409 not-connected): без токена — «П�
   }
 });
 
-test("хаб без службы oauth или не отвечает — как раньше: личный токен, без него «нужен токен»", HUB, async () => {
+test("hub without the oauth service or not answering — as before: personal token, without it \"token needed\"", HUB, async () => {
   const { home, env } = setupHome();
   try {
     const gone = await run({ ...env, AGENTHUB_HUB_SOCKET: join(home, "nope.sock") });
@@ -231,7 +231,7 @@ test("хаб без службы oauth или не отвечает — как �
   }
 });
 
-test("незнакомая форма ответа инструмента → unknown + source-broken; ошибка инструмента — тоже", HUB, async () => {
+test("unfamiliar tool response shape → unknown + source-broken; a tool error too", HUB, async () => {
   for (const result of [{ content: [{ type: "text", text: "Task summary: 3 tasks" }] }, { content: [{ type: "text", text: "{\"items\":[]}" }] }, { isError: true, content: [{ type: "text", text: "boom" }] }]) {
     const hub = await hubDouble(() => ({ status: 200, body: { ...ok().body, result } }));
     const { home, env } = setupHome();
@@ -246,7 +246,7 @@ test("незнакомая форма ответа инструмента → un
   }
 });
 
-test("разбор ответа: structuredContent, массив, статус строкой, даты ISO и секунды; аргументы из настроек", () => {
+test("response parsing: structuredContent, array, status as a string, ISO and seconds dates; arguments from settings", () => {
   const t = mod.tasksFromMcp({ structuredContent: { tasks: [{ id: 42, name: "A", status: "open", list: "Бэклог", date_updated: "2026-11-09T10:00:00Z", due_date: 1_800_000_000 }] } });
   assert.deepEqual(t[0], { id: "42", customId: null, name: "A", status: "open", statusColor: null, statusType: null, url: "https://app.clickup.com/t/42", list: "Бэклог", updatedMs: Date.parse("2026-11-09T10:00:00Z"), dueMs: 1_800_000_000_000, priority: null });
   assert.equal(mod.tasksFromMcp({ content: [{ type: "text", text: JSON.stringify([{ id: "x", name: "B", url: "https://evil.example/" }]) }] })[0].url, "https://app.clickup.com/t/x");
@@ -254,14 +254,14 @@ test("разбор ответа: structuredContent, массив, статус �
   assert.deepEqual(mod.mcpArgs({ assignee: null, listIds: ["12", "x"], teamIds: ["900", "901"] }), { include_closed: false, subtasks: true, order_by: "updated", fields: mod.MCP_FIELDS, list_ids: ["12"], workspace_id: "900" });
 });
 
-// ревью 09.11: текст ошибки инструмента, требование workspace_id, «нет доступа» (403), тариф по бюджету ядра
-test("ошибка инструмента: текст ClickUp и подсказка про teamIds; при прошлом результате из памяти ядра — тоже", HUB, async () => {
+// review of Nov 9: tool error text, the workspace_id requirement, "no access" (403), plan from the core budget
+test("tool error: ClickUp's text and a teamIds hint; also with a previous result in the core's memory", HUB, async () => {
   const cases = [
-    // ядро 09.11+: ok:false, error mcp:tool-error, errorText
+    // core Nov 9+: ok:false, error mcp:tool-error, errorText
     { ...ok().body, ok: false, result: null, error: "mcp:tool-error", errorText: "Error: workspace_id required when you belong to several workspaces", why: "tool-error" },
-    // прошлый результат в памяти ядра, но новый вызов вернул ошибку
+    // a previous result in the core's memory, but the new call returned an error
     { ...ok().body, error: "mcp:tool-error", errorText: "Error: workspace_id required", why: "tool-error" },
-    // хаб старше: ошибка инструмента пришла как результат
+    // older hub: the tool error arrived as a result
     { ...ok().body, result: { isError: true, content: [{ type: "text", text: "Error: workspace_id required" }] } },
   ];
   for (const body of cases) {
@@ -273,7 +273,7 @@ test("ошибка инструмента: текст ClickUp и подсказ�
       assert.equal(parsed.header[0].title, "ClickUp: укажите рабочее пространство");
       const all = titles(parsed).join("\n");
       assert.match(all, /укажите teamIds в config\.json плагина/);
-      assert.match(all, /workspace_id required/, "текст ClickUp не выброшен");
+      assert.match(all, /workspace_id required/, "ClickUp's text is not dropped");
       assert.doesNotMatch(all, /незнакомая форма|не разобран/);
       assert.deepEqual(parsed.events, ["source-broken"]);
     } finally {
@@ -281,7 +281,7 @@ test("ошибка инструмента: текст ClickUp и подсказ�
       rmSync(home, { recursive: true, force: true });
     }
   }
-  // другая ошибка инструмента — общий заголовок и текст ClickUp
+  // another tool error — the generic header and ClickUp's text
   const hub = await hubDouble(() => ({ status: 200, body: { ...ok().body, ok: false, result: null, error: "mcp:tool-error", errorText: "Internal tool failure 42" } }));
   const { home, env } = setupHome();
   try {
@@ -294,7 +294,7 @@ test("ошибка инструмента: текст ClickUp и подсказ�
   }
 });
 
-test("403 у ядра (mcp:forbidden) — «нет доступа», не «подключите снова»; тариф в подписи — по бюджету ядра", HUB, async () => {
+test("403 in the core (mcp:forbidden) — \"no access\", not \"reconnect\"; the plan in the caption follows the core budget", HUB, async () => {
   const hub = await hubDouble(() => ({ status: 200, body: { ...ok().body, error: "mcp:forbidden", why: "forbidden" } }));
   const { home, env } = setupHome();
   try {

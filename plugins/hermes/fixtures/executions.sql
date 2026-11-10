@@ -1,4 +1,4 @@
--- Синтетическая executions.db по форме Hermes (cron/executions.py): те же колонки, выдуманные значения.
+-- Synthetic executions.db shaped like Hermes (cron/executions.py): the same columns, made-up values.
 CREATE TABLE executions (
   id TEXT PRIMARY KEY, job_id TEXT NOT NULL, source TEXT NOT NULL, process_id TEXT NOT NULL, pid INTEGER NOT NULL,
   process_started_at INTEGER,

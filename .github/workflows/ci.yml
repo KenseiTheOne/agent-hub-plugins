@@ -1,20 +1,20 @@
-# CI реестра плагинов.
+# Plugin registry CI.
 #
-# PR: только чтение — без секретов, без pull_request_target (он только у perms-label.yml, где код PR не
-#     исполняется), токен contents: read, persist-credentials: false.
-#     Проверка на macOS и Windows: тесты реестра + scripts/check.sh с диффом прав относительно базы PR
-#     (и правка файлов плагина без новой версии — ошибка: опубликованный архив той же версии не перезаписывается).
-#     Job perms показывает дифф прав в сводке запуска: scripts/ из базовой ветки над файлами PR как данными
-#     (check.mjs --perms-only). Метку «permissions» он НЕ ставит и артефактов не делает: для pull_request этот
-#     файл берётся из самого PR, и PR из форка мог бы переписать job. Метку ставит perms-label.yml
-#     (pull_request_target — версия из main, от ci.yml PR не зависит): сам считает рост прав скриптами main над
-#     файлами PR.
-# push в main: то же + job sign — сборка index.json, подпись ключом из environment «registry-signing»,
-#     публикация ассетами релиза «index». Запуски на main не отменяют друг друга (иначе отмена посреди
-#     загрузки оставила бы новый index.json со старой подписью), sign — в своей очереди без отмены; архивы
-#     грузятся до индекса, index.json и подпись — последними, после загрузки они сверяются с собранными.
+# PR: read-only — no secrets, no pull_request_target (only perms-label.yml has it, and PR code is not
+#     executed there), token contents: read, persist-credentials: false.
+#     Checks on macOS and Windows: registry tests + scripts/check.sh with the permissions diff against the PR base
+#     (and changing plugin files without a new version is an error: a published archive of the same version is not overwritten).
+#     Job perms shows the permissions diff in the run summary: scripts/ from the base branch over the PR files as data
+#     (check.mjs --perms-only). It does NOT set the "permissions" label and makes no artifacts: for pull_request this
+#     file is taken from the PR itself, and a PR from a fork could rewrite the job. The label is set by perms-label.yml
+#     (pull_request_target — the version from main, independent of the PR's ci.yml): it computes permission growth
+#     itself with main's scripts over the PR files.
+# push to main: the same + job sign — build index.json, sign it with the key from the "registry-signing" environment,
+#     publish as assets of the "index" release. Runs on main do not cancel each other (otherwise cancelling mid-upload
+#     would leave a new index.json with an old signature), sign runs in its own queue without cancellation; archives
+#     are uploaded before the index, index.json and the signature last, and after upload they are compared with the built ones.
 #
-# Действия закреплены тегом major-версии; при публикации репы владелец закрепляет их по SHA коммита.
+# Actions are pinned to a major-version tag; when the repo is published, the owner pins them by commit SHA.
 
 name: ci
 
@@ -28,7 +28,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # отменять незаконченный запуск — только у PR; push в main ждёт своей очереди (sign не рвётся посреди загрузки)
+  # cancel an unfinished run only for PRs; a push to main waits its turn (sign is not cut off mid-upload)
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -53,12 +53,12 @@ jobs:
         with:
           node-version: 22
 
-      - name: Тесты реестра
+      - name: Registry tests
         run: env -u NODE_OPTIONS node --test 'test/*.test.mjs'
 
-      - name: Проверка плагинов
+      - name: Check plugins
         env:
-          # имя базовой ветки — через env, не подстановкой в скрипт
+          # base branch name — via env, not substituted into the script
           BASE_REF: ${{ github.event_name == 'pull_request' && github.base_ref || '' }}
         run: |
           if [ -n "$BASE_REF" ]; then
@@ -68,20 +68,20 @@ jobs:
           fi
 
   perms:
-    name: perms (рост прав, без кода PR)
+    name: perms (permission growth, no PR code)
     if: github.event_name == 'pull_request'
     needs: []
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # Скрипты — из базовой ветки (уже прошли ревью); их и исполняем.
+      # Scripts — from the base branch (already reviewed); these are what we execute.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
           persist-credentials: false
 
-      # Файлы PR — только данные: отсюда ничего не запускается.
+      # PR files — data only: nothing is run from here.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -92,8 +92,8 @@ jobs:
         with:
           node-version: 22
 
-      # Только сводка для ревьюера (GITHUB_STEP_SUMMARY); метку ставит perms-label.yml, пересчитывая сам.
-      - name: Дифф прав (скрипты базы над файлами PR)
+      # Only a summary for the reviewer (GITHUB_STEP_SUMMARY); the label is set by perms-label.yml, which recomputes it itself.
+      - name: Permissions diff (base scripts over PR files)
         working-directory: base
         run: env -u NODE_OPTIONS node scripts/check.mjs --perms-only --root ../pr --base-dir . --report ../perms-report.json
 
@@ -103,9 +103,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
     timeout-minutes: 10
-    # Секрет INDEX_SIGNING_KEY живёт только в этом environment (защищён: только ветка main, ревьюер — владелец).
+    # The INDEX_SIGNING_KEY secret lives only in this environment (protected: main branch only, reviewer — the owner).
     environment: registry-signing
-    # Одна публикация за раз и без отмены: следующая ждёт, пока предыдущая догрузит индекс и подпись.
+    # One publication at a time and no cancellation: the next one waits until the previous one finishes uploading the index and signature.
     concurrency:
       group: sign-index
       cancel-in-progress: false
@@ -120,43 +120,43 @@ jobs:
         with:
           node-version: 22
 
-      # Опубликованный сейчас index.json — чтобы версия, уже выпущенная с другим архивом, не перезаписалась.
-      - name: Опубликованный каталог
+      # The currently published index.json — so that a version already released with a different archive is not overwritten.
+      - name: Published catalog
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p published
           if gh release view index >/dev/null 2>&1; then
-            gh release download index -p index.json -D published --clobber || echo "index.json в релизе нет — первая публикация"
+            gh release download index -p index.json -D published --clobber || echo "no index.json in the release — first publication"
           fi
 
-      - name: Сборка и подпись index.json
+      - name: Build and sign index.json
         env:
           INDEX_SIGNING_KEY: ${{ secrets.INDEX_SIGNING_KEY }}
         run: env -u NODE_OPTIONS node scripts/build-index.mjs --out dist --flat-archives --sign-key-env INDEX_SIGNING_KEY --published published/index.json
 
-      - name: Публикация (релиз «index»)
+      - name: Publish (release "index")
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release view index >/dev/null 2>&1 || gh release create index --title "index" --notes "Каталог плагинов Agent Hub (собирается CI)" --latest=false
-          # архивы — раньше индекса: новый index.json не должен ссылаться на ещё не загруженный архив
+          gh release view index >/dev/null 2>&1 || gh release create index --title "index" --notes "Agent Hub plugin catalog (built by CI)" --latest=false
+          # archives before the index: a new index.json must not reference an archive that is not uploaded yet
           shopt -s nullglob
           archives=(dist/*.tar.gz)
           if (( ${#archives[@]} )); then gh release upload index "${archives[@]}" --clobber; fi
-          # индекс и подпись — последними и подряд; затем сверка с собранными (до трёх попыток)
+          # index and signature last and back to back; then compare with the built ones (up to three attempts)
           for attempt in 1 2 3; do
             gh release upload index dist/index.json.minisig dist/index.json --clobber || true
             rm -rf verify && mkdir verify
             if gh release download index -p index.json -p index.json.minisig -D verify \
               && cmp -s verify/index.json dist/index.json && cmp -s verify/index.json.minisig dist/index.json.minisig; then
-              echo "index.json и подпись опубликованы и совпадают с собранными"
+              echo "index.json and signature are published and match the built ones"
               exit 0
             fi
-            echo "попытка $attempt: опубликованная пара index.json/.minisig не совпала с собранной — повтор"
+            echo "attempt $attempt: the published index.json/.minisig pair does not match the built one — retrying"
             sleep 5
           done
-          echo "::error::index.json и index.json.minisig в релизе не совпадают с собранными — перезапустите job sign"
+          echo "::error::index.json and index.json.minisig in the release do not match the built ones — rerun the sign job"
           exit 1

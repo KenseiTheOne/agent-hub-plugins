@@ -1,154 +1,187 @@
-# clickup — тикеты ClickUp и связь с работой
+# clickup — ClickUp tickets and their link to work
 
-Официальный плагин реестра `agent-hub-plugins` (tier `official`, ставится менеджером и удаляется из него).
-Standard, раз в 2 мин (связь с работой — каждый запуск; сами тикеты — по пути данных ниже). Только чтение, действий нет.
+An official plugin of the `agent-hub-plugins` registry (tier `official`, installed and removed by the manager).
+Standard, every 2 min (the link to work — on every run; the tickets themselves — per the data path below). Read-only, no actions.
 
-## Вход в ClickUp через хаб (основной путь, с 1.2.0)
+The plugin is bilingual: the hub shows its texts in Russian or English (`AGENTHUB_LANG`). UI texts below are quoted in
+English.
 
-Кнопка **«Подключить ClickUp»** — на странице плагина и в «Настройках → Подключения» оболочки. Вход и подтверждение —
-на сайте ClickUp, токен вводить не нужно. Подключение делает ядро (служба `oauth`, `agent-hub/docs/api.md`
-«Подключения»): официальный MCP-сервер `https://mcp.clickup.com/mcp`, OAuth 2.1 + PKCE (S256) + динамическая
-регистрация публичного клиента (без client_secret), адрес возврата — `127.0.0.1` со случайным портом, scope `read`.
-Регистрация и токены лежат только в связке ключей хаба (`agent-hub.oauth`); **плагин токена не видит**.
+## ClickUp sign-in through the hub (the main path, since 1.2.0)
 
-Плагин зовёт один инструмент — `clickup_filter_tasks` (`assignees: ["me"]`, открытые, с подзадачами, по обновлению,
-поля `custom_id, status, due_date, date_updated, list`) — через сокет хаба: `POST /connections/clickup/mcp`
-(переменная `AGENTHUB_HUB_SOCKET`, её ядро даёт только доверенным плагинам). Ядро пускает только доверенный плагин с
-объявленным `<agenthub.net>mcp.clickup.com` и только инструменты из белого списка подключения. **Один вызов на опрос**:
-пользователь «me» сервер понимает сам, `clickup_get_user` не нужен.
+The **Connect ClickUp** button is on the plugin page and in the shell's Settings → Connections. Sign-in and approval
+happen on the ClickUp site, no token to paste. The core makes the connection (the `oauth` service, `agent-hub/docs/api.md`
+"Connections"): the official MCP server `https://mcp.clickup.com/mcp`, OAuth 2.1 + PKCE (S256) + dynamic registration
+of a public client (no client_secret), the redirect address is `127.0.0.1` with a random port, scope `read`.
+The registration and tokens live only in the hub's keychain (`agent-hub.oauth`); **the plugin never sees the token**.
 
-**Частота.** На тарифе Free ClickUp даёт около 100 вызовов MCP за скользящие 24 ч (на клиента и рабочее
-пространство), поэтому плагин объявляет `interval="15m" budget="100"`, и ядро зовёт ClickUp **не чаще раза в 15 мин**
-и не больше 100 раз за сутки (на тарифе с бо́льшим лимитом бюджет поднимает сам пользователь —
-`services.oauth.clickup.dailyBudget` в `config.json` хаба), а между вызовами отдаёт прошлый ответ. Плагин
-пишет, когда следующее обновление и почему реже: «следующее в 16:12», «ClickUp сообщил, что лимит запросов исчерпан —
-следующее обновление в …» (`RATE_LIMIT_EXCEEDED`/`retryAfter`, 429), «Бережём суточный лимит ClickUp: 96 из 100 …»,
-«ClickUp просит сбавить темп» (`x-ratelimit-*`), «ClickUp не ответил — повтор в …»; первый ответ ещё идёт — «Загружаю
-тикеты из ClickUp…».
+The plugin calls one tool — `clickup_filter_tasks` (`assignees: ["me"]`, open, with subtasks, by update time,
+fields `custom_id, status, due_date, date_updated, list`) — through the hub socket: `POST /connections/clickup/mcp`
+(the `AGENTHUB_HUB_SOCKET` variable, which the core gives to trusted plugins only). The core lets through only a trusted
+plugin that declares `<agenthub.net>mcp.clickup.com` and only tools from the connection's allowlist. **One call per
+poll**: the server understands the user "me" itself, `clickup_get_user` isn't needed.
 
-**Вход истёк или отозван** (сервер ответил 401, обновить нечем) — `status=error`, «ClickUp: подключите снова», событие
-`login-expired` (push «ClickUp: вход истёк — подключите снова», вид «Сбои и предупреждения»); прошлые тикеты
-остаются. Есть личный токен — данные по нему и оранжевая заметка без события.
+**Rate.** On the Free plan ClickUp allows about 100 MCP calls per rolling 24 h (per client and workspace), so the
+plugin declares `interval="15m" budget="100"`, and the core calls ClickUp **no more than once every 15 min** and no
+more than 100 times a day (on a plan with a higher limit the user raises the budget —
+`services.oauth.clickup.dailyBudget` in the hub's `config.json`), returning the previous response in between. The
+plugin says when the next refresh is and why it is less frequent: "next at 16:12", "ClickUp says the request limit is
+used up — next refresh at …" (`RATE_LIMIT_EXCEEDED`/`retryAfter`, 429), "Saving the ClickUp daily limit: 96 of 100 …",
+"ClickUp asks to slow down" (`x-ratelimit-*`), "ClickUp didn't respond — retrying at …"; while the first response is
+still on its way — "Loading tickets from ClickUp…".
 
-Несколько рабочих пространств: сервер требует `workspace_id` — укажите его в `teamIds` настроек. **Через вход
-берётся одно рабочее пространство** — первое значение `teamIds` (один вызов на опрос); остальные значения через вход
-не опрашиваются (по личному токену плагин, как в 1.1.1, опрашивает все). `listIds` → `list_ids`; `assignee: null`
-— без фильтра по исполнителю. Незнакомая форма ответа инструмента (не JSON, нет `tasks`, задача без id/name) —
-`status=unknown` + `source-broken`. **Ошибка инструмента** (ClickUp ответил ошибкой на запрос) — тоже `status=unknown`
-+ `source-broken`, но с текстом ClickUp (до 120 знаков); требование `workspace_id` — заголовок «ClickUp: укажите
-рабочее пространство» и подсказка про `teamIds`. Ядро такой ответ успешным обновлением не считает (бэкофф, «обновлено»
-не сдвигается). **Нет доступа** (ядро получило 403 — входу не хватает прав) — `status=error`, «ClickUp: нет доступа к
-тикетам через вход», без `login-expired`: повторный вход тут не поможет, ядро повторит через час. Связка ключей не
-ответила — оранжевая заметка «повтор через минуту», прошлые тикеты остаются.
+**Sign-in expired or revoked** (the server answered 401, nothing to refresh with) — `status=error`, "ClickUp:
+reconnect", event `login-expired` (push "ClickUp: sign-in expired — reconnect", the "Problems and warnings" kind);
+previous tickets remain. With a personal token — data from it and an orange note without an event.
 
-Хаб без службы `oauth` (или старше 09.11) — плагин работает как 1.1.1: по личному токену.
+Several workspaces: the server requires `workspace_id` — set it in `teamIds` in the settings. **The sign-in path takes
+one workspace** — the first value of `teamIds` (one call per poll); the other values are not polled via the sign-in
+(with a personal token the plugin polls all of them, as in 1.1.1). `listIds` → `list_ids`; `assignee: null`
+— no assignee filter. An unfamiliar tool response shape (not JSON, no `tasks`, a task without id/name) —
+`status=unknown` + `source-broken`. **A tool error** (ClickUp answered the request with an error) — also
+`status=unknown` + `source-broken`, but with ClickUp's text (up to 120 characters); the `workspace_id` requirement gets
+the header "ClickUp: set the workspace" and a hint about `teamIds`. The core does not count such a response as a
+successful refresh (backoff, "updated" doesn't move). **No access** (the core got a 403 — the sign-in lacks
+permissions) — `status=error`, "ClickUp: no access to tickets via the sign-in", without `login-expired`: signing in
+again won't help, the core retries in an hour. The keychain didn't answer — an orange "retrying in a minute" note,
+previous tickets remain.
 
-## Запасной путь — личный токен
+A hub without the `oauth` service (or older than Nov 9) — the plugin works as 1.1.1: with a personal token.
 
-Если входа через хаб нет (не подключён, хаб старше, служба выключена), плагин работает по личному токену, как
-раньше — обновление раз в 2 мин, лимиты REST.
+## Fallback — a personal token
 
-**API:** REST v2 `https://api.clickup.com`, **только GET** и только пути из белого списка
+If there is no sign-in through the hub (not connected, older hub, service disabled), the plugin works with a personal
+token, as before — a refresh every 2 min, REST limits.
+
+**API:** REST v2 `https://api.clickup.com`, **GET only** and only paths from the allowlist
 (`/api/v2/user`, `/api/v2/team`, `/api/v2/team/{id}/task`, `/api/v2/list/{id}/task`, `/api/v2/task/{id}`)
-с разрешёнными параметрами; редиректы запрещены. Записей в ClickUp нет (вне рамок).
-`user` и `team` кэшируются на сутки — обычный запуск делает один запрос на рабочее пространство.
+with allowed parameters; redirects are forbidden. No writes to ClickUp (out of scope).
+`user` and `team` are cached for a day — a normal run makes one request per workspace.
 
-**Токен:** секрет `clickup.token` → `AGENTHUB_SECRET_CLICKUP_TOKEN` (ядро зовёт провайдер секретов). Запись в
-связке ключей заводит пользователь — сервис `agent-hub.clickup`, учётная запись ровно `token` (служба секретов
-ищет `find-generic-password -s agent-hub.clickup -a token`):
+**Token:** the `clickup.token` secret → `AGENTHUB_SECRET_CLICKUP_TOKEN` (the core calls the secrets provider). The
+user creates the keychain entry — service `agent-hub.clickup`, account exactly `token` (the secrets service looks up
+`find-generic-password -s agent-hub.clickup -a token`):
 
 ```sh
 security add-generic-password -s agent-hub.clickup -a token -T /usr/bin/security -w
 ```
 
-Эту же команду (ru и en) показывает плагин без входа и без токена (с 1.1.1; с 1.2.0 — под «Запасной путь — личный
-токен», первой идёт «Нажмите «Подключить ClickUp»»). Ни входа, ни токена — `status=unknown`, ни одного запроса. Токен не попадает в вывод, кэш и журнал.
+The plugin shows this same command (ru and en) when there is neither a sign-in nor a token (since 1.1.1; since 1.2.0 —
+under "Fallback — a personal token", after "Click Connect ClickUp"). Neither sign-in nor token — `status=unknown`, no
+requests at all. The token never reaches the output, cache or log.
 
-**Лимит:** учитываются `X-RateLimit-Remaining` / `X-RateLimit-Reset` (осталось ≤ 3 — ждём сброса окна);
-на 429 — бэкофф 1, 2, 4… мин (до 30 мин, не раньше Reset), прошлые тикеты остаются на экране.
+**Limit:** `X-RateLimit-Remaining` / `X-RateLimit-Reset` are honoured (≤ 3 left — wait for the window to reset);
+on 429 — backoff of 1, 2, 4… min (up to 30 min, not earlier than Reset), previous tickets stay on screen.
 
-**Настройки** (необязательно) — `<AGENTHUB_PLUGIN_DATA_PATH>/config.json`:
-`{"teamIds": ["…"], "listIds": ["…"], "assignee": "me" | null, "limit": 15}`. По умолчанию — открытые тикеты
-на владельца токена во всех его рабочих пространствах (до 3).
+**Settings** (optional) — `<AGENTHUB_PLUGIN_DATA_PATH>/config.json`:
+`{"teamIds": ["…"], "listIds": ["…"], "assignee": "me" | null, "limit": 15}`. By default — open tickets assigned
+to the token owner in all of their workspaces (up to 3).
 
-**Связь тикет ↔ работа** (дизайн, раздел 4), уверенность видна в строке:
+**Ticket ↔ work link** (design, section 4), the confidence is shown on the line:
 
-| Связь | Откуда | Уверенность |
+| Link | Source | Confidence |
 |---|---|---|
-| ночь | `~/.claude/task-runs/night/projects/*/attempts/<id>.json`, `night/<дата>/<id>/agent.json`, ночной `RUN.md` (ветка `night/…`, каталог `*-night`, `unattended`) | точно |
-| /ticket | `~/.claude/task-runs/<repo>/<id>/RUN.md` | точно |
-| сессия | `session_id` в `RUN.md` | точно |
-| сессия | живая сессия на ветке из `RUN.md` в том же репо, или ветка/каталог сессии содержит id тикета | сильно |
-| сессия | живая сессия в репо `RUN.md` (свежего, < 6 ч), ветка не совпала | возможно |
+| night | `~/.claude/task-runs/night/projects/*/attempts/<id>.json`, `night/<date>/<id>/agent.json`, a night `RUN.md` (branch `night/…`, folder `*-night`, `unattended`) | certain |
+| /ticket | `~/.claude/task-runs/<repo>/<id>/RUN.md` | certain |
+| session | `session_id` in `RUN.md` | certain |
+| session | a live session on the branch from `RUN.md` in the same repo, or the session branch/folder contains the ticket id | likely |
+| session | a live session in the `RUN.md` repo (a fresh one, < 6 h), the branch doesn't match | possible |
 
-Из `RUN.md` читаются только ключи `task_id, task_ref, branch, repo_root, worktree, status, outcome, mode,
-session_id, unattended` и имя последнего `step`. Сессии — `~/.claude/sessions/<pid>.json` (файлы ключей рядом не читаются),
-живость — `ps -p`, ветка — `.git/HEAD` (и `gitdir:` у worktree) без запуска git.
+From `RUN.md` only the keys `task_id, task_ref, branch, repo_root, worktree, status, outcome, mode,
+session_id, unattended` and the name of the last `step` are read. Sessions — `~/.claude/sessions/<pid>.json` (the key
+files next to them are not read), liveness — `process.kill(pid, 0)` (no `ps`, works on Windows too), branch — `.git/HEAD` (and `gitdir:` for a worktree) without
+running git.
 
-**Предлагает:** `open.url` — тикет в браузере; `cmux.focus` — у строки связи с сессией, если её вкладка
-известна по `~/.cmuxterm/claude-hook-sessions.json` (только идентификаторы).
+**Offers:** `open.url` — the ticket in the browser; `session.focus <sessionId>` (since 1.5.0) — a "Switch to session"
+button for a live session linked to the ticket: the hub finds the tab, the plugin knows nothing about the terminal.
 
-**События:** `auth-failed` (401/403 на `/user`, status=error; правило push «ClickUp: токен не принят» —
-`<agenthub.push>`; кэш пользователя и рабочих пространств сбрасывается), `source-broken` (незнакомая форма ответа,
-status=unknown; причина — на языке хаба). `auth-failed` и `login-expired` — правила плагина с явным
-`kind="problems"`: это сбои, их гасит общий выключатель «Сбои и предупреждения» в «Настройках → Уведомления», как и до
-1.3.0 (своего переключателя у ClickUp нет — выбор человека, выключившего «Сбои», переносить не нужно). У
-`source-broken` своего правила нет — это ключ общей таблицы ядра, вид тот же.
+**Events:** `auth-failed` (401/403 on `/user`, status=error; push rule "ClickUp: token rejected" —
+`<agenthub.push>`; the user and workspace cache is reset), `source-broken` (unfamiliar response shape,
+status=unknown; the reason is in the hub's language). `auth-failed` and `login-expired` are the plugin's rules with an
+explicit `kind="problems"`: these are failures, silenced by the shared "Problems and warnings" switch in Settings →
+Notifications, as before 1.3.0 (ClickUp has no toggle of its own — the choice of someone who turned off "Problems"
+needs no migration). `source-broken` has no rule of its own — it is a key in the core's shared table, same kind.
 
-**Отказ по рабочему пространству** (с 1.1.1): 401/403 на `/team/{id}/task` или `/list/{id}/task`, когда токен
-принят, — не «токен не принят»: тикеты этого пространства пропускаются, остальные собираются, в меню — «Нет доступа к
-рабочему пространству N — его тикеты пропущены». Пользователь из кэша — сначала перепроверка `/user` (токен могли
-сменить на другой аккаунт: тогда новые `user` и `team`); подтверждённый отказ помнится сутки (без перепроверки
-каждый запуск), а список рабочих пространств перезапрашивается один раз (пользователя могли убрать из пространства).
-Отказали все — status=error «ClickUp: нет доступа к рабочему пространству N», без `auth-failed`.
+**Denial for a workspace** (since 1.1.1): 401/403 on `/team/{id}/task` or `/list/{id}/task` while the token is
+accepted is not "token rejected": that workspace's tickets are skipped, the rest are collected, the menu shows "No
+access to workspace N — its tickets are skipped". If the user came from the cache, `/user` is re-checked first (the
+token may have been switched to another account: then new `user` and `team`); a confirmed denial is remembered for a
+day (no re-check on every run), and the workspace list is re-requested once (the user may have been removed from the
+workspace). All denied — status=error "ClickUp: no access to workspace N", without `auth-failed`.
 
-Тесты — только на двойниках: HTTP на 127.0.0.1 (подмена адреса принимается только для loopback) —
-`test/clickup.test.mjs`; хаб на Unix-сокете во временном каталоге — `test/clickup-mcp.test.mjs` (вход через хаб, «почему
-реже», истёкший вход, запасной путь, разбор ответа). `scripts/check.sh --only clickup`.
+Tests use doubles only: HTTP on 127.0.0.1 (the base override is accepted only for loopback) —
+`test/clickup.test.mjs`; a hub on a Unix socket in a temp folder — `test/clickup-mcp.test.mjs` (hub sign-in, "why
+less often", expired sign-in, fallback, response parsing). `scripts/check.sh --only clickup`.
 
-**Права 1.2.0:** добавлено `net: mcp.clickup.com` (запросы делает хаб) — рост прав, при обновлении будет окно
-согласия. `api.clickup.com` и секрет `clickup.token` остаются для запасного пути.
+**Permissions 1.2.0:** added `net: mcp.clickup.com` (the hub makes the requests) — a permission increase, the update
+shows a consent window. `api.clickup.com` and the `clickup.token` secret remain for the fallback.
 
-## Контракт 2 (1.3.0)
+## Contract 2 (1.3.0)
 
-Хаб с 09.11 о ClickUp ничего не знает (`docs/contract/extension-points.md`, «Версии контракта»): всё, что ядро раньше
-держало у себя — адрес MCP-сервера, scope, белый список инструментов, интервал, суточный бюджет, название в оболочке, —
-плагин объявляет сам. Что объявлено и зачем:
+Since Nov 9 the hub knows nothing about ClickUp (`docs/contract/extension-points.md`, "Contract versions"): everything
+the core used to keep — the MCP server address, scope, tool allowlist, interval, daily budget, the name in the shell —
+the plugin declares itself. What is declared and why:
 
-| Объявление | Зачем |
+| Declaration | Why |
 |---|---|
-| `<agenthub.contract>2</agenthub.contract>` | плагину нужен хаб с контрактом 2: подключение объявляет плагин. Хаб версии 2 с контрактом старше покажет «Нужен хаб новее»; хаб контракта 1 тег не знает — 1.3.0 на нём работает через подключение, зашитое в то ядро, без значка и без своих текстов |
-| `<agenthub.connection id="clickup" type="mcp" url="https://mcp.clickup.com/mcp" scope="read" tools="clickup_filter_tasks" interval="15m" budget="100" title="ClickUp">` | **новое право вида `connections`** — вход в ClickUp и вызов MCP через хаб. Хост `mcp.clickup.com` уже объявлен в `<agenthub.net>` (иначе ядро подключение не примет). Белый список — **один инструмент**, который плагин и зовёт (`clickup_filter_tasks`); до контракта 2 ядро разрешало ещё `clickup_get_user`, `clickup_get_task`, `clickup_get_workspace_hierarchy` — плагину они не нужны. Интервал и бюджет — прежние значения ядра (15 мин, 100 в сутки). `id="clickup"` — как у плагина, поэтому записи связки ключей прежние (`agent-hub.oauth` / `clickup.client`, `clickup.token`): **сделанный вход не теряется**, повторно подключать не нужно |
-| `<agenthub.icon symbol="checklist" color="#FF375F">` | значок плитки — тот же, что раньше был зашит в оболочку |
-| `kind="problems"` у `auth-failed` и `login-expired` | явно общий вид «Сбои и предупреждения» (как до 1.3.0; таблица ядра больше не обязана знать `auth-failed`) |
+| `<agenthub.contract>2</agenthub.contract>` | the plugin needs a hub with contract 2: the plugin declares the connection. A version-2 hub with an older contract shows "Newer hub needed"; a contract-1 hub doesn't know the tag — 1.3.0 works there through the connection built into that core, without the icon and without its own texts |
+| `<agenthub.connection id="clickup" type="mcp" url="https://mcp.clickup.com/mcp" scope="read" tools="clickup_filter_tasks" interval="15m" budget="100" title="ClickUp">` | **a new `connections` permission** — the ClickUp sign-in and MCP calls through the hub. The host `mcp.clickup.com` is already declared in `<agenthub.net>` (otherwise the core won't accept the connection). The allowlist is **one tool**, the one the plugin calls (`clickup_filter_tasks`); before contract 2 the core also allowed `clickup_get_user`, `clickup_get_task`, `clickup_get_workspace_hierarchy` — the plugin doesn't need them. The interval and budget are the core's previous values (15 min, 100 a day). `id="clickup"` matches the plugin, so the keychain entries are unchanged (`agent-hub.oauth` / `clickup.client`, `clickup.token`): **an existing sign-in is not lost**, no need to reconnect |
+| `<agenthub.icon symbol="checklist" color="#FF375F">` | the tile icon — the same one that used to be built into the shell |
+| `kind="problems"` on `auth-failed` and `login-expired` | explicitly the shared "Problems and warnings" kind (as before 1.3.0; the core's table no longer has to know `auth-failed`) |
 
-**Права 1.3.0:** добавлен вид `connections` (подключение `clickup`) — рост прав: обновление с 1.2.0 пройдёт через окно
-согласия, где подключение видно отдельной строкой (адрес, scope, инструмент, «зачем»). Остальные права не менялись.
+**Permissions 1.3.0:** added the `connections` kind (the `clickup` connection) — a permission increase: updating from
+1.2.0 goes through a consent window where the connection is shown on its own line (address, scope, tool, "why"). The
+other permissions are unchanged.
 
-**Вид уведомлений не менялся.** До 1.3.0 `auth-failed` и `login-expired` шли видом «Сбои и предупреждения»
-(`auth-failed` — по таблице ядра, `login-expired` — `kind="problems"`); с 1.3.0 оба объявлены `kind="problems"` явно,
-так что выбор человека «Сбои выключены» действует как раньше.
+**The notification kind is unchanged.** Before 1.3.0 `auth-failed` and `login-expired` went under "Problems and
+warnings" (`auth-failed` — via the core's table, `login-expired` — `kind="problems"`); since 1.3.0 both declare
+`kind="problems"` explicitly, so a person's "Problems off" choice works as before.
 
-## Страница (1.4.0)
+## Page (1.4.0)
 
-Тикеты сгруппированы по тому, что требует внимания, — каждая группа отдельной карточкой:
+Tickets are grouped by what needs attention — each group as a separate card:
 
-1. **Шапка** — «ClickUp: 9 тикетов · у агентов 2 · просрочено 1». Плитка поповера — то, что требует внимания:
-   «2 у агентов», без них «1 просрочен», иначе число открытых.
-2. **Карточки-цифры** — у агентов (и чьи: ночь, `/ticket`, сессия), просрочено (самый давний), срок на неделе
-   (ближайший), открытых.
-3. **У агентов** — тикеты, с которыми связана работа агентов. Название — строкой со значком статуса (пустой круг —
-   открыт, наполовину — в работе, галочка — закрыт) и статусом пометкой; под ним «номер · список · приоритет · срок»,
-   что делает агент и с какой уверенностью, кнопки «Открыть в ClickUp» и «Перейти: сессия …» (`cmux.focus`).
-4. **Срок горит** — остальные тикеты с просроченным сроком или сроком в ближайшие 3 дня, по сроку; срок — цветной
-   строкой (красный — просрочен, оранжевый — скоро).
-5. **Остальные** — по статусам (в работе → открытые → прочие), внутри — по приоритету и свежести; по капсуле-ссылке
-   на тикет с одним названием. `limit` (15) режет только эту группу: «у агентов» и «срок горит» видны всегда.
+1. **Header** — "ClickUp: 9 tickets · 2 with agents · 1 overdue". The popover tile shows what needs attention:
+   "2 with agents", without them "1 overdue", otherwise the open count.
+2. **Stat cards** — with agents (and whose: night, `/ticket`, session), overdue (the oldest), due this week
+   (the nearest), open.
+3. **With agents** — tickets linked to agent work. The name is a line with a status symbol (empty circle —
+   open, half-filled — in progress, checkmark — closed) and the status as a badge; under it "number · list · priority ·
+   due", what the agent is doing and with what confidence, the "Open in ClickUp" and "Switch to session …" buttons
+   (`session.focus`).
+4. **Due soon** — the other tickets that are overdue or due within the next 3 days, by due date; the due date is a
+   colored line (red — overdue, orange — soon).
+5. **Others** — by status (in progress → open → the rest), within a group — by priority and freshness; a link pill per
+   ticket with just the name. `limit` (15) cuts only this group: "with agents" and "due soon" are always shown.
 
-Приоритет (`urgent` — «срочно», `high` — «высокий приоритет») показывается в строке номера и поднимает тикет выше в
-группе. Его плагин просит у `clickup_filter_tasks` полем `priority` (по личному токену он приходит и так). Если вход
-ещё не подключён, запасной путь с личным токеном свёрнут в «Подробности», чтобы не заслонять кнопку «Подключить
-ClickUp».
+Priority (`urgent` — "urgent", `high` — "high priority") is shown in the number line and moves the ticket up within
+its group. The plugin requests it from `clickup_filter_tasks` with the `priority` field (with a personal token it comes
+anyway). If the sign-in isn't connected yet, the personal-token fallback is collapsed into "Details" so it doesn't hide
+the Connect ClickUp button.
 
-**Права 1.4.0 не менялись** — окна согласия при обновлении не будет. Частота запросов прежняя: через вход хаб ходит в
-ClickUp не чаще раза в 15 мин, и кнопка «Обновить» этого не меняет — между запросами хаб отдаёт прошлый результат.
+**Permissions 1.4.0 are unchanged** — no consent window on update. The request rate is the same: via the sign-in the
+hub calls ClickUp no more than once every 15 min, and the Refresh button doesn't change that — between requests the hub
+returns the previous result.
+
+## Contract 3 (1.5.0): switching through the hub, no cmux
+
+The plugin no longer knows anything about the terminal. Previously the "Switch" button was built from the cmux file
+`~/.cmuxterm/claude-hook-sessions.json` (the session's tab and workspace) and the `cmux.focus` effect; now it is the hub
+effect `session.focus <sessionId>`: the plugin already takes `sessionId` from `~/.claude/sessions/*.json`, and the
+core's terminals layer finds the tab from the session registry — with cmux now and with any terminal the hub gets an
+adapter for.
+
+- **The "Switch" button** — on every live session linked to the ticket (previously — only on the one whose tab the cmux
+  file found). If there is no tab, the hub refuses ("no tab", `no-terminal`) — the plugin can't know that in advance.
+- `<agenthub.contract>3</agenthub.contract>`: only a contract-3 hub knows `session.focus`; an older hub shows
+  "Newer hub needed".
+- Code comments, tests and this README are now in English (no behaviour change; the UI stays bilingual).
+- **The page is closer to the design.** "Others" lists each ticket as a text link (`link=true`, not a capsule) with a
+  gray "number · list · priority · due" line; status groups have a gray title and a colored dot (`iconColor=`); ticket
+  status badges are tinted (`badgeColor=`); an overdue line is red (`color=` on a nested line). The sign-in gives only the
+  status name, so the kind, color and order (in progress → review → blocked → to do) come from the name when ClickUp's
+  own color and type are missing. In sign-in mode "updated · next" is under "Refresh" (the hub's connection card already
+  shows it). These are display parameters of hub 0.1.0 (still contract 3): an older hub ignores them and draws capsules.
+
+**Permissions 1.5.0:** removed `fsRead ~/.cmuxterm/claude-hook-sessions.json`; the `cmux.focus` effect is replaced by
+`session.focus`. The new effect is a permission increase: the update shows a consent window (switching to a tab is a
+harmless effect, like `open.url`).

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // <agenthub.title>Hermes</agenthub.title>
-// <agenthub.version>1.3.0</agenthub.version>
+// <agenthub.version>1.3.1</agenthub.version>
 // <agenthub.contract>2</agenthub.contract>
 // <agenthub.icon symbol="alarm" color="#30D158"></agenthub.icon>
 // <agenthub.desc>Задачи Hermes по расписанию: что упало, что подорожало, отвечает ли служба Hermes и не на паузе ли он</agenthub.desc>
@@ -50,33 +50,34 @@
 // <agenthub.push key="gateway-silent" lang="en">Hermes: service silent</agenthub.push>
 // <agenthub.push key="estop" lang="en">Hermes is paused</agenthub.push>
 //
-// Официальный плагин реестра agent-hub-plugins. Вывод — только чтение. Пауза, возобновление и внеочередной
-// запуск задач — объявленные действия: подтверждение и его текст — от ядра, аргумент (id задачи) ядро сверяет
-// с шаблоном и передаёт отдельным argv. Факты (задача есть в jobs.json своего профиля, cron pause — только не
-// на паузе, cron resume — только на паузе, pause всего Hermes — только без ESTOP в ~/.hermes) проверяет сам
-// плагин в режиме `--action`; отказ — код 3, строка `message=<объяснение на языке хаба>` и последней `reason=<код>`
-// (контракт 2: объяснение пишет плагин, оболочка показывает его как есть — REFUSALS ниже). Кнопка «Поставить Hermes на паузу» есть в кадре,
-// пока нет ~/.hermes/ESTOP; снять паузу — `hermes resume` в терминале (действия для этого нет).
+// Official plugin of the agent-hub-plugins registry. Output is read-only. Pausing, resuming and running a job
+// outside its schedule are declared actions: the confirmation and its text come from the core; the core checks
+// the argument (the job id) against the pattern and passes it as a separate argv. The plugin checks the facts
+// itself in `--action` mode (the job is in its profile's jobs.json, cron pause only when not paused, cron resume
+// only when paused, pausing all of Hermes only without ESTOP in ~/.hermes); a refusal is exit code 3, a line
+// `message=<explanation in the hub's language>` and, last, `reason=<code>` (contract 2: the plugin writes the
+// explanation and the shell shows it as is — REFUSALS below). The "Pause Hermes" button is in the frame
+// while there is no ~/.hermes/ESTOP; to lift the pause run `hermes resume` in a terminal (there is no action for it).
 //
-// ESTOP (agent/estop.py Hermes): `hermes pause` пишет $HERMES_HOME/ESTOP. Процесс профиля проверяет свой
-// HERMES_HOME и корень, поэтому ~/.hermes/ESTOP — пауза всего Hermes, а profiles/<n>/ESTOP — только профиля <n>
-// (снять — `hermes -p <n> resume`). Пауза профиля не гасит тишину планировщика других профилей.
+// ESTOP (Hermes agent/estop.py): `hermes pause` writes $HERMES_HOME/ESTOP. A profile's process checks its own
+// HERMES_HOME and the root, so ~/.hermes/ESTOP pauses all of Hermes and profiles/<n>/ESTOP only profile <n>
+// (lift it with `hermes -p <n> resume`). A profile's pause does not silence other profiles' scheduler alerts.
 //
-// Что читаем и чего не читаем:
-//   jobs.json        — только id, name, расписание, enabled/state, last_status, failure_streak, время запусков.
-//                      Поля prompt, origin, last_error/last_failure.detail НЕ читаются и не выводятся.
-//   executions.db    — `-readonly` и `?immutable=1` (без блокировок и без записи в каталог Hermes), только job_id,
-//                      status и времена; колонка error — только факт наличия. Колонки с токенами берём, если они
-//                      есть в схеме. База Hermes в режиме WAL: при immutable файл -wal не читается, и пока у
-//                      Hermes открыто соединение, свежие запуски (в том числе провал) лежат только в нём. Поэтому
-//                      при непустом -wal читается копия базы вместе с -wal во временном каталоге (данные плагина
-//                      или системный tmp), копия удаляется сразу после чтения.
-//   usage_audit.jsonl— только числа токенов, job_id, ts, duration_ms (там же лежит расход каждого запуска).
-//   Файлы секретов и настроек Hermes, state.db, sessions/ — никогда (читаются только перечисленные выше файлы).
+// What we read and what we don't:
+//   jobs.json        — only id, name, schedule, enabled/state, last_status, failure_streak, run times.
+//                      The prompt, origin, last_error/last_failure.detail fields are NOT read and not shown.
+//   executions.db    — `-readonly` and `?immutable=1` (no locks and no writes to the Hermes folder), only job_id,
+//                      status and times; the error column only as a has-error flag. Token columns are taken if
+//                      they exist in the schema. The Hermes database is in WAL mode: with immutable the -wal file
+//                      isn't read, and while Hermes holds a connection open, fresh runs (a failure included) live
+//                      only there. So with a non-empty -wal a copy of the database together with -wal is read in a
+//                      temp folder (the plugin's data folder or the system tmp), and the copy is deleted right after.
+//   usage_audit.jsonl— only token counts, job_id, ts, duration_ms (that is where each run's usage is recorded).
+//   Hermes secret and settings files, state.db, sessions/ — never (only the files listed above are read).
 //
-// События (event=): job-failed-<id> (последний запуск упал), job-costly-<id> (последний запуск потратил
-// вдвое больше обычного), gateway-silent (gateway объявлен работающим, но пульс старый или процесса нет),
-// ticker-silent-<профиль> (планировщик cron не тикает), estop (Hermes на паузе), source-broken.
+// Events (event=): job-failed-<id> (the last run failed), job-costly-<id> (the last run used
+// twice the usual), gateway-silent (gateway declared running, but the heartbeat is old or there is no process),
+// ticker-silent-<profile> (the cron scheduler isn't ticking), estop (Hermes is paused), source-broken.
 
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
@@ -84,18 +85,18 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const GATEWAY_STALE_S = 180; // пульс пишется раз в 30 с
-export const TICKER_STALE_S = 200; // как в Hermes: TICKER_INTERVAL_SECONDS * 3 + 20
+export const GATEWAY_STALE_S = 180; // the heartbeat is written every 30 s
+export const TICKER_STALE_S = 200; // as in Hermes: TICKER_INTERVAL_SECONDS * 3 + 20
 export const COSTLY_FACTOR = 2;
 export const COSTLY_MIN_SAMPLES = 3;
 const AUDIT_TAIL_BYTES = 256 * 1024;
 
-// ---------- форматирование вывода ----------
+// ---------- output formatting ----------
 export function clean(s) {
   return String(s ?? "")
     .replace(/[\r\n\t]+/g, " ")
     .replace(/\|/g, "¦")
-    .replace(/^[-\s]+/, "") // `--` в начале — вложенность
+    .replace(/^[-\s]+/, "") // a leading `--` means nesting
     .replace(/^~~~$/, "~")
     .slice(0, 200);
 }
@@ -112,7 +113,7 @@ function line(title, params = {}) {
 function fmtInt(n) {
   return Math.round(n).toLocaleString("ru-RU").replace(/ /g, " ");
 }
-// Язык — AGENTHUB_LANG (ru | en) от ядра; без переменной — ru.
+// Language: AGENTHUB_LANG (ru | en) from the core; without the variable, ru.
 export function envLang() {
   return process.env.AGENTHUB_LANG === "en" ? "en" : "ru";
 }
@@ -148,7 +149,7 @@ function fmtTime(iso, now) {
 const plEn = (n, one, other) => (n === 1 ? one : other);
 const tr = (ru, en) => (EN() ? en : ru);
 
-// Расписание cron → по-человечески для частых форм; незнакомое — null (сырая строка уходит в «Подробности»).
+// Cron schedule → human wording for common forms; anything else → null (the raw string goes to "Details").
 export function humanCron(expr) {
   const e = String(expr || "").trim();
   const p2 = (n) => String(n).padStart(2, "0");
@@ -166,8 +167,8 @@ export function humanCron(expr) {
   return null;
 }
 
-// ---------- чтение источников ----------
-// Поломка источника — кодом (переводит render, BROKEN_TEXT), а не готовой русской строкой.
+// ---------- reading sources ----------
+// A broken source is reported as a code (render translates it via BROKEN_TEXT), not as a ready-made Russian string.
 class Broken extends Error {
   constructor(kind, arg = "") {
     super(arg ? `${kind} ${arg}` : kind);
@@ -195,7 +196,7 @@ function readJson(path) {
   }
 }
 
-// Каталоги Hermes: корень и профили. → [{ name, home }]
+// Hermes folders: the root and the profiles. → [{ name, home }]
 export function hermesHomes(root) {
   const out = [{ name: "default", home: root }];
   const pdir = join(root, "profiles");
@@ -212,7 +213,7 @@ export function hermesHomes(root) {
 
 const JOB_FIELDS = ["id", "name", "schedule_display", "enabled", "state", "paused_at", "last_status", "failure_streak", "last_run_at", "next_run_at"];
 
-// jobs.json → только нужные поля. Незнакомая форма → Broken.
+// jobs.json → only the needed fields. Unknown shape → Broken.
 export function readJobs(path) {
   const j = readJson(path);
   const list = Array.isArray(j) ? j : j && Array.isArray(j.jobs) ? j.jobs : null;
@@ -242,10 +243,10 @@ const walSize = (dbPath) => {
   }
 };
 
-// Чтение базы Hermes без записи в её каталог. Журнала WAL нет — immutable (без блокировок; всё уже в базе).
-// Непустой -wal — копия базы и -wal во временном каталоге: copy открывается обычным read-only соединением,
-// и SQLite видит строки из журнала. Сбой чтения immutable, пока появился -wal (checkpoint во время чтения), —
-// повтор по копии. tmpBase — каталог данных плагина (AGENTHUB_PLUGIN_DATA_PATH) или системный tmp.
+// Reads the Hermes database without writing to its folder. No WAL journal → immutable (no locks; everything is in the database).
+// Non-empty -wal → a copy of the database and -wal in a temp folder: the copy is opened with a plain read-only connection,
+// and SQLite sees the journal's rows. If the immutable read fails because a -wal appeared meanwhile (a checkpoint during
+// the read), it is retried on a copy. tmpBase is the plugin's data folder (AGENTHUB_PLUGIN_DATA_PATH) or the system tmp.
 export function withDb(dbPath, fn, { tmpBase = process.env.AGENTHUB_PLUGIN_DATA_PATH || tmpdir() } = {}) {
   const viaCopy = () => {
     mkdirSync(tmpBase, { recursive: true, mode: 0o700 });
@@ -268,7 +269,7 @@ export function withDb(dbPath, fn, { tmpBase = process.env.AGENTHUB_PLUGIN_DATA_
   }
 }
 
-// executions.db: последние запуски по задачам. → Map(jobId → [{status, claimed_at, started_at, finished_at, has_error, tokens?}])
+// executions.db: the latest runs per job. → Map(jobId → [{status, claimed_at, started_at, finished_at, has_error, tokens?}])
 export function readExecutions(dbPath, opts = {}) {
   if (!opts.uri) return withDb(dbPath, (uri) => readExecutions(dbPath, { ...opts, uri }), opts);
   const cols = sqlite(dbPath, "PRAGMA table_info(executions)", opts).map((r) => r.name);
@@ -310,14 +311,14 @@ function readTail(path, bytes) {
     const buf = Buffer.alloc(st.size - start);
     readSync(fd, buf, 0, buf.length, start);
     let s = buf.toString("utf8");
-    if (start > 0) s = s.slice(s.indexOf("\n") + 1); // первая строка обрезана
+    if (start > 0) s = s.slice(s.indexOf("\n") + 1); // the first line is cut off
     return s;
   } finally {
     closeSync(fd);
   }
 }
 
-// usage_audit.jsonl → Map(jobId → [{ts, tokens, durationMs}]) по возрастанию времени. Только числа.
+// usage_audit.jsonl → Map(jobId → [{ts, tokens, durationMs}]) in ascending time order. Numbers only.
 export function readUsageAudit(path) {
   const by = new Map();
   for (const l of readTail(path, AUDIT_TAIL_BYTES).split("\n")) {
@@ -326,7 +327,7 @@ export function readUsageAudit(path) {
     try {
       o = JSON.parse(l);
     } catch {
-      continue; // недописанная строка
+      continue; // a partially written line
     }
     if (!o || typeof o.job_id !== "string") continue;
     let tokens = null;
@@ -347,7 +348,7 @@ export function median(xs) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-// Расход последнего запуска против обычного (медиана до 10 предыдущих). → {last, usual, costly} | null
+// The last run's usage against the usual (the median of up to 10 previous runs). → {last, usual, costly} | null
 export function costCheck(samples) {
   if (!samples || samples.length < COSTLY_MIN_SAMPLES + 1) return samples?.length ? { last: samples.at(-1).tokens, usual: null, costly: false } : null;
   const last = samples.at(-1).tokens;
@@ -355,7 +356,7 @@ export function costCheck(samples) {
   return { last, usual, costly: usual > 0 && last >= COSTLY_FACTOR * usual };
 }
 
-// Файл-пульс Hermes: «<epoch> [pid]». → {ageSec, pid} | null
+// A Hermes heartbeat file: "<epoch> [pid]". → {ageSec, pid} | null
 export function readEpochMarker(path, nowMs) {
   if (!existsSync(path)) return null;
   const parts = readFileSync(path, "utf8").trim().split(/\s+/);
@@ -408,7 +409,7 @@ export function readGateway(root, nowMs, { alive = pidAlive } = {}) {
   return g;
 }
 
-// ---------- сборка кадра ----------
+// ---------- building the frame ----------
 export function collect({ home = homedir(), now = Date.now(), sqliteBin = "/usr/bin/sqlite3", alive = pidAlive } = {}) {
   const root = join(home, ".hermes");
   const r = { root, present: existsSync(root), broken: [], estop: [], gateway: null, profiles: [] };
@@ -417,7 +418,7 @@ export function collect({ home = homedir(), now = Date.now(), sqliteBin = "/usr/
     try {
       return fn();
     } catch (e) {
-      // системная ошибка — её код (ENOENT, EACCES …) или сообщение sqlite3: язык-нейтральны
+      // a system error: its code (ENOENT, EACCES …) or the sqlite3 message — language-neutral
       r.broken.push(e instanceof Broken ? { what, kind: e.kind, arg: e.arg } : { what, kind: String(e.code || e.message).slice(0, 120) });
       return null;
     }
@@ -456,7 +457,7 @@ export function collect({ home = homedir(), now = Date.now(), sqliteBin = "/usr/
   return r;
 }
 
-// Шапка отвечает на «нужно ли что-то сделать с Hermes»: не отвечает → упала → встало → пауза → дорого → всё ок.
+// The header answers "does Hermes need attention": not responding → failed → stopped → paused → costly → all OK.
 export function render(r, { now = Date.now(), lang = envLang() } = {}) {
   LANG = lang === "en" ? "en" : "ru";
   const out = [];
@@ -473,7 +474,7 @@ export function render(r, { now = Date.now(), lang = envLang() } = {}) {
     const sev = { ok: 0, unknown: 1, wait: 2, block: 3, error: 4 };
     if (sev[s] > sev[status]) status = s;
   };
-  const problems = []; // [{ rank, text }] — шапка по самому важному
+  const problems = []; // [{ rank, text }]: the header shows the most important one
 
   // gateway
   const g = r.gateway;
@@ -500,8 +501,8 @@ export function render(r, { now = Date.now(), lang = envLang() } = {}) {
     body.push(line(tr("Gateway: нет gateway_state.json", "Gateway: no gateway_state.json"), { color: "gray" }));
   }
 
-  // Пауза самого Hermes (ESTOP — его собственный механизм, не пауза хаба). ~/.hermes/ESTOP — весь Hermes;
-  // profiles/<n>/ESTOP (`hermes -p <n> pause`) — только профиль <n>: остальные профили работают.
+  // Hermes's own pause (ESTOP is its own mechanism, not the hub's pause). ~/.hermes/ESTOP pauses all of Hermes;
+  // profiles/<n>/ESTOP (`hermes -p <n> pause`) only profile <n>: the other profiles keep running.
   const rootPaused = r.estop.includes("default");
   const pausedProfiles = new Set(rootPaused ? r.profiles.map((p) => p.name).concat(r.estop) : r.estop);
   if (rootPaused) {
@@ -518,19 +519,19 @@ export function render(r, { now = Date.now(), lang = envLang() } = {}) {
       problems.push({ rank: 3, text: tr(`Профиль ${pn} Hermes на паузе — его задачи не запускаются`, `Hermes profile ${pn} is paused — its jobs won't run`) });
       events.push(key);
       body.push(line(tr(`Профиль ${pn} на паузе — его задачи не запускаются`, `Profile ${pn} is paused — its jobs won't run`), { color: "orange", sfimage: "pause.circle", event: key }));
-      // имя профиля — только безопасное для команды
+      // the profile name only when it is safe for a command
       if (/^[\w.-]{1,64}$/.test(name)) body.push(line(tr(`--Снять: hermes -p ${name} resume в терминале`, `--To resume: run hermes -p ${name} resume in a terminal`), { color: "gray" }));
     }
-    // лестница остановки (дизайн §5): весь Hermes — одно объявленное действие, подтверждение — от ядра
+    // the stop ladder (design §5): all of Hermes is one declared action; the confirmation comes from the core
     body.push(line(tr("Поставить Hermes на паузу", "Pause Hermes"), { action: "pause", sfimage: "pause.circle", color: "gray" }));
   }
 
-  // задачи
+  // jobs
   for (const p of r.profiles) {
     body.push("---");
     const tickerSilent = p.ticker && p.ticker.ageSec > TICKER_STALE_S;
     const pn = clean(p.name);
-    // на паузе (весь Hermes или этот профиль) тишина планировщика ожидаема
+    // while paused (all of Hermes or this profile) a silent scheduler is expected
     if (tickerSilent && !pausedProfiles.has(p.name)) {
       bump("error");
       problems.push({ rank: 2, text: tr(`Расписание профиля ${pn} остановилось`, `Profile ${pn}'s schedule has stopped`) });
@@ -585,7 +586,7 @@ export function render(r, { now = Date.now(), lang = envLang() } = {}) {
         body.push(line(tr("--Подробности", "--Details"), { details: "true" }));
         body.push(line(tr(`----расписание cron: ${clean(j.schedule_display)} · id ${clean(j.id)}`, `----cron schedule: ${clean(j.schedule_display)} · id ${clean(j.id)}`), { color: "gray" }));
       }
-      // пауза/возобновление/запуск — объявленные действия (подтверждение с ценой — от ядра, только из приложения)
+      // pause/resume/run are declared actions (the confirmation with its cost comes from the core, only from the app)
       if (/^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(j.id)) {
         if (j.paused) body.push(line(tr("--Возобновить по расписанию", "--Resume on schedule"), { action: "cron-resume", arg: j.id }));
         else {
@@ -610,13 +611,13 @@ export function render(r, { now = Date.now(), lang = envLang() } = {}) {
   problems.sort((a, b) => a.rank - b.rank);
   const title = problems.length ? clean(problems[0].text) : tr(`Hermes: ${jobsCount} ${plural(jobsCount, "задача", "задачи", "задач")} по расписанию`, `Hermes: ${jobsCount} ${plEn(jobsCount, "job", "jobs")} on schedule`);
   const sf = status === "ok" ? "bolt.horizontal.circle" : status === "wait" ? "pause.circle" : status === "unknown" ? "questionmark.circle" : "exclamationmark.triangle";
-  // плитка — что происходит: сколько проблем, иначе сколько задач (не «!» — его и так показывает значок)
+  // the tile says what is going on: how many issues, otherwise how many jobs (not "!" — the icon already shows that)
   const tile = problems.length ? tr(`${problems.length} ${plural(problems.length, "проблема", "проблемы", "проблем")}`, `${problems.length} ${plEn(problems.length, "issue", "issues")}`) : tr(`${jobsCount} ${plural(jobsCount, "задача", "задачи", "задач")}`, `${jobsCount} ${plEn(jobsCount, "job", "jobs")}`);
-  // activity= — для вердикта хаба «можно ли выключать» (ядро ≥ 07.11): задачи, которые идут сейчас; пусто — тихо
+  // activity= feeds the hub's "OK to shut down" verdict (core ≥ 07.11): jobs running now; empty means quiet
   const runningN = r.profiles.reduce((a, p) => a + p.jobs.filter((j) => j.running).length, 0);
   const activity = runningN ? tr(`Hermes: ${runningN} ${plural(runningN, "задача", "задачи", "задач")} в работе`, `Hermes: ${runningN} ${plEn(runningN, "job", "jobs")} running`) : "";
-  // служба молчит или данные не читаются — что у Hermes идёт, неизвестно: «тихо» не говорим, ключа нет (плагин не
-  // участвует в вердикте), иначе карточка выключения ставила бы ему галку рядом с красной плиткой
+  // the service is silent or the data can't be read — what Hermes is running is unknown: we don't say "quiet", the key is
+  // omitted (the plugin takes no part in the verdict), otherwise the shutdown card would tick it next to a red tile
   const blind = events.some((e) => e === "gateway-silent" || e === "source-broken" || e.startsWith("ticker-silent"));
   const head = line(title, { status, tile, sfimage: sf, activity });
   out.push(activity || blind ? head : `${head} activity=""`);
@@ -641,11 +642,11 @@ function plural(n, one, few, many) {
   return many;
 }
 
-// ---------- действия (запускает ядро после подтверждения в приложении) ----------
+// ---------- actions (the core runs them after confirmation in the app) ----------
 
 export const JOB_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-// Профиль, где лежит задача. → { profile, job } | { reason }
+// The profile that holds the job. → { profile, job } | { reason }
 export function findJob(jobId, { home = homedir() } = {}) {
   if (!JOB_ID.test(String(jobId || "")) || String(jobId).startsWith("-")) return { reason: "bad-job" };
   const root = join(home, ".hermes");
@@ -680,8 +681,8 @@ function cleanEnv(home) {
   return env;
 }
 
-// Объяснение отказа действия для человека (контракт 2, строка message=): оболочка показывает его после названия
-// кнопки — «"Пауза": Задача уже на паузе.», поэтому название кнопки в тексте не повторяется. До 120 графем.
+// A human-readable explanation of an action refusal (contract 2, the message= line): the shell shows it after the button
+// name ("Pause": The job is already paused.), so the text doesn't repeat the button name. Up to 120 graphemes.
 export const REFUSALS = {
   "no-hermes": ["Hermes не найден: нет ~/.local/bin/hermes.", "Hermes isn't installed: no ~/.local/bin/hermes."],
   "no-hermes-home": ["Нет папки ~/.hermes — данных Hermes нет.", "No ~/.hermes folder — no Hermes data."],
@@ -747,7 +748,7 @@ function main() {
   process.stdout.write(text + "\n");
 }
 
-// Запуск как программа (а не импорт из тестов). Пути сравниваются по realpath: /tmp → /private/tmp.
+// Run as a program (not imported by tests). Paths are compared by realpath: /tmp → /private/tmp.
 function isMain() {
   try {
     return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));

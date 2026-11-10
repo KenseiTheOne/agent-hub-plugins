@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Разовая генерация ключа подписи реестра — ТОЛЬКО по решению владельца, на его машине.
+// One-off generation of the registry signing key — ONLY when the owner decides to, on the owner's machine.
 //
-//   node scripts/keygen.mjs <каталог вне репы>
+//   node scripts/keygen.mjs <directory outside the repo>
 //
-// Пишет <каталог>/agent-hub-index.key (JSON {keyId, pkcs8}, 0600) и agent-hub-index.pub (формат minisign).
-// .key кладётся в секрет environment «registry-signing» на GitHub (INDEX_SIGNING_KEY) и больше нигде не живёт;
-// .pub — в config.json демона (services.plugins.publicKey) и в приложение. Каталог внутри репы — отказ.
+// Writes <directory>/agent-hub-index.key (JSON {keyId, pkcs8}, 0600) and agent-hub-index.pub (minisign format).
+// The .key goes into the secret of the "registry-signing" environment on GitHub (INDEX_SIGNING_KEY) and lives nowhere else;
+// the .pub goes into the daemon's config.json (services.plugins.publicKey) and into the app. A directory inside the repo is refused.
 
 import { existsSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
@@ -17,10 +17,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export function keygen(dir) {
   const d = resolve(dir);
-  if (d === ROOT || d.startsWith(ROOT + sep)) throw new Error("ключ внутри репы реестра — нельзя");
+  if (d === ROOT || d.startsWith(ROOT + sep)) throw new Error("the key must not be inside the registry repo");
   mkdirSync(d, { recursive: true, mode: 0o700 });
   const keyFile = join(d, "agent-hub-index.key");
-  if (existsSync(keyFile)) throw new Error(`${keyFile} уже есть — не перезаписываю`);
+  if (existsSync(keyFile)) throw new Error(`${keyFile} already exists — not overwriting it`);
   const kp = generateKeyPair();
   writeFileSync(keyFile, kp.secretKey + "\n", { mode: 0o600 });
   chmodSync(keyFile, 0o600);
@@ -30,12 +30,12 @@ export function keygen(dir) {
 
 if (isMain(import.meta.url)) {
   if (!process.argv[2]) {
-    console.error("укажите каталог вне репы: node scripts/keygen.mjs <каталог>");
+    console.error("give a directory outside the repo: node scripts/keygen.mjs <directory>");
     process.exit(2);
   }
   try {
     const r = keygen(process.argv[2]);
-    console.log(`ключ ${r.keyId}: ${r.pubFile} (открытый); закрытый — ${r.keyFile}, в git не класть`);
+    console.log(`key ${r.keyId}: ${r.pubFile} (public); private — ${r.keyFile}, never put it in git`);
   } catch (e) {
     console.error(e.message);
     process.exit(1);

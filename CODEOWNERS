@@ -1,10 +1,10 @@
-# Владельцы реестра.
-# Ветка main защищена: мердж только после ревью владельца; PR с ростом прав (метка permissions) —
-# второй ревьюер (правило защиты ветки «2 approvals» для путей ниже настраивает владелец).
+# Registry owners.
+# The main branch is protected: merge only after the owner's review; PRs with permission growth (label permissions) —
+# a second reviewer (the owner configures the "2 approvals" branch protection rule for the paths below).
 
 *                       @KenseiTheOne
 
-# Права и доверие: только владелец
+# Permissions and trust: owner only
 /official.json          @KenseiTheOne
 /blocklist.json         @KenseiTheOne
 /scripts/               @KenseiTheOne

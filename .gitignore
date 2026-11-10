@@ -2,5 +2,5 @@ dist/
 node_modules/
 .DS_Store
 *.log
-# закрытый ключ подписи никогда не лежит в репе
+# the private signing key never lives in the repo
 *.key

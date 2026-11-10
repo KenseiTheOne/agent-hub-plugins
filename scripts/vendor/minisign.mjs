@@ -1,17 +1,17 @@
-// Подпись в формате minisign (Ed25519) на node:crypto, без внешних программ.
+// Signatures in the minisign format (Ed25519) on node:crypto, without external programs.
 //
-// Модуль самодостаточен (только node:*): его же копирует реестр agent-hub-plugins (scripts/vendor/).
+// The module is self-contained (node:* only): the agent-hub-plugins registry copies it too (scripts/vendor/).
 //
-// Открытый ключ (как у minisign):
+// Public key (same as minisign):
 //   untrusted comment: minisign public key <KEYID>
 //   base64( "Ed" || keyId[8] || pk[32] )
-// Подпись (.minisig):
-//   untrusted comment: <текст>
-//   base64( "ED" || keyId[8] || sig[64] )         ← sig = Ed25519(BLAKE2b-512(файл)); "Ed" — без предхеша
-//   trusted comment: <текст>
+// Signature (.minisig):
+//   untrusted comment: <text>
+//   base64( "ED" || keyId[8] || sig[64] )         ← sig = Ed25519(BLAKE2b-512(file)); "Ed" — no prehash
+//   trusted comment: <text>
 //   base64( globalSig[64] )                        ← Ed25519(sig || trusted comment)
-// Закрытый ключ — НЕ формат minisign (у того scrypt-шифрование), а JSON {"keyId":"<hex>","pkcs8":"<base64>"}:
-// он живёт только в секрете окружения CI (environment) и во временных каталогах тестов.
+// The secret key is NOT in the minisign format (that one uses scrypt encryption) but JSON {"keyId":"<hex>","pkcs8":"<base64>"}:
+// it lives only in the CI environment secret and in temporary test directories.
 
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign as edSign, verify as edVerify } from "node:crypto";
 
@@ -24,21 +24,27 @@ function b64url(buf) {
 }
 
 function keyIdHex(id) {
-  // minisign печатает keyId как little-endian число в верхнем регистре
+  // minisign prints keyId as an uppercase little-endian number
   return Buffer.from(id).reverse().toString("hex").toUpperCase();
+}
+
+// Key errors: an English message plus msgKey — the hub CLI shows it in the hub language (lib/i18n.mjs errText); the
+// module stays self-contained.
+function keyError(msgKey, text) {
+  return Object.assign(new Error(text), { msgKey: `minisign.${msgKey}`, params: {} });
 }
 
 function lines(text) {
   return String(text).replace(/\r\n/g, "\n").split("\n");
 }
 
-// Разбор открытого ключа: файл из двух строк или одна строка base64. → { keyId: Buffer(8), key: KeyObject }
+// Public key parsing: a two-line file or a single base64 line. → { keyId: Buffer(8), key: KeyObject }
 export function parsePublicKey(text) {
-  if (typeof text !== "string" || !text.trim()) throw new Error("пустой открытый ключ");
+  if (typeof text !== "string" || !text.trim()) throw keyError("empty", "empty public key");
   const ls = lines(text).map((l) => l.trim()).filter(Boolean);
   const b64 = ls.find((l) => !l.startsWith("untrusted comment:"));
   const raw = Buffer.from(b64 || "", "base64");
-  if (raw.length !== 42 || !raw.subarray(0, 2).equals(PK_ALG)) throw new Error("не открытый ключ minisign Ed25519");
+  if (raw.length !== 42 || !raw.subarray(0, 2).equals(PK_ALG)) throw keyError("notKey", "not a minisign Ed25519 public key");
   const keyId = raw.subarray(2, 10);
   const key = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: b64url(raw.subarray(10)) }, format: "jwk" });
   return { keyId, key, keyIdHex: keyIdHex(keyId) };
@@ -47,15 +53,15 @@ export function parsePublicKey(text) {
 function parseSecretKey(secret) {
   const obj = typeof secret === "string" ? JSON.parse(secret) : secret;
   if (!obj || typeof obj.keyId !== "string" || !/^[0-9a-f]{16}$/.test(obj.keyId) || typeof obj.pkcs8 !== "string") {
-    throw new Error("закрытый ключ: ждём JSON {keyId, pkcs8}");
+    throw new Error("secret key: expected JSON {keyId, pkcs8}");
   }
   const key = createPrivateKey({ key: Buffer.from(obj.pkcs8, "base64"), format: "der", type: "pkcs8" });
-  if (key.asymmetricKeyType !== "ed25519") throw new Error("закрытый ключ не Ed25519");
+  if (key.asymmetricKeyType !== "ed25519") throw new Error("secret key is not Ed25519");
   return { keyId: Buffer.from(obj.keyId, "hex"), key };
 }
 
-// Новая пара. Вызывать только там, где ключ не утечёт: тесты во временном каталоге, разовая генерация
-// пользователем (scripts/keygen.mjs реестра). → { publicKey: <текст minisign>, secretKey: <JSON>, keyId }
+// A new key pair. Call only where the key cannot leak: tests in a temporary directory, a one-off generation
+// by the user (the registry's scripts/keygen.mjs). → { publicKey: <minisign text>, secretKey: <JSON>, keyId }
 export function generateKeyPair() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const keyId = randomBytes(8);
@@ -77,7 +83,7 @@ function cleanComment(s, fallback) {
   return v.length > 1024 ? v.slice(0, 1024) : v;
 }
 
-// → текст .minisig (предхеш BLAKE2b-512, как minisign -S по умолчанию)
+// → .minisig text (BLAKE2b-512 prehash, like minisign -S by default)
 export function sign(message, secret, { trustedComment, untrustedComment } = {}) {
   const { keyId, key } = parseSecretKey(secret);
   const sig = edSign(null, blake(Buffer.from(message)), key);

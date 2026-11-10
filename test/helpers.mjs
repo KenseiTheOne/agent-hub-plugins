@@ -1,4 +1,4 @@
-// Помощники тестов реестра: временный реестр с синтетическими плагинами.
+// Registry test helpers: a temporary registry with synthetic plugins.
 
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,7 +8,7 @@ export function tempDir(prefix = "ahp-") {
   return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
 }
 
-// plugins: { id: { "<файл>": "текст", ... } }
+// plugins: { id: { "<file>": "text", ... } }
 export function makeRegistry(plugins = {}, { official = [], blocklist = [] } = {}) {
   const root = tempDir("ahp-reg-");
   writeFileSync(join(root, "official.json"), JSON.stringify({ official }));
@@ -30,7 +30,7 @@ export function cleanup(p) {
   rmSync(p, { recursive: true, force: true });
 }
 
-// Метаданные плагина .mjs. extra — дополнительные строки-теги.
+// Metadata of an .mjs plugin. extra — additional tag lines.
 export function pluginSource({ title = "Hello", version = "1.0.0", effects = "open.url", extra = [], body = null } = {}) {
   const tags = [
     `// <agenthub.title>${title}</agenthub.title>`,
@@ -46,15 +46,15 @@ export function pluginSource({ title = "Hello", version = "1.0.0", effects = "op
     `import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-let s = "нет файла";
+let s = "no file";
 try {
   s = readFileSync(join(homedir(), ".config", "hello", "state.json"), "utf8").trim();
 } catch {}
 console.log("Hello " + s + " | status=ok");
 console.log("---");
-console.log('Сайт | effect="open.url https://example.com"');
+console.log('Site | effect="open.url https://example.com"');
 `;
   return `#!/usr/bin/env node\n${tags.join("\n")}\n${code}`;
 }
 
-export const README = "# Плагин\n\nСинтетический плагин для тестов реестра.\n";
+export const README = "# Plugin\n\nA synthetic plugin for registry tests.\n";

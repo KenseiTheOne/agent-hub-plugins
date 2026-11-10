@@ -1,20 +1,20 @@
-<!-- Копия из agent-hub, контракт v3. Не править: файл пишет node scripts/sync-vendor.mjs, --check ловит расхождение. -->
-> **Копия из agent-hub, контракт v3 — не править.** Источник: `daemon/lib/push/README.md`, разделы: «Ключи событий для плагинов», «Выключатели». Обновляет
-> `node scripts/sync-vendor.mjs` (рядом с agent-hub); `node scripts/sync-vendor.mjs --check` и CI ловят расхождение.
-> Пути и ссылки в тексте — от корня репозитория agent-hub. Нужна возможность, которой здесь нет, — запишите, что
-> нужно, и отдайте в сессию хаба (CLAUDE.md реестра).
+<!-- Copy from agent-hub, contract v3. Don't edit: node scripts/sync-vendor.mjs writes this file, --check catches drift. -->
+> **Copy from agent-hub, contract v3 — don't edit.** Source: `daemon/lib/push/README.md`, sections: "Event keys for plugins", "Switches". Updated by
+> `node scripts/sync-vendor.mjs` (next to agent-hub); `node scripts/sync-vendor.mjs --check` and CI catch drift.
+> Paths and links in the text are relative to the agent-hub repository root. Need a capability that isn't here? Write
+> down what you need and hand it to the hub session (the registry's CLAUDE.md).
 
-## Ключи событий для плагинов
+## Event keys for plugins
 
-Правило выбирается по ключу без id плагина: точное имя/алиас или имя + суффикс экземпляра через `:`, `.`, `/`, `-`
-(`session-waiting:<sessionId>`, `build-blocked:<что>`). Текст сообщения — заголовок строки вывода, на которой стоит
-`event=` (до 160 символов, без управляющих символов), подзаголовок — название плагина и ярлык правила («Почта · письмо
-не ушло»): ведущее «<название плагина>:» с ярлыка срезается, а если подробность сама говорит то же (≥ 60 % значимых слов
-ярлыка), подзаголовок — только название («Квота» · «При таком темпе 85% наступит вс 08.11 12:36 — раньше сброса»).
-Подробности нет — телом идёт ярлык. **В заголовок такой строки —
-только метаданные**: имя задачи, вкладки, причина; никакого текста переписки, `tool_input`, путей к секретам.
+A rule is chosen by the key without the plugin id: an exact name/alias, or a name plus an instance suffix after `:`,
+`.`, `/`, `-` (`session-waiting:<sessionId>`, `build-blocked:<what>`). The message text is the title of the output
+line that carries `event=` (up to 160 characters, no control characters); the subtitle is the plugin name plus the
+rule label ("Mail · message not sent"): a leading "<plugin name>:" is cut from the label, and if the detail already says
+the same (≥ 60 % of the label's significant words), the subtitle is only the name ("Quota" · "At this pace 85% will be
+reached Sun 08.11 12:36 — before the reset"). With no detail, the label becomes the body. **The title of such a line
+must contain metadata only**: a task name, a tab, a reason; no conversation text, no `tool_input`, no paths to secrets.
 
-**Свои правила плагина.** Плагин объявляет правила для своих ключей тегом в метаданных:
+**A plugin's own rules.** A plugin declares rules for its own keys with a tag in its metadata:
 
 ```
 # <agenthub.push key="build-blocked" hold="evening" cooldown="0s" kind="plugin">Сборка не запустится</agenthub.push>
@@ -23,127 +23,133 @@
 # <agenthub.push key="service-silent" lang="en">Silent</agenthub.push>
 ```
 
-`hold="evening"`, `quiet="true"` (проходит в тихие часы), `macOnly="true"`, `cooldown=<интервал>`, `away=<интервал>`
-(Telegram, если человек отошёл и событие висит дольше), `kind=<вид>` (выключатель в «Настройках»: общий вид ядра
-`sessions`, `updates`, `problems`, `other`; `plugin` — **свой переключатель плагина** (строка с названием плагина в
-«Настройках → Уведомления»); `security` — исключение безопасности, не выключается; неизвестное значение —
-предупреждение разбора, правило отбрасывается), `was=runs|night` (только с `kind="plugin"`: прежний вид контракта 1 —
-выключенный пользователем, он гасит этот переключатель, ниже «Перенос»), текст тега — ярлык (до 80 символов).
-Устаревшие `kind="runs"` и `kind="night"` (контракт 1) принимаются как `kind="plugin" was="<вид>"`, линтер
-предупреждает. Служба берёт такие
-правила **только у встроенных, официальных и своих** плагинов (`trusted`: tier из подписанного индекса реестра или
-согласие человека на свой плагин из папки — `docs/plugins-registry.md`, «Свои источники»); они стоят впереди общей
-таблицы. У остальных теги игнорируются. Так ядро не знает ключей ни одного плагина: правила официальных плагинов лежат
-в их метаданных (реестр `agent-hub-plugins`), своих — в метаданных своего плагина в репозитории инструмента; встроенные
-(`agents`, `claude-sessions`) объявляют свои так же. У своего плагина правила с `kind="security"` и `quiet="true"` — права вида `push`:
-видны в окне согласия, их появление — рост прав (не тихое обновление из папки).
+`hold="evening"`, `quiet="true"` (goes through during quiet hours), `macOnly="true"`, `cooldown=<interval>`,
+`away=<interval>` (Telegram if the human is away and the event stays raised longer), `kind=<kind>` (the switch in
+"Settings": a shared core kind `sessions`, `updates`, `problems`, `other`; `plugin` — **the plugin's own toggle** (a
+line with the plugin name in "Settings → Notifications"); `security` — a security exception, cannot be turned off; an
+unknown value is a parse warning and the rule is dropped), `was=runs|night` (only with `kind="plugin"`: the former
+contract 1 kind — if the user turned it off, it turns this toggle off, see "Migration" below); the tag text is the label
+(up to 80 characters). The deprecated `kind="runs"` and `kind="night"` (contract 1) are accepted as
+`kind="plugin" was="<kind>"`, and the linter warns. The service takes such rules **only from built-in, official and
+own** plugins (`trusted`: the tier comes from the signed registry index or from the human's consent to an own plugin
+from a folder — [`docs/plugins-registry.md`](../../../docs/plugins-registry.md), "Own sources"); they go ahead of the
+shared table. Other plugins' tags are ignored. This way the core knows no plugin's keys: official plugins' rules live in
+their metadata (registry `agent-hub-plugins`), own plugins' rules in their metadata in the tool's repository; built-in
+plugins (`agents`, `claude-sessions`) declare theirs the same way. For an own plugin, rules with `kind="security"` and
+`quiet="true"` are `push` permissions: they are shown in the consent window, and their appearance is a permission
+increase (not a silent update from the folder).
 
-Общая таблица (`rules.mjs`) — только общие ключи ядра (с контракта 2 там нет `blocker`, `session-died`,
-`workflow-failed`, `workflow-orphaned` и квоты: их объявляют плагины, которым они нужны — `claude-sessions` (`died`),
-`agents` (`wf-failed`, `wf-orphaned`), `quota` (`week-80` и `pace-85` — не чаще раза в неделю, `token-lost` — сразу;
-все — «сбои и предупреждения»)):
+The shared table (`rules.mjs`) contains only the core's shared keys (since contract 2 it no longer has `blocker`,
+`session-died`, `workflow-failed`, `workflow-orphaned` or the quota keys: the plugins that need them declare them —
+`claude-sessions` (`died`), `agents` (`wf-failed`, `wf-orphaned`), `quota` (`week-80` and `pace-85` — at most once a
+week, `token-lost` — immediately; all of them "failures and warnings")):
 
-| Ключ | Когда шлётся |
+| Key | When it is sent |
 |---|---|
-| `session-waiting` (`waiting:<sessionId>` у claude-sessions) | у мака — macOS сразу; отошёл и ждёт > 5 мин — Telegram один раз; без окна дребезга |
-| `auth-failed` | сразу |
-| `source-broken`, `plugin-error` | один раз до восстановления |
-| `approvals-paused` (источник `@hub`) | сразу |
-| `app-pin-changed` (источник `@hub`) | сразу и в тихие часы, на каждую смену `requirements.app` (без окна дребезга); у мака — всегда `osascript`, без `push.notify` и `/push/ack` (`bannerAlways`); в тексте — откуда закрепили (`из Claude Code` — заглавными в начале) |
-| `app-pin-path-changed` (источник `@hub`) | сразу и в тихие часы, на каждую смену `appPin.path` при том же требовании (бандл, который демон запускает); у мака — всегда `osascript` (`bannerAlways`); «Сменился путь закреплённой сборки Agent Hub — Демон теперь запускает <путь>. Если это были не вы — откройте журнал» |
-| `app-restart-stopped` (источник `@hub`) | сразу, на каждый эпизод стопа надзора (служба app: приложение упало 3 раза за 10 мин или 3 проверки подряд не дали запустить — `why`); снова — только после того, как приложение открыло поток событий и стоп снят; у мака — всегда `osascript` (`bannerAlways`: приложения нет, подтверждать некому); «Agent Hub падает — перезапуск остановлен: 3 перезапуска за 10 мин. Откройте Agent Hub сами; подробности — agenthub logs» (с `why` — «Не удаётся запустить Agent Hub (<why>)…») |
-| любой другой | сразу, с ярлыком «Событие «ключ»» |
+| `session-waiting` (`waiting:<sessionId>` in claude-sessions) | at the Mac — macOS immediately; away and waiting > 5 min — Telegram once; no flap window |
+| `auth-failed` | immediately |
+| `source-broken`, `plugin-error` | once until recovery |
+| `approvals-paused` (source `@hub`) | immediately |
+| `app-pin-changed` (source `@hub`) | immediately and during quiet hours, on every change of `requirements.app` (no flap window); at the Mac — always `osascript`, without `push.notify` and `/push/ack` (`bannerAlways`); the text says where the pin came from (`из Claude Code` — capitalized at the start) |
+| `app-pin-path-changed` (source `@hub`) | immediately and during quiet hours, on every change of `appPin.path` with the same requirement (the bundle the daemon launches); at the Mac — always `osascript` (`bannerAlways`); "The path of the pinned Agent Hub build changed — the daemon now launches <path>. If it wasn't you, open the journal" |
+| `app-restart-stopped` (source `@hub`) | immediately, once per episode of the supervisor stopping (app service: the app crashed 3 times in 10 min or 3 checks in a row could not launch it — `why`); again only after the app has opened the event stream and the stop is cleared; at the Mac — always `osascript` (`bannerAlways`: there is no app to acknowledge); "Agent Hub keeps crashing — restarts stopped: 3 restarts in 10 min. Open Agent Hub yourself; details — agenthub logs" (with `why` — "Cannot launch Agent Hub (<why>)…") |
+| anything else | immediately, labeled "Event "key"" |
 
-Общее: пока ключ поднят — одно сообщение; снят и поднят снова в пределах 10 мин после отправки — гасится
-(дребезг). События **сторонних** плагинов (`trusted: false`) — только macOS, без их текста и без их правил.
+In general: while a key is raised there is one message; cleared and raised again within 10 min after sending — it is
+suppressed (flapping). Events of **third-party** plugins (`trusted: false`) go to macOS only, without their text and
+without their rules.
 
-Пределы (защита демона от потока событий): не больше `maxPerPluginPerMin` (20) новых уведомлений от одного
-доверенного плагина за минуту и `maxPerUntrustedPerMin` (5) — от стороннего; первое сверх предела — одно
-уведомление «уведомления от плагина приглушены на минуту» (`push-throttled` в журнале), остальные события только
-запоминаются. Записей (ключей) на плагин — не больше `maxEntriesPerPlugin` (500) / `maxEntriesPerUntrusted` (100):
-сверх — вытесняются самые давно снятые, а если все подняты — новый ключ не запоминается (`push-dropped`: первый отказ за минуту — запись сразу,
-остальные — одной сводкой `push-dropped` с `dropped: N` по истечении минуты). События
-хаба (`@hub`) — без этих пределов. `push-state.json` пишется один раз на пачку событий (когда очередь опустела,
-не реже раза в 2 с), очередь отдаёт цикл событий между операциями.
+Limits (protecting the daemon from an event flood): at most `maxPerPluginPerMin` (20) new notifications per minute from
+one trusted plugin and `maxPerUntrustedPerMin` (5) from a third-party one; the first one over the limit produces a
+single notification "notifications from the plugin are muted for a minute" (`push-throttled` in the journal), the
+other events are only remembered. Entries (keys) per plugin — at most `maxEntriesPerPlugin` (500) /
+`maxEntriesPerUntrusted` (100): beyond that the longest-cleared ones are evicted, and if all are raised the new key is
+not remembered (`push-dropped`: the first refusal in a minute is recorded immediately, the rest as one `push-dropped`
+summary with `dropped: N` when the minute ends). Hub events (`@hub`) have no such limits. `push-state.json` is written
+once per batch of events (when the queue is empty, at least every 2 s); the queue yields the event loop between
+operations.
 
-## Выключатели — «Настройки → Уведомления» (09.11)
+## Switches — "Settings → Notifications" (2026-11-09)
 
-Хранятся в `<home>/settings.json → notifications` (`{enabled, kinds: {<вид>: bool}, quiet: {enabled, start, end} | null}`),
-пишет только класс app (закреплённая сборка) — `PUT /settings/notifications` (`docs/api.md`); служба подхватывает смену
-по `settings.changed` без перезапуска.
+Stored in `<home>/settings.json → notifications` (`{enabled, kinds: {<kind>: bool}, quiet: {enabled, start, end} | null}`),
+written only by the app class (the pinned build) via `PUT /settings/notifications`
+([`docs/api.md`](../../../docs/api.md)); the service picks up changes on `settings.changed` without a restart.
 
-| Вид | Правила ядра | Плагины (`kind=` в теге) |
+| Kind | Core rules | Plugins (`kind=` in the tag) |
 |---|---|---|
-| `sessions` — ждут ответа / вопросы сессий | `session-waiting`, `approvals-paused` | — |
-| `updates` — обновления хаба и плагинов | `plugin-update`, `hub-update`, `hub-update-ready`, `hub-update-installed`, `hub-update-failed` | — |
-| `problems` — сбои и предупреждения плагинов | `source-broken`, `plugin-error`, `auth-failed` (и правила плагинов с `kind="problems"`, например квота) | правило с `kind="problems"` или ключ из таблицы (`auth-failed`) |
-| `other` — прочее от плагинов | ключ без правила; **все** события сторонних плагинов | правило без `kind` и без совпадения в таблице |
-| `plugin:<id>` — **свой переключатель плагина** | — | правила с `kind="plugin"` (и устаревшие `kind="runs"`/`"night"`): строка в «Настройках» с названием плагина, только пока плагин установлен |
-| `security` — **не выключается** | `app-pin-changed`, `app-pin-path-changed`, `app-restart-stopped`, `hub-update-tag-moved`, `hub-update-suspect` | правила с `kind="security"` (сигналы подмены) |
+| `sessions` — waiting for an answer / session questions | `session-waiting`, `approvals-paused` | — |
+| `updates` — hub and plugin updates | `plugin-update`, `hub-update`, `hub-update-ready`, `hub-update-installed`, `hub-update-failed` | — |
+| `problems` — plugin failures and warnings | `source-broken`, `plugin-error`, `auth-failed` (and plugin rules with `kind="problems"`, for example quota) | a rule with `kind="problems"` or a key from the table (`auth-failed`) |
+| `other` — everything else from plugins | a key without a rule; **all** events of third-party plugins | a rule without `kind` and without a match in the table |
+| `plugin:<id>` — **the plugin's own toggle** | — | rules with `kind="plugin"` (and the deprecated `kind="runs"`/`"night"`): a line in "Settings" with the plugin name, only while the plugin is installed |
+| `security` — **cannot be turned off** | `app-pin-changed`, `app-pin-path-changed`, `app-restart-stopped`, `hub-update-tag-moved`, `hub-update-suspect` | rules with `kind="security"` (tampering signals) |
 
-**Свой переключатель плагина** (контракт 2). В `settings.json → pluginNotifications.plugins` — `{<id>: bool}`;
-`/state.notifications.plugins` — строки `{id, title, on, labels, legacy?}` для установленных доверенных плагинов, у
-которых есть правило `kind="plugin"`. Название — на языке хаба (из `<agenthub.title lang=…>`), `labels` — ярлыки его
-правил. Нет плагина — нет строки; значение в `settings.json` при этом остаётся (плагин вернётся — с тем же выбором).
-Общий выключатель гасит и переключатели плагинов; `security` они не трогают.
+**The plugin's own toggle** (contract 2). `settings.json → pluginNotifications.plugins` holds `{<id>: bool}`;
+`/state.notifications.plugins` has lines `{id, title, on, labels, legacy?}` for installed trusted plugins that have a
+`kind="plugin"` rule. The title is in the hub language (from `<agenthub.title lang=…>`), `labels` are the labels of its
+rules. No plugin — no line; the value in `settings.json` stays (if the plugin comes back, the same choice applies).
+The master switch also silences plugin toggles; they do not affect `security`.
 
-**Перенос настроек контракта 1.** До 09.11 в `settings.json` были виды `runs` («Прогоны агентов») и `night` («Ночь»).
-Ядро их больше не знает, но выбор пользователя не теряется:
+**Migrating contract 1 settings.** Before 2026-11-09 `settings.json` had the kinds `runs` ("Agent runs") and `night`.
+The core no longer knows them, but the user's choice is not lost:
 
-1. Выключенные `kinds.runs/night = false` остаются в `settings.json → notifications.kinds` как есть — ядро видит их
-   как «прежний вид выключен» (`legacy` в памяти); `true` значения не имеет (по умолчанию и так включено).
-2. Переключатель плагина без явного значения выключен, если хоть одно его правило объявляло выключенный прежний вид:
-   `kind="night"`/`kind="runs"` (устаревший синоним) или `kind="plugin" was="night"|"runs"`. Встроенные `agents` и
-   `claude-sessions` объявляют `was="runs"` — их события до 09.11 шли видом «Прогоны агентов».
-3. Как только ядро видит такой плагин, оно закрепляет вывод явным `plugins.<id> = false` с пометкой `migrated.<id>`
-   (журнал `settings-migrated {plugin, from}`, событие `settings.changed`): дальше плагин может сменить
-   `kind="night"` на `kind="plugin"` без `was=` — выбор сохранится. Явный выбор человека перенос не трогает; строка с
-   выводом из переноса — `legacy: true` («Выключено по прежней настройке уведомлений»), пока человек её не тронет.
-4. **Однократно.** После первого полного скана плагинов (`host.start` → `core.pluginsScanned`) ядро запоминает, к
-   каким плагинам относится перенос (`pluginNotifications.legacyFor` — id плагинов, что стояли тогда; журнал
-   `settings-migrated {legacyFor}`). Плагин, поставленный позже, прежней настройкой не выключается, даже если объявил
+1. Turned-off `kinds.runs/night = false` stay in `settings.json → notifications.kinds` as they are — the core sees
+   them as "a former kind is off" (`legacy` in memory); `true` means nothing (it is on by default anyway).
+2. A plugin toggle without an explicit value is off if at least one of its rules declared a turned-off former kind:
+   `kind="night"`/`kind="runs"` (deprecated synonym) or `kind="plugin" was="night"|"runs"`. The built-in `agents` and
+   `claude-sessions` declare `was="runs"` — before 2026-11-09 their events used the "Agent runs" kind.
+3. As soon as the core sees such a plugin, it fixes the inferred value as an explicit `plugins.<id> = false` with a
+   `migrated.<id>` mark (journal `settings-migrated {plugin, from}`, event `settings.changed`): from then on the plugin
+   may change `kind="night"` to `kind="plugin"` without `was=` and the choice is kept. Migration never touches an
+   explicit human choice; a line inferred from migration has `legacy: true` ("Turned off by an earlier notification
+   setting") until the human touches it.
+4. **Once only.** After the first full plugin scan (`host.start` → `core.pluginsScanned`) the core records which plugins
+   the migration applies to (`pluginNotifications.legacyFor` — ids of the plugins installed at that time; journal
+   `settings-migrated {legacyFor}`). A plugin installed later is not turned off by the old setting, even if it declares
    `was=`.
-5. `PUT /settings/notifications` с `kinds.runs|night` — `400 args:kinds:enum`; пункт дайджеста из файла до переноса с
-   видом `runs`/`night` считается «прочим».
+5. `PUT /settings/notifications` with `kinds.runs|night` — `400 args:kinds:enum`; a digest item from a pre-migration
+   file with kind `runs`/`night` counts as "other".
 
-**Откат хаба** (`agenthub hub rollback` на ядро контракта 1) выбор не теряет: в `settings.json` выключенные
-`runs`/`night` лежат в `notifications.kinds` — там, где их читает старое ядро (его «Прогоны» и «Ночь» молчат), а свои
-переключатели и пометки переноса — отдельным ключом верхнего уровня `pluginNotifications {plugins, migrated,
-legacyFor}`: старое ядро его не нормализует и при своей записи `settings.json` сохраняет как есть. После повторного
-обновления выбор на месте. Человек включил прежний вид в старом хабе — новое ядро снимает выведенные из него
-«выключено» (`migrated`), явный выбор остаётся.
+**A hub rollback** (`agenthub hub rollback` to a contract 1 core) keeps the choice: in `settings.json` the turned-off
+`runs`/`night` live in `notifications.kinds`, where the old core reads them (its "Runs" and "Night" stay silent), and
+the plugin toggles and migration marks live in a separate top-level key `pluginNotifications {plugins, migrated,
+legacyFor}`: the old core does not normalize it and keeps it as is when it writes `settings.json`. After updating again
+the choice is in place. If the human turned a former kind back on in the old hub, the new core drops the "off" values
+inferred from it (`migrated`), while explicit choices stay.
 
-Вид правила плагина без `kind` — вид правила общей таблицы с тем же ключом (`auth-failed` → `problems`), иначе `other`.
-Вид задают только ядро и доверенный плагин; `services.push.rules` в `config.json` вид не меняет, сторонний плагин
-`security` объявить не может (его правила не берутся вовсе). Вид `security` из таблицы ядра достаётся только событиям
-самого хаба (`@hub`): плагин, поднявший ключ ядра (`app-restart-stopped` и т. п.), получает правило без вида, без
-`bannerAlways`, `quietException` и ярлыка хаба — исключение безопасности доверенный плагин объявляет только своим тегом
-`<agenthub.push kind="security">` (линтер реестра предупреждает о таком теге и о ключах ядра).
+The kind of a plugin rule without `kind` is the kind of the shared-table rule with the same key (`auth-failed` →
+`problems`), otherwise `other`. Only the core and a trusted plugin set kinds; `services.push.rules` in `config.json`
+does not change the kind, and a third-party plugin cannot declare `security` (its rules are not taken at all). The
+`security` kind from the core table applies only to the hub's own events (`@hub`): a plugin that raises a core key
+(`app-restart-stopped` and the like) gets a rule without a kind, without `bannerAlways`, `quietException` and the hub
+label — a trusted plugin declares a security exception only with its own `<agenthub.push kind="security">` tag (the
+registry linter warns about such a tag and about core keys).
 
-**`config.json` не переопределяет исключения безопасности**: к правилам с видом `security` (ядра и доверенных плагинов)
-`services.push.rules` не применяется — ни `hold`, ни `awayDelayMs`, ни `cooldownMs`, ни `label`, ни новый алиас,
-перехватывающий ключ ядра. Единственный способ их заглушить — выключить службу целиком (`services.push.enabled =
-false`), и «Настройки → Уведомления» об этом предупреждают.
+**`config.json` does not override security exceptions**: `services.push.rules` is not applied to rules of kind
+`security` (core or trusted plugins) — no `hold`, no `awayDelayMs`, no `cooldownMs`, no `label`, no new alias that
+hijacks a core key. The only way to silence them is to turn off the whole service (`services.push.enabled = false`),
+and "Settings → Notifications" warns about that.
 
-- **Выключенный вид не уходит никуда**: ни `push.notify` оболочке, ни запасной `osascript`, ни Telegram, ни пункт
-  дайджеста; в журнал — `push-muted {key, rule, kind, reason: "kind"|"all"}` без текста. Событие остаётся в состоянии
-  плагина (поповер, страница плагина) и в журнале. Его подъём не тратит предел частоты плагина и не даёт
-  «уведомления приглушены».
-- Решение — при подъёме и перед каждой отложенной отправкой: вечерний блокер ждал 21:00, ждущая сессия — простоя,
-  пункт ждал утреннего дайджеста (`push-muted {key: "digest", count}`). Выключено в момент отправки — не уходит;
-  выключали на время ожидания, а к отправке включили — уходит как обычно (`push-muted` — один раз на «выключено»).
-  Поднято при выключенном виде — не досылается и после включения (придёт следующее состояние). Пункт дайджеста без
-  `kind` (файл до 09.11) получает вид по ключу.
-- Общий выключатель (`enabled: false`) глушит все виды, кроме `security`.
-- **Почему `security` не выключается**: это сигналы о возможной подмене (перезакрепление приложения, смена пути
-  сборки, перенос тега релиза, сигнал подмены, объявленный плагином) и об остановке перезапусков приложения. Настройки меняет класс app —
-  то есть та самая сборка, о закреплении которой уведомление; выключатель для таких событий первым делом щёлкнула бы
-  подменённая сборка. Поэтому их нет ни в общем выключателе, ни в видах (`PUT` с `kinds.security` — `400
-  args:kinds:enum`), и баннер у событий хаба по-прежнему идёт мимо оболочки (`bannerAlways`).
-- **Тихие часы** — `quiet` в настройках; пока не заданы, действуют `services.push.quietStart/quietEnd` из
-  `config.json` (как до 09.11), без них — 23:00–08:00 (`/state.notifications.quiet.from`: `settings` | `config` |
-  `default`). Первая правка в «Настройках» берёт за основу действующие значения. `quiet.enabled: false` — ночью всё по
-  обычному маршруту (Telegram сразу, дайджеста нет); вечерний блокер и «сутки ночи» считаются от тех же границ.
-  `quietStart == quietEnd` в `config.json` (раньше — «тихих часов нет») показывается выключенными тихими часами с
-  границами 23:00–08:00. Вечернее окно блокера — от `eveningAt` до начала тихих часов, только если оно вечером
-  (не длиннее 12 ч): тихие часы с 20:00 при `eveningAt` 21:00 окна не дают, блокер ждёт начала ночи.
+- **A turned-off kind goes nowhere**: no `push.notify` to the shell, no fallback `osascript`, no Telegram, no digest
+  item; the journal gets `push-muted {key, rule, kind, reason: "kind"|"all"}` without text. The event stays in the
+  plugin state (popover, plugin page) and in the journal. Raising it does not consume the plugin rate limit and does not
+  produce "notifications muted".
+- The decision is made when the event is raised and before every deferred send: the evening blocker waited for 21:00, a
+  waiting session for idleness, an item for the morning digest (`push-muted {key: "digest", count}`). Off at send time —
+  not sent; turned off while waiting but on again by send time — sent as usual (`push-muted` once per "off"). Raised
+  while the kind was off — not re-sent after it is turned on (the next state will arrive). A digest item without `kind`
+  (a file from before 2026-11-09) gets its kind from the key.
+- The master switch (`enabled: false`) silences all kinds except `security`.
+- **Why `security` cannot be turned off**: these are signals of possible tampering (the app re-pinned, the build path
+  changed, a release tag moved, a tampering signal declared by a plugin) and of app restarts being stopped. Settings are
+  changed by the app class — that is, by the very build the pin notification is about; a switch for such events would be
+  the first thing a swapped build flips. So they are neither under the master switch nor among the kinds (`PUT` with
+  `kinds.security` — `400 args:kinds:enum`), and the banner for hub events still bypasses the shell (`bannerAlways`).
+- **Quiet hours** — `quiet` in settings; until it is set, `services.push.quietStart/quietEnd` from `config.json` apply
+  (as before 2026-11-09), and without them 23:00–08:00 (`/state.notifications.quiet.from`: `settings` | `config` |
+  `default`). The first edit in "Settings" starts from the effective values. `quiet.enabled: false` — at night everything
+  takes the normal route (Telegram immediately, no digest); the evening blocker and the "night day" are computed from the
+  same bounds. `quietStart == quietEnd` in `config.json` (formerly "no quiet hours") is shown as quiet hours turned off
+  with bounds 23:00–08:00. The blocker's evening window runs from `eveningAt` to the start of quiet hours, only if that
+  is in the evening (no longer than 12 h): quiet hours from 20:00 with `eveningAt` 21:00 give no window, and the blocker
+  waits for the night to start.

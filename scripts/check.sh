@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Проверка реестра: один вход для CI и автора. Все ключи — как у scripts/check.mjs:
-#   scripts/check.sh                          — всё, без диффа прав
-#   scripts/check.sh --base origin/main       — плюс дифф прав с main
-#   scripts/check.sh --only my-plugin         — один плагин
-# NODE_OPTIONS убирается: preload-хуки (например, cmux) роняют дочерние node.
+# Registry check: one entry point for CI and authors. Flags are the same as scripts/check.mjs:
+#   scripts/check.sh                          — everything, no permission diff
+#   scripts/check.sh --base origin/main       — plus the permission diff against main
+#   scripts/check.sh --only my-plugin         — one plugin
+# NODE_OPTIONS is unset: preload hooks (cmux, for example) crash child node processes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 unset NODE_OPTIONS

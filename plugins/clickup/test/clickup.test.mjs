@@ -1,5 +1,5 @@
-// Плагин clickup (agent-hub-plugins/plugins/clickup/clickup.2m.mjs) с двойником HTTP на 127.0.0.1 — в сеть не ходим.
-// Запуск: cd agent-hub-plugins && env -u NODE_OPTIONS node --test plugins/clickup/test/*.test.mjs (или scripts/check.sh --only clickup)
+// The clickup plugin (agent-hub-plugins/plugins/clickup/clickup.2m.mjs) against an HTTP double on 127.0.0.1 — no network.
+// Run: cd agent-hub-plugins && env -u NODE_OPTIONS node --test plugins/clickup/test/*.test.mjs (or scripts/check.sh --only clickup)
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,7 +17,7 @@ const mod = await import(pathToFileURL(PLUGIN).href);
 const TOKEN = "pk_synthetic_test_token_0001";
 const fix = (n) => JSON.parse(readFileSync(join(FIX, n), "utf8"));
 
-// Двойник ClickUp: маршруты → (req) => {status, body, headers}
+// ClickUp double: routes → (req) => {status, body, headers}
 async function double(routes) {
   const log = [];
   const srv = createServer((req, res) => {
@@ -45,7 +45,7 @@ function setupHome() {
   return { home, env };
 }
 
-// Связи: /ticket + сессия на той же ветке; ночь по attempts; вторая сессия в worktree с id в ветке.
+// Links: /ticket + a session on the same branch; night via attempts; a second session in a worktree with the id in the branch.
 function setupWork(home) {
   const repo = join(home, "repo");
   mkdirSync(join(repo, ".git", "worktrees", "wt"), { recursive: true });
@@ -69,6 +69,7 @@ function setupWork(home) {
   mkdirSync(join(wt, "sub"), { recursive: true });
   writeFileSync(join(sess, "999999.json"), JSON.stringify({ pid: 999999, sessionId: "00000000-0000-4000-8000-00000000000c", cwd: join(home, "dead-86aaa0004"), status: "idle" }));
   writeFileSync(join(sess, `${process.pid}.key`), "НЕ-ЧИТАТЬ");
+  // trap: the cmux file is there, but the plugin doesn't read it (the hub finds the tab by sessionId)
   mkdirSync(join(home, ".cmuxterm"), { recursive: true });
   writeFileSync(
     join(home, ".cmuxterm", "claude-hook-sessions.json"),
@@ -84,31 +85,34 @@ function run(env) {
       if (err) return reject(Object.assign(err, { stderr }));
       const parsed = parseOutput(stdout);
       assert.deepEqual(parsed.warnings, []);
-      for (const m of ["СИНТЕТИЧЕСКОЕ-ОПИСАНИЕ", "СИНТЕТИЧЕСКИЙ-ТЕКСТ", TOKEN, "synthetic@example", "НЕ-ЧИТАТЬ"]) assert.ok(!stdout.includes(m), `в выводе нет «${m}»`);
+      for (const m of ["СИНТЕТИЧЕСКОЕ-ОПИСАНИЕ", "СИНТЕТИЧЕСКИЙ-ТЕКСТ", TOKEN, "synthetic@example", "НЕ-ЧИТАТЬ"]) assert.ok(!stdout.includes(m), `output does not contain "${m}"`);
       resolve({ text: stdout, parsed });
     });
   });
 }
 
-test("метаданные: secrets clickup.token, effects open.url и cmux.focus, net", () => {
+test("metadata: secrets clickup.token, effects open.url and session.focus (not cmux), contract 3, net", () => {
   const pm = readPluginMeta(PLUGIN);
   assert.equal(pm.id, "clickup");
   assert.equal(pm.intervalMs, 120_000);
   assert.equal(pm.meta.type, "standard");
-  assert.deepEqual(pm.meta.effects, ["open.url", "cmux.focus"]);
+  assert.deepEqual(pm.meta.effects, ["open.url", "session.focus"]);
+  assert.equal(pm.meta.contract, 3);
+  assert.ok(!pm.meta.fsRead.some((e) => /cmux/i.test(e)), "the plugin does not read cmux files: the hub finds the tab");
+  assert.ok(!/cmux/i.test(readFileSync(PLUGIN, "utf8")), "the plugin knows nothing about cmux at all");
   assert.equal(pm.meta.secrets.length, 1);
   assert.match(pm.meta.secrets[0], /^clickup\.token/);
   assert.ok(pm.meta.net.length);
 });
 
-test("белый список: только GET и только разрешённые пути и параметры; подмена адреса — только loopback", async () => {
+test("allowlist: GET only and only allowed paths and parameters; base override — loopback only", async () => {
   for (const ok of ["/api/v2/user", "/api/v2/team", "/api/v2/team/1/task", "/api/v2/list/2/task", "/api/v2/task/86abc"]) mod.checkRequest(ok);
   for (const bad of ["/api/v2/task/86abc/comment", "/api/v2/team/1/task/x", "/api/v2/user/../team", "/api/v3/user", "/api/v2/webhook", "/api/v2/team/abc/task"])
     assert.throws(() => mod.checkRequest(bad), (e) => e.kind === "denied", bad);
   assert.throws(() => mod.checkRequest("/api/v2/user", { archived: "true" }), (e) => e.kind === "denied");
   assert.equal(mod.resolveBase("http://127.0.0.1:8080"), "http://127.0.0.1:8080");
   for (const b of ["https://evil.example", "http://127.0.0.1.evil.example:80", "http://10.0.0.1:80", undefined]) assert.equal(mod.resolveBase(b), mod.API_BASE);
-  // клиент сам по себе шлёт только GET с токеном в Authorization и не идёт по редиректам
+  // the client itself sends only GET with the token in Authorization and doesn't follow redirects
   const calls = [];
   const fake = async (url, init) => {
     calls.push({ url, init });
@@ -122,10 +126,10 @@ test("белый список: только GET и только разрешён
   assert.equal(calls[0].init.headers.Authorization, TOKEN);
   assert.equal(rates[0].remaining, 5);
   await assert.rejects(() => c.get("/api/v2/task/1/comment"), (e) => e.kind === "denied");
-  assert.equal(calls.length, 1, "запрещённый путь не дошёл до сети");
+  assert.equal(calls.length, 1, "a denied path never reached the network");
 });
 
-test("нет токена → unknown, ни одного запроса", async () => {
+test("no token → unknown, no requests at all", async () => {
   const d = await double(okRoutes());
   const { home, env } = setupHome();
   try {
@@ -139,7 +143,7 @@ test("нет токена → unknown, ни одного запроса", async 
   }
 });
 
-test("тикеты на пользователя, ссылки open.url, связь с работой и уверенность; user/team кэшируются", async () => {
+test("tickets assigned to the user, open.url links, link to work and confidence; user/team are cached", async () => {
   const d = await double(okRoutes());
   const { home, env } = setupHome();
   setupWork(home);
@@ -159,35 +163,40 @@ test("тикеты на пользователя, ссылки open.url, свя�
     const items = parsed.body;
     const t1 = items.findIndex((i) => i.title === "Синтетика: починить экран загрузки");
     assert.ok(t1 >= 0);
-    assert.equal(items[t1].params.badge, "in progress", "статус — пометкой у названия");
-    assert.match(text, /\n--86aaa0001 · Синтетический список\n/, "номер и список — строкой под названием");
+    assert.equal(items[t1].params.badge, "in progress", "status is a badge on the name");
+    assert.match(text, /\n--86aaa0001 · Синтетический список\n/, "number and list on a line under the name");
     assert.ok(items.some((i) => i.href === "https://app.clickup.com/t/86aaa0001" && /Открыть в ClickUp/.test(i.title)));
     assert.match(text, /→ \/ticket: шаг review \(fix\) · точно/);
     assert.match(text, /сессия «синт-тикет»: ветка fix\/86aaa0001-loading как в RUN\.md · вероятно/);
-    const focus = items.find((i) => i.effect && i.effect.startsWith("cmux.focus"));
-    assert.equal(focus.effect, `cmux.focus ${SURF} workspaceId=${WS}`, "связь с сессией ведёт во вкладку");
-    assert.equal(focus.title, "Перейти: сессия «синт-тикет»");
-    assert.match(text, /\nСинтетика: ночная задача \| sfimage=circle\.lefthalf\.filled badge=review\n--SYN-42 · Синтетический список\n--просрочен: срок 14\.11\.2023 \| color=red\n/);
+    const focus = items.filter((i) => i.effect && i.effect.startsWith("session.focus"));
+    assert.deepEqual(focus.map((i) => [i.title, i.effect]), [
+      ["Перейти: сессия «синт-тикет»", "session.focus 00000000-0000-4000-8000-00000000000a"],
+      ["Перейти: сессия 00000000", "session.focus 00000000-0000-4000-8000-00000000000b"],
+    ], "switching is by sessionId, the hub finds the tab");
+    assert.ok(!text.includes(SURF) && !text.includes("cmux"), "the cmux file (the test trap) is not read");
+    assert.match(text, /\nСинтетика: ночная задача \| sfimage=circle\.lefthalf\.filled iconColor=#f8ae00 badge=review badgeColor=#f8ae00\n--SYN-42 · Синтетический список\n--просрочен: срок 14\.11\.2023 \| color=red\n/);
     assert.match(text, /ночь: PR открыт, 03\.11 · точно/);
     assert.match(text, /сессия 00000000: ветка feature\/86aaa0003-session · вероятно/);
-    assert.ok(!text.includes("dead-86aaa0004"), "мёртвая сессия не связывается");
-    assert.ok(text.includes("в сессии ¦ с чертой"), "черта в названии не ломает разбор");
+    assert.ok(!text.includes("dead-86aaa0004"), "a dead session is not linked");
+    assert.ok(text.includes("в сессии ¦ с чертой"), "a bar in the name does not break parsing");
+    // the others: the name is a text link (link=true), not a capsule
     const t4 = items.find((i) => i.title === "Синтетика: без связи");
-    assert.equal(t4.href, "https://app.clickup.com/t/86aaa0004", "небезопасный url заменён; остальные — капсулой-ссылкой");
+    assert.equal(t4.href, "https://app.clickup.com/t/86aaa0004", "an unsafe url is replaced");
+    assert.equal(t4.params.link, "true", "the name is a text link");
     assert.match(text, /лимит API: осталось 96/);
-    // второй запуск: user/team из кэша — один запрос
+    // second run: user/team from the cache — one request
     d.log.length = 0;
     await run(e);
     assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/team/9000001/task"]);
     const cache = readFileSync(join(env.AGENTHUB_PLUGIN_CACHE_PATH, "state.json"), "utf8");
-    assert.ok(!cache.includes(TOKEN), "токена нет в кэше");
+    assert.ok(!cache.includes(TOKEN), "the token is not in the cache");
   } finally {
     await d.close();
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("RUN.md с session_id → связь с сессией «точно»", async () => {
+test("RUN.md with session_id → session link is \"certain\"", async () => {
   const d = await double(okRoutes());
   const { home, env } = setupHome();
   setupWork(home);
@@ -202,7 +211,7 @@ test("RUN.md с session_id → связь с сессией «точно»", asy
   }
 });
 
-test("429 → бэкофф: следующий запуск не ходит в сеть и показывает прошлые тикеты", async () => {
+test("429 → backoff: the next run stays off the network and shows the previous tickets", async () => {
   let limited = false;
   const routes = okRoutes();
   const inner = routes["/api/v2/team/9000001/task"];
@@ -215,13 +224,13 @@ test("429 → бэкофф: следующий запуск не ходит в �
     limited = true;
     const r2 = await run(e);
     assert.match(r2.text, /Лимит запросов ClickUp \(429\), пауза до/);
-    assert.match(r2.parsed.header[0].title, /4 тикета/, "прошлые тикеты остаются");
+    assert.match(r2.parsed.header[0].title, /4 тикета/, "previous tickets remain");
     const st = JSON.parse(readFileSync(join(env.AGENTHUB_PLUGIN_CACHE_PATH, "state.json"), "utf8"));
     assert.equal(st.backoff.n, 1);
     assert.ok(st.backoff.until >= Date.now() + 50_000);
     d.log.length = 0;
     const r3 = await run(e);
-    assert.equal(d.log.length, 0, "во время бэкоффа запросов нет");
+    assert.equal(d.log.length, 0, "no requests during backoff");
     assert.match(r3.text, /Пауза до/);
   } finally {
     await d.close();
@@ -229,7 +238,7 @@ test("429 → бэкофф: следующий запуск не ходит в �
   }
 });
 
-test("X-RateLimit-Remaining на исходе → ждём X-RateLimit-Reset без запросов", async () => {
+test("X-RateLimit-Remaining running out → wait for X-RateLimit-Reset without requests", async () => {
   const reset = Math.floor(Date.now() / 1000) + 300;
   const routes = okRoutes({ "x-ratelimit-remaining": "1", "x-ratelimit-reset": String(reset) });
   const d = await double(routes);
@@ -247,7 +256,7 @@ test("X-RateLimit-Remaining на исходе → ждём X-RateLimit-Reset б�
   }
 });
 
-test("401 на /user → error + auth-failed; незнакомая форма → unknown + source-broken; 500 — без событий", async () => {
+test("401 on /user → error + auth-failed; unfamiliar shape → unknown + source-broken; 500 — no events", async () => {
   {
     const routes = okRoutes();
     routes["/api/v2/user"] = () => ({ status: 401, body: { err: "Token invalid", ECODE: "OAUTH_025" } });
@@ -285,7 +294,7 @@ test("401 на /user → error + auth-failed; незнакомая форма �
   }
 });
 
-test("401 на тикеты одного рабочего пространства при рабочем токене — его пропускаем, остальные собираем, /team перезапрашиваем", async () => {
+test("401 on one workspace's tickets with a working token — skip it, collect the rest, re-request /team", async () => {
   const deny = { on: false };
   const t1 = fix("tasks.json");
   const routes = {
@@ -300,24 +309,24 @@ test("401 на тикеты одного рабочего пространств
     const e = { ...env, AGENTHUB_SECRET_CLICKUP_TOKEN: TOKEN, AGENTHUB_CLICKUP_API_BASE: d.base };
     await run(e);
     assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/user", "/api/v2/team", "/api/v2/team/111/task", "/api/v2/team/222/task"]);
-    // пользователя убрали из 111: user и team в кэше — токен перепроверяется, 111 пропускается, 222 собирается
+    // the user was removed from 111: user and team are cached — the token is re-verified, 111 is skipped, 222 is collected
     deny.on = true;
     d.log.length = 0;
     let r = await run(e);
     assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/team/111/task", "/api/v2/user", "/api/v2/team", "/api/v2/team/111/task", "/api/v2/team/222/task"]);
     assert.equal(r.parsed.status, "ok", r.text);
-    assert.ok(!r.parsed.events.includes("auth-failed"), "токен рабочий");
+    assert.ok(!r.parsed.events.includes("auth-failed"), "the token works");
     assert.match(r.parsed.header[0].title, /^ClickUp: 4 тикета/);
     assert.match(r.text, /^Нет доступа к рабочему пространству 111 — его тикеты пропущены/m);
-    // следующий запуск: /team перезапрашивается (кэш команд сброшен), /user — из кэша
+    // next run: /team is re-requested (the team cache was reset), /user comes from the cache
     d.log.length = 0;
     r = await run(e);
     assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/team", "/api/v2/team/111/task", "/api/v2/team/222/task"]);
-    // отказ уже подтверждён — без повторной проверки токена и списка команд
+    // the denial is already confirmed — no re-check of the token or the team list
     d.log.length = 0;
     await run(e);
     assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/team/111/task", "/api/v2/team/222/task"]);
-    // все рабочие пространства отказали — «нет доступа», а не «токен не принят»
+    // all workspaces denied — "no access", not "token rejected"
     routes["/api/v2/team/222/task"] = () => ({ status: 403, body: { err: "Team not authorized", ECODE: "OAUTH_027" } });
     r = await run(e);
     assert.equal(r.parsed.status, "error");
@@ -329,7 +338,7 @@ test("401 на тикеты одного рабочего пространств
   }
 });
 
-test("401 на /user (токен сменили или он отозван) сбрасывает кэш и пользователя, и рабочих пространств", async () => {
+test("401 on /user (token changed or revoked) resets the cache of both the user and the workspaces", async () => {
   const bad = { on: false };
   const routes = okRoutes();
   const user = routes["/api/v2/user"];
@@ -356,7 +365,7 @@ test("401 на /user (токен сменили или он отозван) сб
   }
 });
 
-test("«Как подключить»: команда связки ключей с сервисом agent-hub.clickup и учётной записью token (ru и en)", async () => {
+test("\"How to connect\": the keychain command with service agent-hub.clickup and account token (ru and en)", async () => {
   const { home, env } = setupHome();
   try {
     for (const lang of ["ru", "en"]) {
@@ -369,7 +378,7 @@ test("«Как подключить»: команда связки ключей 
   }
 });
 
-test("AGENTHUB_LANG=en: причина незнакомого ответа — по-английски; «что» у прав — без русского", async () => {
+test("AGENTHUB_LANG=en: the reason for an unfamiliar response is in English; permission \"what\" texts have no Russian", async () => {
   const routes = okRoutes();
   routes["/api/v2/team/9000001/task"] = () => ({ body: { items: [] } });
   const d = await double(routes);
@@ -386,7 +395,7 @@ test("AGENTHUB_LANG=en: причина незнакомого ответа — �
   assert.doesNotMatch(whats.join("\n"), /[А-Яа-яЁё]/);
 });
 
-test("настройки: listIds без teams, assignee: null — без фильтра по пользователю", async () => {
+test("settings: listIds without teams, assignee: null — no user filter", async () => {
   const routes = okRoutes();
   routes["/api/v2/list/8000001/task"] = () => ({ body: fix("tasks.json") });
   const d = await double(routes);
@@ -403,18 +412,18 @@ test("настройки: listIds без teams, assignee: null — без фил
   }
 });
 
-test("parseRunMd: только ключи верхнего уровня из списка, у шагов — только имя", () => {
+test("parseRunMd: only top-level keys from the list, steps keep only the name", () => {
   const o = mod.parseRunMd("task_id: X1\nstep: implement длинный текст\n  caveat: вложенное\nprompt: нельзя\nstep: gate ещё текст\nbranch: night/x1-a\n");
   assert.deepEqual(o, { task_id: "X1", lastStep: "gate", branch: "night/x1-a" });
   assert.ok(!existsSync("/nonexistent"));
 });
 
-test("живость pid без /bin/ps (kill(pid, 0) — работает и на Windows)", () => {
+test("pid liveness without /bin/ps (kill(pid, 0) — works on Windows too)", () => {
   assert.deepEqual([...mod.pidsAlive([process.pid, 99_999_999, 0, -1])], [process.pid]);
   assert.doesNotMatch(readFileSync(PLUGIN, "utf8"), /\/bin\/ps/);
 });
 
-test("страница 1.4.0: у агентов → срок горит → остальные по статусам; плитка — что требует внимания; приоритет; лимит", () => {
+test("page 1.4.0: with agents → due soon → others by status; the tile shows what needs attention; priority; limit", () => {
   const now = Date.parse("2026-11-10T12:00:00Z");
   const day = 24 * 3600_000;
   const T = (id, o = {}) => ({ id, customId: null, name: `Тикет ${id}`, status: "to do", statusColor: null, statusType: "open", url: `https://app.clickup.com/t/${id}`, list: "Спринт", updatedMs: now - 1000, dueMs: null, priority: null, ...o });
@@ -435,28 +444,49 @@ test("страница 1.4.0: у агентов → срок горит → ос
   const t = p.body.map((i) => i.title);
   const at = (s) => t.indexOf(s);
   assert.ok(at("У агентов · 1") < at("Тикет a1") && at("Тикет a1") < at("Срок горит · 2"));
-  assert.ok(at("Тикет d1") < at("Тикет d2"), "срок горит — по сроку");
+  assert.ok(at("Тикет d1") < at("Тикет d2"), "due soon — sorted by due date");
   assert.ok(p.body.some((i) => i.title === "просрочен: срок вчера" && i.params.color === "red"));
-  assert.ok(p.body.some((i) => i.title === "d1 · Спринт · срочно"), "приоритет — в строке номера");
+  assert.ok(p.body.some((i) => i.title === "d1 · Спринт · срочно"), "priority is in the number line");
   assert.ok(at("Остальные · 4") > at("Тикет d2"));
-  assert.ok(at("in progress · 1") < at("to do · 3"), "в работе — раньше открытых");
-  assert.ok(at("Тикет r2") < at("Тикет w1") && at("Тикет r2") < at("Тикет r3"), "высокий приоритет — выше");
+  assert.ok(at("in progress · 1") < at("to do · 3"), "in progress comes before open");
+  assert.ok(at("Тикет r2") < at("Тикет w1") && at("Тикет r2") < at("Тикет r3"), "high priority is higher");
   const cards = p.body.filter((i) => i.params.stat);
   assert.deepEqual(cards.map((c) => [c.params.stat, c.title]), [["У агентов", "1"], ["Просрочено", "1"], ["Срок на неделе", "2"], ["Открытых", "7"]]);
   assert.equal(cards[2].params.note, "ближайший — 12.11");
-  // плитка без агентов — просроченные, без них — число открытых
+  // tile without agents — overdue; without those — the open count
   assert.equal(mod.tileText(5, 0, 2), "2 просрочено");
   assert.equal(mod.tileText(5, 0, 0), "5");
-  // лимит: у агентов и срок горит видны всегда, остальные режутся
+  // limit: with agents and due soon are always shown, the others are cut
   const small = parseOutput(mod.render(r, { nowMs: now, lang: "ru", limit: 4 }));
   assert.ok(small.body.some((i) => i.title === "…и ещё 3 — в ClickUp"));
   // en
   const en = parseOutput(mod.render(r, { nowMs: now, lang: "en" }));
   assert.equal(en.header[0].title, "ClickUp: 7 tickets · 1 with agents · 1 overdue");
   assert.ok(en.body.some((i) => i.title === "Due soon · 2"));
-  // приоритет из ответа ClickUp: объект, строка, число
+  // priority from the ClickUp response: object, string, number
   assert.equal(mod.pickPriority({ priority: "urgent", color: "#f00" }), "urgent");
   assert.equal(mod.pickPriority("HIGH"), "high");
   assert.equal(mod.pickPriority(3), "normal");
   assert.equal(mod.pickPriority({ priority: "мусор" }), null);
+});
+
+test("sign-in tickets have only a status name: the kind, color and order come from the name", () => {
+  const T = (status) => ({ status, statusType: null, statusColor: null });
+  assert.deepEqual(["in progress", "review", "blocked", "to do", "Open", "complete", "в работе", "что-то своё"].map((s) => mod.statusKind(T(s))), ["work", "review", "block", "todo", "todo", "done", "work", null]);
+  assert.equal(mod.statusHue(T("in progress")), "#5B8DEF");
+  assert.equal(mod.statusHue({ ...T("in progress"), statusColor: "#ff00aa" }), "#ff00aa", "ClickUp's own color wins");
+  const groups = mod.byStatus([T("review"), T("to do"), T("in progress")].map((t, i) => ({ ...t, id: String(i) })));
+  assert.deepEqual(groups.map(([st]) => st), ["in progress", "review", "to do"]);
+  // sign-in mode: "updated · next" goes under Details — the shell's connection card already shows it
+  const now = Date.parse("2026-11-10T12:00:00Z");
+  const r = { tasks: [{ id: "x1", customId: null, name: "Тикет", status: "review", statusType: null, statusColor: null, url: "https://app.clickup.com/t/x1", list: "V1 - Dev", updatedMs: now, dueMs: null, priority: null }], links: new Map(), fetchedAt: now, mode: "oauth", oauth: { nextAt: now + 900_000, intervalMs: 900_000, dailyBudget: 100 }, rate: null, error: null, denied: null };
+  const p = parseOutput(mod.render(r, { nowMs: now, lang: "en" }));
+  const at = p.body.findIndex((i) => i.title === "Refresh");
+  assert.equal(p.body[at].params.details, "true");
+  assert.ok(p.body.slice(at + 1).every((i) => i.level === 1));
+  assert.ok(p.body.some((i) => i.title === "Tickets · 1"), "no other groups — the card is just \"Tickets\"");
+  assert.ok(p.body.some((i) => i.title === "Тикет" && i.href === "https://app.clickup.com/t/x1" && i.params.link === "true"));
+  assert.ok(p.body.some((i) => i.title === "V1 - Dev" && i.params.color === "gray" && !i.href));
+  const grp = p.body.find((i) => i.title === "review · 1");
+  assert.deepEqual([grp.params.iconColor, grp.params.color], ["#B07CFF", "gray"], "a colored dot, a gray title");
 });

@@ -1,62 +1,67 @@
 # plugins/
 
-Каждый плагин — папка `plugins/<id>/`:
+Each plugin is a `plugins/<id>/` folder:
 
 ```
 plugins/<id>/
-  <id>.<интервал>.<расширение>   ← исполняемый файл (или <id>.<расширение> для streamable / по расписанию)
-  README.md                      ← что показывает, какие права и зачем
-  fixtures/home/                 ← синтетический HOME для тестов (необязательно)
-  test/*.test.mjs                ← тесты плагина (необязательно), запускаются на синтетическом HOME
+  <id>.<interval>.<extension>   ← executable file (or <id>.<extension> for streamable / scheduled)
+  README.md                      ← what it shows, which permissions and why
+  fixtures/home/                 ← synthetic HOME for tests (optional)
+  test/*.test.mjs                ← plugin tests (optional), run on the synthetic HOME
 ```
 
-Формат файла, метаданные и вывод — контракт плагина Agent Hub (копия в `docs/contract/extension-points.md`, раздел
-«Контракт плагина»; что объявлять по контракту 2 — CONTRIBUTING.md): теги `<agenthub.*>` в комментариях, вывод в стиле SwiftBar. В архив плагина идёт всё,
-кроме `test/`, `fixtures/` и dot-файлов.
+File format, metadata and output are the Agent Hub plugin contract (copy in `docs/contract/`: start with
+`writing-plugins.md`; the full reference is `extension-points.md`, section "Plugin contract"; what to declare under
+contract 2 — CONTRIBUTING.md): `<agenthub.*>` tags in comments, SwiftBar-style output. Everything except `test/`,
+`fixtures/` and dot files goes into the plugin archive.
 
-## Официальные плагины
+## Official plugins
 
-`hermes`, `clickup`, `claude-code` — официальные (список — `official.json`, правит только владелец; в индексе —
-`tier: "official"`). `night-runner` из реестра ушёл (09.11): раннер приватный, его плагин лежит в его же
-репозитории (`agenthub/night-runner/`) и ставится как **свой плагин** из локальной папки (`agenthub plugins install
---from <папка>` + подтверждение в приложении; agent-hub README, «Свои плагины»). Мейнтейнер — владелец реестра. Встроенные плагины Agent Hub (claude-sessions, agents, quota)
-лежат в `agent-hub/plugins/` и в реестр не входят.
+`hermes`, `clickup`, `claude-code` are official (the list is `official.json`, edited only by the owner; in the
+index — `tier: "official"`). `night-runner` left the registry (09.11): the runner is private, its plugin lives in the
+runner's own repository (`agenthub/night-runner/`) and is installed as **your own plugin** from a local folder
+(`agenthub plugins install --from <folder>` + confirmation in the app; agent-hub README, "Your own plugins"). The
+maintainer is the registry owner. Agent Hub's built-in plugins (claude-sessions, agents, quota) live in
+`agent-hub/plugins/` and are not part of the registry.
 
-Метка `official` даёт в CI и в демоне четыре вещи, и ревьюер смотрит все четыре как привилегию:
-- объявленные действия `<agenthub.action>` (уровень не ниже `confirm`; подтверждение и его текст — от ядра);
-- свои правила push `<agenthub.push …>`: ярлык события, `hold`, `macOnly`, `cooldown`, `away` и `quiet="true"` —
-  проход в Telegram **в тихие часы** (у community теги игнорируются: только macOS, без текста плагина);
-- статус доверенного (`trusted`): текст строки с `event=` попадает в уведомление (у community — нет);
-- подключения `<agenthub.connection>` (контракт 2): вход в сервис и вызовы его MCP ведёт хаб. У community —
-  ошибка линтера; `id` — id плагина или `<id>.<имя>`, `url` — https на имени хоста (не IP), хост — из
-  `<agenthub.net>`; ревьюер смотрит белый список `tools` — только то, что плагин зовёт.
+The `official` label grants four things in CI and in the daemon, and the reviewer treats all four as a privilege:
+- declared actions `<agenthub.action>` (level no lower than `confirm`; the confirmation and its text come from the
+  core);
+- own push rules `<agenthub.push …>`: event label, `hold`, `macOnly`, `cooldown`, `away` and `quiet="true"` —
+  delivery to Telegram **during quiet hours** (for community plugins the tags are ignored: macOS only, without the
+  plugin's text);
+- trusted status (`trusted`): the text of a line with `event=` goes into the notification (not for community);
+- connections `<agenthub.connection>` (contract 2): the hub handles signing in to the service and calls to its MCP.
+  For community — a linter error; `id` — the plugin id or `<id>.<name>`, `url` — https on a host name (not an IP),
+  the host — from `<agenthub.net>`; the reviewer checks the `tools` allowlist — only what the plugin calls.
 
-Демон считает плагин официальным, только пока подписанный индекс называет его `official` и файлы на диске —
-ровно архив с sha256 из индекса: убрали id из `official.json` — у установленной копии эти четыре вещи пропадают
-после следующего `POST /registry/fetch`. Потолок effects (`open.*`, `cmux.focus`) и запрет упоминать запретные
-места — те же, что у всех. Параметризованное действие:
+The daemon treats a plugin as official only while the signed index calls it `official` and the files on disk are
+exactly the archive with the sha256 from the index: remove the id from `official.json` and the installed copy loses
+these four things after the next `POST /registry/fetch`. The effects ceiling (`open.*`, `session.focus`, and the
+deprecated `cmux.focus`; `Plugins/local` — only `open.*`) and the ban on mentioning forbidden locations are the same
+as for everyone. A parameterised action:
 
 ```
 // <agenthub.action id="skip" level="confirm" arg="taskId:^[A-Za-z0-9_-]{1,64}$" title="…">my-plugin.30s.mjs --action skip {taskId}</agenthub.action>
 ```
 
-В выводе: `Пропустить | action=skip arg=<значение>`. Ядро сверяет значение с шаблоном (обёрнутым в `^(?:…)$`;
-ещё — без управляющих и форматирующих символов Unicode (Cc, Cf: bidi, нулевая ширина) и U+2028/2029, не с «-»,
-до 256 символов) и запускает главный файл плагина его же
-интерпретатором, подставив значение отдельным элементом argv вместо `{taskId}` (или в конец). Факты (держатель
-замка, есть ли задача) действие проверяет само; отказ — код выхода ≠ 0 и последняя строка `reason=<код>`, перед
-ней — `message=<текст на языке хаба>` (контракт 2: объяснение пишет плагин, своих текстов для его кодов у хаба нет).
-Свои правила push — `<agenthub.push key=… hold=… quiet=…>Ярлык</agenthub.push>`.
+In the output: `Skip | action=skip arg=<value>`. The core checks the value against the pattern (wrapped in
+`^(?:…)$`; also — no Unicode control and format characters (Cc, Cf: bidi, zero width) and U+2028/2029, not starting
+with "-", up to 256 characters) and runs the plugin's main file with its own interpreter, passing the value as a
+separate argv element in place of `{taskId}` (or at the end). The action checks the facts (lock holder, whether the
+task exists) itself; refusal — exit code ≠ 0 and the last line `reason=<code>`, before it —
+`message=<text in the hub's language>` (contract 2: the plugin writes the explanation, the hub has no texts of its
+own for its codes). Own push rules — `<agenthub.push key=… hold=… quiet=…>Label</agenthub.push>`.
 
-Тесты плагина — `plugins/<id>/test/*.test.mjs`; общие помощники (разборщики ядра из `scripts/vendor/`, временный
+Plugin tests — `plugins/<id>/test/*.test.mjs`; shared helpers (core parsers from `scripts/vendor/`, temporary
 HOME) — `scripts/lib/plugin-test.mjs`.
 
-## Локальная установка для разработки (без публикации)
+## Local install for development (without publishing)
 
 ```sh
-node scripts/keygen.mjs /tmp/ahp-key                      # тестовый ключ вне репы (не связка ключей)
+node scripts/keygen.mjs /tmp/ahp-key                      # test key outside the repo (not the keychain)
 node scripts/build-index.mjs --out /tmp/ahp-idx --sign-key-file /tmp/ahp-key/agent-hub-index.key
 AGENTHUB_HOME=/tmp/ah-dev node ../agent-hub/daemon/bin/agenthub install \
   --registry-pubkey /tmp/ahp-key/agent-hub-index.pub --registry-url /tmp/ahp-idx/index.json --apply --no-launchd
-AGENTHUB_HOME=/tmp/ah-dev node ../agent-hub/daemon/bin/agenthub plugins install hermes   # окно прав в терминале
+AGENTHUB_HOME=/tmp/ah-dev node ../agent-hub/daemon/bin/agenthub plugins install hermes   # permissions window in the terminal
 ```

@@ -1,20 +1,22 @@
 #!/usr/bin/env node
-// Вендоринг ядра Agent Hub в реестр: разборщики и копия контракта плагинов.
+// Vendors the Agent Hub core into the registry: the parsers and a copy of the plugin contract.
 //
-// CI реестра не видит соседнюю репу agent-hub, поэтому нужное лежит здесь копией:
-//   scripts/vendor/ — модули демона:
-//     meta.mjs, output.mjs                — разбор метаданных и вывода (daemon/lib/)
-//     minisign.mjs, tarball.mjs, perms.mjs — подпись, архив, права (daemon/lib/registry/)
-//     native.mjs                           — заглушка (аддон peercred реестру не нужен; xattr бинарников —
-//                                            не наш случай: в реестре только текстовые плагины)
-//   docs/contract/  — контракт плагинов для автора плагина (CONTRACT_DOCS ниже): extension-points.md целиком и
-//                     нужные автору разделы push/README.md, plugins-registry.md, api.md, с шапкой «копия, не править».
-// Модули — побайтные копии; документы — разделы исходника как есть плюс шапка. sha256 всего записывается в
-// scripts/vendor/VENDOR.json. check.sh сверяет копии с этим файлом всегда, а с исходником — если рядом есть
-// agent-hub (AGENT_HUB_DIR или ../agent-hub).
+// The registry's CI can't see the sibling agent-hub repository, so what it needs lives here as a copy:
+//   scripts/vendor/ — daemon modules:
+//     meta.mjs, output.mjs                — metadata and output parsing (daemon/lib/)
+//     minisign.mjs, tarball.mjs, perms.mjs — signature, archive, permissions (daemon/lib/registry/)
+//     messages/parse.mjs                  — parser and linter texts (daemon/lib/messages/), imported by meta and output
+//     native.mjs                           — a stub (the registry needs no peercred addon; binary xattrs aren't
+//                                            our case: the registry holds text plugins only)
+//   docs/contract/  — the plugin contract for plugin authors (CONTRACT_DOCS below): extension-points.md and
+//                     writing-plugins.md whole, plus the sections of push/README.md, plugins-registry.md and api.md
+//                     an author needs, each with a "copy, don't edit" header.
+// Modules are byte-for-byte copies; documents are the source sections as they are plus a header. Every sha256 goes into
+// scripts/vendor/VENDOR.json. check.sh always checks the copies against that file, and against the source when
+// agent-hub is next to it (AGENT_HUB_DIR or ../agent-hub).
 //
-//   node scripts/sync-vendor.mjs [--from <путь к agent-hub>] [--check]
-// --check — только сверить (код 1 при расхождении), ничего не писать.
+//   node scripts/sync-vendor.mjs [--from <path to agent-hub>] [--check]
+// --check — only compare (exit code 1 on a mismatch), write nothing.
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -31,23 +33,26 @@ export const FILES = {
   "minisign.mjs": "daemon/lib/registry/minisign.mjs",
   "tarball.mjs": "daemon/lib/registry/tarball.mjs",
   "perms.mjs": "daemon/lib/registry/perms.mjs",
+  // meta.mjs and output.mjs import "./messages/parse.mjs": keep the subfolder so the copies stay byte-identical
+  "messages/parse.mjs": "daemon/lib/messages/parse.mjs",
 };
-export const NATIVE_STUB = `// Заглушка вендоринга (scripts/sync-vendor.mjs): реестру аддон peercred не нужен.
+export const NATIVE_STUB = `// Vendoring stub (scripts/sync-vendor.mjs): the registry needs no peercred addon.
 export function loadNative() {
   return null;
 }
 `;
 
-// Копия контракта для автора плагина. sections: null — файл целиком; иначе — разделы, чей заголовок начинается с
-// этой строки (раздел — от заголовка до следующего заголовка того же или старшего уровня), в порядке списка.
-// Что сюда входит: всё, что плагин объявляет и печатает (метаданные, вывод, действия, push, подключения), как его
-// ставят и обновляют (уровни, права, свои источники, каталог) и версии контракта. Что нет: внутренности демона
-// (каталог состояния, служебные маршруты, журнал) — их автор плагина не видит.
+// The contract copy for plugin authors. sections: null — the whole file; otherwise the sections whose heading starts
+// with that string (a section runs from its heading to the next heading of the same or a higher level), in list order.
+// What goes in: everything a plugin declares and prints (metadata, output, actions, push, connections, terminal), how
+// it is installed and updated (tiers, permissions, own sources, catalog) and the contract versions. What doesn't:
+// daemon internals (state directory, service routes, journal) — a plugin author never sees them.
 export const CONTRACT_DOCS = [
-  { out: "extension-points.md", src: "docs/extension-points.md", sections: null, about: "контракт плагина: имя файла, метаданные, вывод, действия, окружение, версии контракта" },
-  { out: "push.md", src: "daemon/lib/push/README.md", sections: ["Ключи событий для плагинов", "Выключатели"], about: "правила push (<agenthub.push>), виды и свой переключатель плагина, перенос настроек контракта 1" },
-  { out: "plugins-registry.md", src: "docs/plugins-registry.md", sections: ["Политика для ядра", "Свои источники", "Зависимости в каталоге", "Индекс: `tier`", "Контракт плагинов 2"], about: "уровни и права, свои плагины из папки, «Нужен …», что нужно от реестра" },
-  { out: "api.md", src: "docs/api.md", sections: ["`POST /actions/:id`", "Подключения"], about: "запуск действия и его результат (reason=, message=), подключения и вызов MCP через хаб" },
+  { out: "writing-plugins.md", src: "docs/writing-plugins.md", sections: null, about: "a practical guide: how to make, test and ship a plugin — start here" },
+  { out: "extension-points.md", src: "docs/extension-points.md", sections: null, about: "the plugin contract: file name, metadata, output, actions, environment, contract versions" },
+  { out: "push.md", src: "daemon/lib/push/README.md", sections: ["Event keys for plugins", "Switches"], about: "push rules (<agenthub.push>), kinds and a plugin's own switch, carrying over contract 1 settings" },
+  { out: "plugins-registry.md", src: "docs/plugins-registry.md", sections: ["Policy for the core", "Own sources", "Dependencies in the catalog", "Index: `tier`", "Plugin contract 2"], about: "tiers and permissions, own plugins from a folder, \"Requires …\", what the registry needs" },
+  { out: "api.md", src: "docs/api.md", sections: ["`POST /actions/:id`", "Connections", "Terminal"], about: "running an action and its result (reason=, message=), connections and MCP calls through the hub, the hub terminal" },
 ];
 
 const sha = (b) => createHash("sha256").update(b).digest("hex");
@@ -57,14 +62,14 @@ export function agentHubDir(env = process.env) {
   return cands.find((d) => existsSync(join(d, "daemon", "lib", "meta.mjs"))) || null;
 }
 
-// Версия контракта ядра — CONTRACT_VERSION из meta.mjs (текстом: модуль не исполняем). Нет — 1 (до 09.11).
+// The core's contract version — CONTRACT_VERSION from meta.mjs (as text: the module isn't executed). None — 1 (before 2026-11-09).
 export function contractVersion(metaText) {
   const m = /export const CONTRACT_VERSION = (\d+);/.exec(String(metaText));
   return m ? Number(m[1]) : 1;
 }
 
-// Разделы markdown по началу заголовка; строки внутри ``` — не заголовки (там бывают «# <agenthub.push …>»).
-// → { text, missing: [префиксы без раздела] }
+// Markdown sections by heading prefix; lines inside ``` aren't headings (they can hold "# <agenthub.push …>").
+// → { text, missing: [prefixes with no section] }
 export function pickSections(md, prefixes) {
   const lines = String(md).replace(/\r\n/g, "\n").split("\n");
   const heads = [];
@@ -89,13 +94,13 @@ export function pickSections(md, prefixes) {
 }
 
 function header(doc, version) {
-  const what = doc.sections ? `\`${doc.src}\`, разделы: ${doc.sections.map((s) => `«${s.replace(/`/g, "")}»`).join(", ")}` : `\`${doc.src}\` целиком`;
+  const what = doc.sections ? `\`${doc.src}\`, sections: ${doc.sections.map((s) => `"${s.replace(/`/g, "")}"`).join(", ")}` : `\`${doc.src}\`, whole`;
   return [
-    `<!-- Копия из agent-hub, контракт v${version}. Не править: файл пишет node scripts/sync-vendor.mjs, --check ловит расхождение. -->`,
-    `> **Копия из agent-hub, контракт v${version} — не править.** Источник: ${what}. Обновляет`,
-    "> `node scripts/sync-vendor.mjs` (рядом с agent-hub); `node scripts/sync-vendor.mjs --check` и CI ловят расхождение.",
-    "> Пути и ссылки в тексте — от корня репозитория agent-hub. Нужна возможность, которой здесь нет, — запишите, что",
-    "> нужно, и отдайте в сессию хаба (CLAUDE.md реестра).",
+    `<!-- Copy from agent-hub, contract v${version}. Don't edit: node scripts/sync-vendor.mjs writes this file, --check catches drift. -->`,
+    `> **Copy from agent-hub, contract v${version} — don't edit.** Source: ${what}. Updated by`,
+    "> `node scripts/sync-vendor.mjs` (next to agent-hub); `node scripts/sync-vendor.mjs --check` and CI catch drift.",
+    "> Paths and links in the text are relative to the agent-hub repository root. Need a capability that isn't here? Write",
+    "> down what you need and hand it to the hub session (the registry's CLAUDE.md).",
     "",
     "",
   ].join("\n");
@@ -103,25 +108,25 @@ function header(doc, version) {
 
 function readmeText(version) {
   return [
-    `<!-- Копия из agent-hub, контракт v${version}. Не править: файл пишет node scripts/sync-vendor.mjs, --check ловит расхождение. -->`,
-    `# Контракт плагинов Agent Hub (копия, контракт v${version})`,
+    `<!-- Copy from agent-hub, contract v${version}. Don't edit: node scripts/sync-vendor.mjs writes this file, --check catches drift. -->`,
+    `# Agent Hub plugin contract (copy, contract v${version})`,
     "",
-    "Что ядро хаба понимает в плагине — копия документации agent-hub для авторов плагинов реестра. Читать здесь, а не в",
-    "репозитории хаба. Файлы не править руками: их пишет `node scripts/sync-vendor.mjs`.",
+    "What the hub core understands in a plugin — a copy of the agent-hub documentation for registry plugin authors. Read it",
+    "here, not in the hub repository. Don't edit these files by hand: `node scripts/sync-vendor.mjs` writes them.",
     "",
-    "| Файл | Что |",
+    "| File | What |",
     "|---|---|",
     ...CONTRACT_DOCS.map((d) => `| [${d.out}](${d.out}) | ${d.about} |`),
     "",
-    "Версия контракта плагина — тег `<agenthub.contract>N</agenthub.contract>` (раздел «Версии контракта» в",
-    "extension-points.md): объявляйте ту, чьими возможностями пользуетесь; хаб версии 2 и новее с контрактом старше покажет",
-    "«Нужен хаб новее». Хабы контракта 1 тег не знают и поставят плагин молча — публиковать такой плагин только после",
-    "обновления хаба (там же, «Порядок выкатки»).",
+    "A plugin's contract version is the `<agenthub.contract>N</agenthub.contract>` tag (\"Contract versions\" in",
+    "extension-points.md): declare the one whose capabilities you use; a hub of version 2 or newer with an older contract",
+    "shows \"Requires a newer hub\". Contract 1 hubs don't know the tag and install the plugin silently — publish such a",
+    "plugin only after the hub is updated (same section, rollout order).",
     "",
   ].join("\n");
 }
 
-// → { "<имя в docs/contract>": Buffer } из исходников agent-hub; missing — разделы, которых в источнике нет.
+// → { "<name in docs/contract>": Buffer } from the agent-hub sources; missing — sections the source doesn't have.
 export function buildContractDocs(from) {
   const version = contractVersion(readFileSync(join(from, FILES["meta.mjs"]), "utf8"));
   const out = { "README.md": Buffer.from(readmeText(version)) };
@@ -131,7 +136,7 @@ export function buildContractDocs(from) {
     let body = src.endsWith("\n") ? src : src + "\n";
     if (d.sections) {
       const r = pickSections(src, d.sections);
-      for (const p of r.missing) missing.push(`${d.src}: нет раздела «${p}»`);
+      for (const p of r.missing) missing.push(`${d.src}: no section "${p}"`);
       body = r.text;
     }
     out[d.out] = Buffer.from(header(d, version) + body);
@@ -139,12 +144,12 @@ export function buildContractDocs(from) {
   return { version, docs: out, missing };
 }
 
-// → { ok, problems: [...], drift: [...] } — problems: копия не совпала с VENDOR.json; drift: исходник ушёл вперёд
-// Файл Finder: ОС кладёт его сама, а .gitignore не пускает в git — не «лишний файл». Только то, что закрыто
-// .gitignore: любой другой файл (в том числе с точкой в начале) git возьмёт в коммит, и проверка обязана его поймать.
+// → { ok, problems: [...], drift: [...] } — problems: a copy doesn't match VENDOR.json; drift: the source moved ahead
+// A Finder file: the OS drops it on its own and .gitignore keeps it out of git — not an "extra file". Only what
+// .gitignore covers: git would commit any other file (dotfiles included), and the check must catch it.
 const OS_JUNK = new Set([".DS_Store"]);
 
-// vendorDir / contractDir — для тестов (копия во временном каталоге); по умолчанию — каталоги реестра
+// vendorDir / contractDir — for tests (a copy in a temp directory); by default the registry's directories
 export function checkVendor({ from = agentHubDir(), vendorDir = VENDOR_DIR, contractDir = CONTRACT_DIR } = {}) {
   const problems = [];
   const drift = [];
@@ -152,43 +157,43 @@ export function checkVendor({ from = agentHubDir(), vendorDir = VENDOR_DIR, cont
   try {
     manifest = JSON.parse(readFileSync(join(vendorDir, "VENDOR.json"), "utf8"));
   } catch {
-    problems.push("нет scripts/vendor/VENDOR.json");
+    problems.push("scripts/vendor/VENDOR.json is missing");
   }
   const files = manifest.files || {};
   const all = { ...FILES, "native.mjs": null };
   for (const name of Object.keys(all)) {
     const p = join(vendorDir, name);
     if (!existsSync(p)) {
-      problems.push(`нет scripts/vendor/${name}`);
+      problems.push(`scripts/vendor/${name} is missing`);
       continue;
     }
     const h = sha(readFileSync(p));
-    if (files[name] !== h) problems.push(`scripts/vendor/${name} не совпадает с VENDOR.json (правка руками?)`);
+    if (files[name] !== h) problems.push(`scripts/vendor/${name} doesn't match VENDOR.json (edited by hand?)`);
     if (from && all[name]) {
       const src = join(from, all[name]);
-      if (existsSync(src) && sha(readFileSync(src)) !== h) drift.push(`${name} отличается от ${all[name]} — запустите node scripts/sync-vendor.mjs`);
+      if (existsSync(src) && sha(readFileSync(src)) !== h) drift.push(`${name} differs from ${all[name]} — run node scripts/sync-vendor.mjs`);
     }
   }
-  // копия контракта: ровно файлы из VENDOR.json, каждый — с тем же sha256; лишний файл в docs/contract — тоже ошибка (кроме .DS_Store — его не пускает .gitignore)
+  // the contract copy: exactly the files in VENDOR.json, each with the same sha256; an extra file in docs/contract is an error too (except .DS_Store — .gitignore keeps it out)
   const docs = manifest.docs || {};
   const want = ["README.md", ...CONTRACT_DOCS.map((d) => d.out)];
   for (const name of want) {
     const p = join(contractDir, name);
-    if (!existsSync(p)) problems.push(`нет docs/contract/${name} — запустите node scripts/sync-vendor.mjs`);
-    else if (docs[name] !== sha(readFileSync(p))) problems.push(`docs/contract/${name} не совпадает с VENDOR.json (правка руками?)`);
+    if (!existsSync(p)) problems.push(`docs/contract/${name} is missing — run node scripts/sync-vendor.mjs`);
+    else if (docs[name] !== sha(readFileSync(p))) problems.push(`docs/contract/${name} doesn't match VENDOR.json (edited by hand?)`);
   }
-  if (existsSync(contractDir)) for (const name of readdirSync(contractDir)) if (!want.includes(name) && !OS_JUNK.has(name)) problems.push(`docs/contract/${name}: лишний файл — копию пишет только scripts/sync-vendor.mjs`);
+  if (existsSync(contractDir)) for (const name of readdirSync(contractDir)) if (!want.includes(name) && !OS_JUNK.has(name)) problems.push(`docs/contract/${name}: extra file — only scripts/sync-vendor.mjs writes the copy`);
   if (from) {
     try {
       const built = buildContractDocs(from);
-      for (const m of built.missing) problems.push(`контракт: ${m} (поправьте CONTRACT_DOCS в scripts/sync-vendor.mjs)`);
+      for (const m of built.missing) problems.push(`contract: ${m} (fix CONTRACT_DOCS in scripts/sync-vendor.mjs)`);
       for (const [name, data] of Object.entries(built.docs)) {
         const p = join(contractDir, name);
-        if (existsSync(p) && sha(readFileSync(p)) !== sha(data)) drift.push(`docs/contract/${name} отстал от agent-hub — запустите node scripts/sync-vendor.mjs`);
+        if (existsSync(p) && sha(readFileSync(p)) !== sha(data)) drift.push(`docs/contract/${name} is behind agent-hub — run node scripts/sync-vendor.mjs`);
       }
-      if (manifest.contract !== built.version) drift.push(`контракт в VENDOR.json — ${manifest.contract ?? "нет"}, у agent-hub — ${built.version}: запустите node scripts/sync-vendor.mjs`);
+      if (manifest.contract !== built.version) drift.push(`contract in VENDOR.json is ${manifest.contract ?? "none"}, agent-hub has ${built.version}: run node scripts/sync-vendor.mjs`);
     } catch (e) {
-      drift.push(`контракт: не прочитать документы agent-hub (${e.code || e.message})`);
+      drift.push(`contract: can't read the agent-hub documents (${e.code || e.message})`);
     }
   }
   return { ok: problems.length === 0, problems, drift, contract: manifest.contract ?? null };
@@ -196,11 +201,12 @@ export function checkVendor({ from = agentHubDir(), vendorDir = VENDOR_DIR, cont
 
 export function syncVendor(from) {
   const built = buildContractDocs(from);
-  if (built.missing.length) throw new Error(`в документах agent-hub нет разделов:\n${built.missing.join("\n")}\nпоправьте CONTRACT_DOCS в scripts/sync-vendor.mjs`);
+  if (built.missing.length) throw new Error(`the agent-hub documents lack sections:\n${built.missing.join("\n")}\nfix CONTRACT_DOCS in scripts/sync-vendor.mjs`);
   mkdirSync(VENDOR_DIR, { recursive: true });
   const files = {};
   for (const [name, rel] of Object.entries(FILES)) {
     const data = readFileSync(join(from, rel));
+    mkdirSync(dirname(join(VENDOR_DIR, name)), { recursive: true });
     writeFileSync(join(VENDOR_DIR, name), data);
     files[name] = sha(data);
   }
@@ -214,7 +220,7 @@ export function syncVendor(from) {
     docs[name] = sha(data);
   }
   const manifest = {
-    note: "копии модулей agent-hub/daemon и контракта плагинов (docs/contract); обновлять только scripts/sync-vendor.mjs",
+    note: "copies of the agent-hub/daemon modules and the plugin contract (docs/contract); update only with scripts/sync-vendor.mjs",
     contract: built.version,
     source: FILES,
     files,
@@ -235,12 +241,12 @@ if (isMain(import.meta.url)) {
     process.exit(r.ok && !r.drift.length ? 0 : 1);
   }
   if (!from) {
-    console.error("не найден agent-hub: укажите --from <путь> или AGENT_HUB_DIR");
+    console.error("agent-hub not found: pass --from <path> or set AGENT_HUB_DIR");
     process.exit(2);
   }
   try {
     const m = syncVendor(from);
-    console.log(`скопировано из ${from}: ${Object.keys(m.files).join(", ")}; контракт v${m.contract} → docs/contract: ${Object.keys(m.docs).join(", ")}`);
+    console.log(`copied from ${from}: ${Object.keys(m.files).join(", ")}; contract v${m.contract} → docs/contract: ${Object.keys(m.docs).join(", ")}`);
   } catch (e) {
     console.error(e.message);
     process.exit(1);

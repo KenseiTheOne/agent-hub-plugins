@@ -1,4 +1,4 @@
-// Заглушка вендоринга (scripts/sync-vendor.mjs): реестру аддон peercred не нужен.
+// Vendoring stub (scripts/sync-vendor.mjs): the registry needs no peercred addon.
 export function loadNative() {
   return null;
 }

@@ -1,5 +1,5 @@
-// scripts/build-index.mjs: index.json с sha256 архивов, детерминизм, подпись minisign через node:crypto.
-// Ключи генерируются только здесь, в памяти/временном каталоге, и удаляются.
+// scripts/build-index.mjs: index.json with archive sha256s, determinism, minisign signing via node:crypto.
+// Keys are generated only here, in memory or a temp directory, and deleted.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -20,14 +20,14 @@ const sha = (b) => createHash("sha256").update(b).digest("hex");
 function registry() {
   return makeRegistry(
     {
-      hello: { "hello.5m.mjs": pluginSource(), "README.md": README, "fixtures/home/.config/hello/state.json": "x", "test/hello.test.mjs": "// тест" },
+      hello: { "hello.5m.mjs": pluginSource(), "README.md": README, "fixtures/home/.config/hello/state.json": "x", "test/hello.test.mjs": "// test" },
       quota: { "quota.30s.mjs": pluginSource({ title: "Quota", version: "2.1.0" }), "README.md": README, "lib/util.mjs": "export const x = 1;\n" },
     },
     { official: ["quota"], blocklist: [{ id: "evil", reason: "крадёт токены" }] },
   );
 }
 
-test("index.json: записи с sha256 и размером архивов, права с «зачем», official, blocklist", () => {
+test("index.json: entries with archive sha256 and size, permissions with \"why\", official, blocklist", () => {
   const root = registry();
   const out = tempDir("ahp-out-");
   try {
@@ -54,7 +54,7 @@ test("index.json: записи с sha256 и размером архивов, п�
   }
 });
 
-test("watch в индексе — в прежнем виде записи: права архива сверяются и ядром до 05.11, и новым (ревью регрессий)", () => {
+test("watch in the index uses the older entry form: archive permissions match for both the pre-05.11 core and the new one (regression review)", () => {
   const root = makeRegistry({
     w: { "w.5m.mjs": pluginSource({ title: "W", extra: ["// <agenthub.watch>~/.config/w/state  --  менять кадр сразу</agenthub.watch>"] }), "README.md": README },
   });
@@ -62,14 +62,14 @@ test("watch в индексе — в прежнем виде записи: пр�
   try {
     const { index } = buildIndex({ root, out, generatedAt: "2026-11-04T10:00:00.000Z" });
     const entry = JSON.parse(JSON.stringify(index.plugins[0].permissions));
-    // прежний вид: вся строка (пробелы схлопнуты), why: null — так ключ считало ядро до 05.11
+    // the older form: the whole line (whitespace collapsed), why: null — that's how the pre-05.11 core computed the key
     assert.deepEqual(entry.watch, [{ what: "~/.config/w/state -- менять кадр сразу", why: null }]);
     const gz = readFileSync(join(out, index.plugins[0].archive));
     const main = readTarGz(gz, { root: "w" }).find((f) => f.path === "w/w.5m.mjs");
     const { meta } = parseMetaText(main.data.toString("utf8"));
-    // новое ядро: права архива (what — путь) сверяются с записью (permissionList разбирает прежний вид)
+    // the new core: archive permissions (what is the path) match the entry (permissionList parses the older form)
     assert.equal(permissionsFingerprint(permissionsFromMeta(meta)), permissionsFingerprint(entry));
-    // ядро до 05.11: ключ watch — вся строка метаданных
+    // the pre-05.11 core: the watch key is the whole metadata line
     const oldKeys = (m) => (m.watch || []).map((w) => `watch:${String(w).trim().replace(/\s+/g, " ")}`);
     assert.deepEqual(oldKeys(meta), entry.watch.map((e) => `watch:${e.what}`));
   } finally {
@@ -78,7 +78,7 @@ test("watch в индексе — в прежнем виде записи: пр�
   }
 });
 
-test("архивы детерминированы: две сборки — одинаковые sha256", () => {
+test("archives are deterministic: two builds give the same sha256", () => {
   const root = registry();
   const a = tempDir("ahp-a-");
   const b = tempDir("ahp-b-");
@@ -94,7 +94,7 @@ test("архивы детерминированы: две сборки — од�
   }
 });
 
-test("подпись: свой ключ проходит, чужой ключ и правка индекса — нет", () => {
+test("signature: our key verifies, a foreign key or an edited index does not", () => {
   const root = registry();
   const out = tempDir("ahp-out-");
   const mine = generateKeyPair();
@@ -107,7 +107,7 @@ test("подпись: свой ключ проходит, чужой ключ и
     assert.equal(ok.ok, true);
     assert.match(ok.trustedComment, /generatedAt=.* plugins=2/);
     assert.equal(verify(text, sig, alien.publicKey).reason, "key-mismatch");
-    // чужой ключ с тем же keyId (подделка заголовка) — подпись не сходится
+    // a foreign key with the same keyId (forged header) — the signature doesn't match
     const forged = alien.publicKey.replace(/\n(.+)\n$/, (_, b64) => {
       const raw = Buffer.from(b64, "base64");
       Buffer.from(mine.publicKey.split("\n")[1], "base64").copy(raw, 2, 2, 10);
@@ -115,7 +115,7 @@ test("подпись: свой ключ проходит, чужой ключ и
     });
     assert.equal(verify(text, sig, forged).reason, "signature");
     assert.equal(verify(Buffer.concat([text, Buffer.from(" ")]), sig, mine.publicKey).reason, "signature");
-    const badComment = sig.replace(/^trusted comment: .*$/m, "trusted comment: подменено");
+    const badComment = sig.replace(/^trusted comment: .*$/m, "trusted comment: tampered");
     assert.equal(verify(text, badComment, mine.publicKey).reason, "global-signature");
   } finally {
     cleanup(root);
@@ -123,7 +123,7 @@ test("подпись: свой ключ проходит, чужой ключ и
   }
 });
 
-test("плагин с ошибками линтера валит сборку целиком", () => {
+test("a plugin with linter errors fails the whole build", () => {
   const root = makeRegistry({ bad: { "bad.1m.mjs": pluginSource({ effects: "session.stop" }), "README.md": README } });
   const out = tempDir("ahp-out-");
   try {
@@ -134,7 +134,7 @@ test("плагин с ошибками линтера валит сборку ц
   }
 });
 
-test("--flat-archives: архивы рядом с index.json", () => {
+test("--flat-archives: archives next to index.json", () => {
   const root = registry();
   const out = tempDir("ahp-out-");
   try {
@@ -147,21 +147,21 @@ test("--flat-archives: архивы рядом с index.json", () => {
   }
 });
 
-test("keygen: пишет ключ 0600 во временный каталог и отказывается писать в репу", () => {
+test("keygen: writes a 0600 key to a temp directory and refuses to write into the repo", () => {
   const dir = tempDir("ahp-key-");
   try {
     const r = keygen(join(dir, "keys"));
     if (process.platform !== "win32") assert.equal(statSync(r.keyFile).mode & 0o777, 0o600);
     const pub = readFileSync(r.pubFile, "utf8");
     assert.match(pub, /^untrusted comment: minisign public key [0-9A-F]{16}\n/);
-    assert.throws(() => keygen(join(dir, "keys")), /уже есть/);
-    assert.throws(() => keygen(join(dirname(fileURLToPath(import.meta.url)), "..", "tmp-keys")), /внутри репы/);
+    assert.throws(() => keygen(join(dir, "keys")), /already exists/);
+    assert.throws(() => keygen(join(dirname(fileURLToPath(import.meta.url)), "..", "tmp-keys")), /inside the registry repo/);
   } finally {
     cleanup(dir);
   }
 });
 
-test("переводы в индексе: название, описание и «зачем» у прав (lang=\"en\"); права (ключи) от перевода не зависят", () => {
+test("translations in the index: title, description and permission \"why\" (lang=\"en\"); permissions (keys) don't depend on the translation", () => {
   const root = makeRegistry({
     hello: {
       "hello.5m.mjs": pluginSource({
@@ -181,27 +181,27 @@ test("переводы в индексе: название, описание и 
   }
 });
 
-test("официальные плагины: у каждого права есть английское «зачем», у каждого действия — title-en", () => {
+test("official plugins: every permission has an English \"why\", every action has title-en", () => {
   const out = tempDir("ahp-out-");
   try {
     const { index } = buildIndex({ out, generatedAt: "2026-11-04T10:00:00.000Z" });
     for (const p of index.plugins) {
       const en = p.i18n?.en || {};
       for (const k of ["fsRead", "fsWrite", "exec", "secrets", "net"]) {
-        for (const e of p.permissions[k] || []) assert.ok(en.why?.[e.what], `${p.id}: ${k} ${e.what} — нет lang="en"`);
+        for (const e of p.permissions[k] || []) assert.ok(en.why?.[e.what], `${p.id}: ${k} ${e.what} — no lang="en"`);
       }
-      for (const a of p.permissions.actions || []) assert.ok(en.actions?.[a.id], `${p.id}: действие ${a.id} без title-en`);
+      for (const a of p.permissions.actions || []) assert.ok(en.actions?.[a.id], `${p.id}: action ${a.id} has no title-en`);
     }
   } finally {
     cleanup(out);
   }
 });
 
-test("официальные плагины: автор — имя Kensei и логин KenseiTheOne (в индексе — оба)", () => {
+test("official plugins: author is the name Kensei and the login KenseiTheOne (both in the index)", () => {
   const out = tempDir("ahp-out-");
   try {
     const { index } = buildIndex({ out, generatedAt: "2026-11-04T10:00:00.000Z" });
-    // hermes и clickup; night-runner из реестра ушёл (09.11) — приватный, ставится своим источником
+    // hermes and clickup; night-runner left the registry (09.11) — it's private and installs from its own source
     assert.ok(index.plugins.length >= 2);
     for (const p of index.plugins) assert.deepEqual(p.author, { name: "Kensei", github: "KenseiTheOne" }, p.id);
   } finally {
@@ -209,7 +209,7 @@ test("официальные плагины: автор — имя Kensei и л�
   }
 });
 
-test("зависимость <agenthub.requires>: в индексе — name, url, check, note и перевод; у hermes — «Нужен Hermes»; night-runner в реестре нет", () => {
+test("<agenthub.requires> dependency: the index has name, url, check, note and the translation; hermes has \"Needs Hermes\"; night-runner is not in the registry", () => {
   const out = tempDir("ahp-out-");
   try {
     const { index } = buildIndex({ out, generatedAt: "2026-11-04T10:00:00.000Z" });
@@ -221,25 +221,25 @@ test("зависимость <agenthub.requires>: в индексе — name, ur
     assert.equal(h.requires[0].check, "~/.hermes");
     assert.match(h.requires[0].url, /^https:\/\//);
     assert.ok(h.i18n.en.requires.Hermes.note);
-    // плагин без зависимостей — без поля
+    // a plugin without dependencies has no field
     assert.equal("requires" in index.plugins.find((p) => p.id === "clickup"), false);
   } finally {
     cleanup(out);
   }
 });
 
-test("--published: версия, уже опубликованная с другим архивом, — ошибка сборки (архив не перезаписывается); та же — ок", () => {
+test("--published: a version already published with a different archive is a build error (the archive isn't overwritten); the same one is fine", () => {
   const root = registry();
   const a = tempDir("ahp-pub-a-");
   const b = tempDir("ahp-pub-b-");
   try {
     const published = buildIndex({ root, out: a, generatedAt: "2026-11-04T10:00:00.000Z" }).index;
-    // пересборка того же содержимого — те же sha256, сборка проходит
+    // rebuilding the same content gives the same sha256s, the build passes
     assert.doesNotThrow(() => buildIndex({ root, out: b, generatedAt: "2026-11-05T10:00:00.000Z", published }));
-    // README поменяли, а версию нет
-    writeFileSync(join(root, "plugins", "hello", "README.md"), README + "\nещё строка\n");
-    assert.throws(() => buildIndex({ root, out: b, published }), /hello: версия 1\.0\.0 уже опубликована с другим архивом/);
-    // версию подняли — ок
+    // README changed, version didn't
+    writeFileSync(join(root, "plugins", "hello", "README.md"), README + "\none more line\n");
+    assert.throws(() => buildIndex({ root, out: b, published }), /hello: version 1\.0\.0 is already published with a different archive/);
+    // version bumped — fine
     writeFileSync(join(root, "plugins", "hello", "hello.5m.mjs"), pluginSource({ version: "1.0.1" }));
     assert.doesNotThrow(() => buildIndex({ root, out: b, published }));
   } finally {
@@ -249,7 +249,7 @@ test("--published: версия, уже опубликованная с друг
   }
 });
 
-test("контракт 2: в индексе — contract и icon из метаданных; без тегов полей нет; у официальных — контракт 2 и значок, у clickup — подключение в правах", () => {
+test("contract in the index — contract and icon from metadata; no tags, no fields; official plugins have contract 2+ and an icon, clickup has a connection and session.focus, claude-code has terminal in its permissions", () => {
   const root = makeRegistry({
     v2: { "v2.5m.mjs": pluginSource({ title: "V2", extra: ["// <agenthub.contract>2</agenthub.contract>", '// <agenthub.icon symbol="moon.stars" color="#5e5ce6"></agenthub.icon>'] }), "README.md": README },
     old: { "old.5m.mjs": pluginSource({ title: "Old" }), "README.md": README },
@@ -264,11 +264,11 @@ test("контракт 2: в индексе — contract и icon из метад
     const old = index.plugins.find((p) => p.id === "old");
     assert.equal("contract" in old, false);
     assert.equal("icon" in old, false);
-    // официальные плагины этой репы
+    // this repo's official plugins
     const real = buildIndex({ out: out2, generatedAt: "2026-11-04T10:00:00.000Z" }).index;
-    for (const id of ["clickup", "hermes"]) {
+    for (const [id, contract] of [["clickup", 3], ["hermes", 2], ["claude-code", 3]]) {
       const p = real.plugins.find((x) => x.id === id);
-      assert.equal(p.contract, 2, id);
+      assert.equal(p.contract, contract, id);
       assert.match(p.icon?.symbol || "", /^[a-z0-9.]+$/, id);
       assert.match(p.icon?.color || "", /^#[0-9A-F]{6}$/, id);
     }
@@ -276,6 +276,11 @@ test("контракт 2: в индексе — contract и icon из метад
     assert.equal(cu.permissions.connections.length, 1);
     assert.match(cu.permissions.connections[0].what, /^clickup: https:\/\/mcp\.clickup\.com\/mcp scope=read tools=clickup_filter_tasks$/);
     assert.equal("connections" in real.plugins.find((x) => x.id === "hermes").permissions, false);
+    // focusing and typing go through the hub: no official plugin declares cmux
+    assert.deepEqual(cu.permissions.effects, ["open.url", "session.focus"]);
+    const cc = real.plugins.find((x) => x.id === "claude-code");
+    assert.deepEqual(cc.permissions.terminal.map((t) => t.what), ["send /model /effort"]);
+    for (const p of real.plugins) assert.doesNotMatch(JSON.stringify(p.permissions), /cmux/i, p.id);
   } finally {
     cleanup(root);
     cleanup(out);

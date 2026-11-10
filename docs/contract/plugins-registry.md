@@ -1,189 +1,208 @@
-<!-- Копия из agent-hub, контракт v3. Не править: файл пишет node scripts/sync-vendor.mjs, --check ловит расхождение. -->
-> **Копия из agent-hub, контракт v3 — не править.** Источник: `docs/plugins-registry.md`, разделы: «Политика для ядра», «Свои источники», «Зависимости в каталоге», «Индекс: tier», «Контракт плагинов 2». Обновляет
-> `node scripts/sync-vendor.mjs` (рядом с agent-hub); `node scripts/sync-vendor.mjs --check` и CI ловят расхождение.
-> Пути и ссылки в тексте — от корня репозитория agent-hub. Нужна возможность, которой здесь нет, — запишите, что
-> нужно, и отдайте в сессию хаба (CLAUDE.md реестра).
+<!-- Copy from agent-hub, contract v3. Don't edit: node scripts/sync-vendor.mjs writes this file, --check catches drift. -->
+> **Copy from agent-hub, contract v3 — don't edit.** Source: `docs/plugins-registry.md`, sections: "Policy for the core", "Own sources", "Dependencies in the catalog", "Index: tier", "Plugin contract 2". Updated by
+> `node scripts/sync-vendor.mjs` (next to agent-hub); `node scripts/sync-vendor.mjs --check` and CI catch drift.
+> Paths and links in the text are relative to the agent-hub repository root. Need a capability that isn't here? Write
+> down what you need and hand it to the hub session (the registry's CLAUDE.md).
 
-## Политика для ядра
+## Policy for the core
 
-Служба ставит `ctx.setPluginPolicy`. Пока политики нет (служба выключена или упала в `init`), ядро установленные
-плагины не допускает вовсе (`policy:no-manager`): без lock, sha256 и согласия ничего из `Plugins/<id>` не запускается.
+The service sets `ctx.setPluginPolicy`. While there is no policy (the service is off or failed in `init`), the core does
+not admit installed plugins at all (`policy:no-manager`): without lock, sha256 and consent nothing from `Plugins/<id>`
+runs.
 
-- `builtin` — без изменений;
-- `local` — допускается, кроме попавших в blocklist целиком по id; effects режет ядро до `open.*`;
-- `installed` — только если есть в lock, не отключён, не в blocklist, лежит папкой `Plugins/<id>/`, хеши всех
-  файлов совпали с lock и права в метаданных не шире согласованных; effects = объявленные ∩ согласованные
-  (ядро дополнительно режет до `open.*`, `session.focus`, `cmux.focus`); `tier` — по проверенному каталогу в момент проверки:
-  `official`, только если индекс сейчас называет id official, sha256 из lock подписан как официальный — текущим
-  индексом или сохранённым `Registry/attest/<id>` (прежний индекс, где эта версия была последней; проверяется тем же
-  открытым ключом, сверяются id, версия и sha256) — и файлы lock — ровно содержимое `Registry/archives/<id>.tar.gz` с
-  этим sha256; иначе `community`. Выход новой версии официального плагина (в том числе найденной фоновой проверкой)
-  уровня установленной не меняет: до обновления у неё остаются действия, свои правила push и переменные служб
-  (до 05.11 вышедшая версия понижала установленную до community уже при загрузке каталога). Поле `tier` в lock —
-  справочное: запись lock, сделанная мимо менеджера, уровня не даёт — ни official (ни один подписанный индекс не
-  называет её архив официальным), ни own (нет согласия менеджера, ниже — «Уровень own»); понижение id в новом индексе снимает действия и правила push у установленной копии после загрузки
-  каталога, свидетельство старой версии официальности не возвращает (менеджер просит ядро пересмотреть политику).
-  Каталог на диске новее памяти демона (поставили из терминала) — перечитывается при проверке. `<agenthub.action>` ядро разрешает только `official` (и встроенным); у официального
-  без объявленной сети и без объявленной цены у действия — как объявлено, в том числе `immediate` (без окна, только из
-  приложения; 09.11); с сетью или с `cost=` (на любом языке, `cost-en=` тоже) — не ниже `confirm-cost` (линтер:
-  `immediate` с сетью или с `cost=` — ошибка). Метаданные плагина на уровень не влияют.
-  **Ревьюер реестра проверяет каждое `immediate`-действие на цену.** «Нет сети и нет `cost=`» не значит «бесплатно»:
-  действие может запускать раннер, агентов или включать ежедневный расход квоты (как `mode-research-only` у
-  night-runner), и ядро выполнит его по одному щелчку. Линтер помечает каждое такое действие предупреждением
-  (`check.sh`: «! … immediate — запуск одним щелчком, без окна…»). Допустимо только действие, которое ничего не
-  тратит в момент щелчка и отменяется таким же щелчком (переключатель); цена, которая наступит позже, — словами в его
-  `title` (подсказка кнопки). Тратит сразу или не откатывается из хаба — `confirm-cost` с `cost=`.
-- **Запись в места перехвата (контракт 3, 10.11).** `fsWrite` туда, откуда перехватывают Claude Code или систему, —
-  допустима (плагину настроек Claude Code она и нужна), но громкая: `perms.mjs` (`writeRisk`, `WRITE_RISKS`) относит
-  путь к виду места — `claude-code` (весь `~/.claude`, кроме `task-runs` и `backups`: настройки, хуки, команды, агенты,
-  statusline-скрипты, `ide/*.lock`, `local/claude`; `~/.claude.json`; управляемые настройки; в любом проекте — каталог
-  `.claude` целиком и `.mcp.json`), `autostart` (`~/Library/LaunchAgents`, LaunchDaemons, cron, systemd user,
-  Hammerspoon, автозагрузка Windows, …), `shell` (`~/.zshrc`, `~/.zshenv`, `~/.bash_profile`, `~/.profile`, fish,
-  `/etc/zshrc`, `/etc/paths`, sudoers, профиль PowerShell…), `bin` (`~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`,
-  глобальные пакеты npm — подложить свой `claude`), `terminals` (`~/.cmuxterm` — привязка сессий к вкладкам, конфиги
-  cmux, ghostty, kitty, WezTerm, tmux), `ssh`, `git` (`~/.gitconfig`), `hub` (каталог Agent Hub, кроме своих
-  `PluginData/<id>` и `Cache/<id>`). Охват — по сегментам: путь внутри места, путь-предок (`/`, `/Users`, `~`,
-  `~/.claude`), маска внутри места (`~/Library/LaunchAgents/*.plist`) и маска, которая может до него дойти
-  (`~/Library/*/*.plist`, `/Users/*/.zshrc`), — тоже.
-  Линтер помечает каждое такое право предупреждением (`check.sh`: «! <agenthub.fsWrite>…: место перехвата (вид) —
-  …»): **ревьюер проверяет, что плагин пишет туда только обещанное** (белый список ключей, копия до правки, атомарная
-  запись). Окно согласия (приложение и `agenthub plugins install`) показывает право красной строкой с объяснением —
-  и у своего плагина (там же предупреждение «Проверьте сами»).
-- **Терминал (контракт 3, 10.11).** `<agenthub.terminal>read-screen|send </команды>|* — зачем</agenthub.terminal>` —
-  только у официальных и своих (у сообщества — ошибка линтера), запись другого вида — ошибка, «зачем» обязательно. Каждое
-  право `send` — предупреждение ревьюеру (`check.sh`: «! <agenthub.terminal>send …: набор во вкладки Claude Code…»):
-  **ревьюер проверяет, что плагин набирает только обещанное и только по действию человека или его настройке**. По
-  командам — только slash-команды (`/model`, `/effort`; слово без `/` — ошибка линтера) с не больше чем 3 короткими
-  аргументами; `send *` — любой запрос агенту и любая slash-команда (кроме `!`, `#`, `&` в начале — их хаб не набирает),
-  смотреть строже: откуда берётся строка и не может ли её подставить чужой текст. В правах — вид `terminal` (`permissions.terminal: [{what, why}]` в индексе; пустой
-  список не пишется), у `send` — `risk: "terminal"`: окно согласия показывает красную строку «Набор в сессии Claude Code».
+- `builtin` — unchanged;
+- `local` — admitted, except those blocklisted as a whole by id; the core cuts effects down to `open.*`;
+- `installed` — only if it is in lock, not disabled, not blocklisted, lives as a folder `Plugins/<id>/`, the hashes of
+  all files match lock and the permissions in the metadata are no wider than the agreed ones; effects = declared ∩
+  agreed (the core additionally cuts them down to `open.*`, `session.focus`, `cmux.focus`); `tier` follows the verified
+  catalog at check time: `official` only if the index currently names the id official, the sha256 from lock is signed as
+  official — by the current index or by the saved `Registry/attest/<id>` (an earlier index where this version was the
+  latest; verified with the same public key, id, version and sha256 are compared) — and the lock files are exactly the
+  contents of `Registry/archives/<id>.tar.gz` with that sha256; otherwise `community`. A new release of an official
+  plugin (including one found by the background check) does not change the tier of the installed one: until it is
+  updated it keeps its actions, its own push rules and service variables (before 2026-11-05 a released version demoted
+  the installed one to community as soon as the catalog was loaded). The `tier` field in lock is informational: a lock
+  entry made bypassing the manager gives no tier — neither official (no signed index names its archive official) nor
+  own (no manager consent, see "The `own` tier" below); demoting an id in a new index removes the installed copy's
+  actions and push rules after the catalog loads, and the attestation of the old version does not restore official
+  status (the manager asks the core to re-evaluate the policy). A catalog on disk newer than the daemon's memory
+  (installed from a terminal) is re-read during the check. The core allows `<agenthub.action>` only for `official` (and
+  built-in) plugins; for an official plugin without declared network access and without a declared price the action is
+  as declared, including `immediate` (no window, from the app only; 2026-11-09); with network access or `cost=` (in any
+  language, `cost-en=` too) — at least `confirm-cost` (linter: `immediate` with network or `cost=` is an error). Plugin
+  metadata does not affect the tier.
+  **The registry reviewer checks every `immediate` action for a price.** "No network and no `cost=`" does not mean
+  "free": an action may start a runner, agents or turn on daily quota spending (for example, a runner plugin's mode
+  switch), and the core will run it on a single click. The linter flags every such action with a warning (`check.sh`:
+  "! … immediate — one-click launch, no window…"). Only an action that spends nothing at the moment of the click and is
+  undone by the same click (a toggle) is acceptable; a price that comes later is stated in words in its `title` (the
+  button tooltip). If it spends right away or cannot be undone from the hub — `confirm-cost` with `cost=`.
+- **Writing to hijack locations (contract 3, 2026-11-10).** `fsWrite` to places from which Claude Code or the system
+  can be hijacked is allowed (a Claude Code settings plugin needs exactly that), but loud: `perms.mjs` (`writeRisk`,
+  `WRITE_RISKS`) maps the path to a kind of place — `claude-code` (all of `~/.claude` except `task-runs` and `backups`:
+  settings, hooks, commands, agents, statusline scripts, `ide/*.lock`, `local/claude`; `~/.claude.json`; managed
+  settings; in any project the whole `.claude` directory and `.mcp.json`), `autostart` (`~/Library/LaunchAgents`,
+  LaunchDaemons, cron, systemd user, Hammerspoon, Windows startup, …), `shell` (`~/.zshrc`, `~/.zshenv`,
+  `~/.bash_profile`, `~/.profile`, fish, `/etc/zshrc`, `/etc/paths`, sudoers, the PowerShell profile…), `bin`
+  (`~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, global npm packages — to plant your own `claude`), `terminals`
+  (`~/.cmuxterm` — binding sessions to tabs, configs of cmux, ghostty, kitty, WezTerm, tmux), `ssh`, `git`
+  (`~/.gitconfig`), `hub` (the Agent Hub directory except its own `PluginData/<id>` and `Cache/<id>`). Coverage is by
+  segments: a path inside the place, an ancestor path (`/`, `/Users`, `~`, `~/.claude`), a mask inside the place
+  (`~/Library/LaunchAgents/*.plist`) and a mask that can reach it (`~/Library/*/*.plist`, `/Users/*/.zshrc`) all count.
+  The linter flags every such permission with a warning (`check.sh`: "! <agenthub.fsWrite>…: hijack location (kind) —
+  …"): **the reviewer checks that the plugin writes there only what it promises** (an allowlist of keys, a backup before
+  editing, atomic writes). The consent window (the app and `agenthub plugins install`) shows the permission as a red line
+  with an explanation — for an own plugin too (along with the "Check it yourself" warning).
+- **Terminal (contract 3, 2026-11-10).** `<agenthub.terminal>read-screen|send </commands>|* — why</agenthub.terminal>` —
+  only for official and own plugins (a linter error for community ones), an entry of any other form is an error, "why"
+  is required. Every `send` permission is a warning for the reviewer (`check.sh`: "! <agenthub.terminal>send …: typing
+  into Claude Code tabs…"): **the reviewer checks that the plugin types only what it promises and only on a human action
+  or setting**. By command — slash commands only (`/model`, `/effort`; a word without `/` is a linter error) with at most
+  3 short arguments; `send *` — any prompt to the agent and any slash command (except a leading `!`, `#`, `&` — the hub
+  never types those), so look more strictly: where does the line come from, and can foreign text inject it. In the
+  permissions it is the `terminal` kind (`permissions.terminal: [{what, why}]` in the index; an empty list is not
+  written), and `send` has `risk: "terminal"`: the consent window shows a red line "Typing into Claude Code sessions".
 
-## Свои источники (09.11)
+## Own sources (2026-11-09)
 
-Решение пользователя: night-runner остаётся приватным и из публичного реестра ушёл; плагины, которые не для
-публичного каталога, ставятся **своим источником** — из локальной папки. Только папка на этом Mac, никаких
-git-адресов. Формат папки — тот же, что у плагина реестра (`<id>.<интервал>.<расширение>` с метаданными, `README.md`,
-`test/`, `fixtures/`); соглашение — репозиторий инструмента держит плагин в `agenthub/<id>/` (night-runner:
-`~/Projects/IT/night-runner/agenthub/night-runner`). Код — `daemon/lib/registry/own-source.mjs` (проверка папки) и
-`PluginManager` (заявки, установка, слежение).
+Decision 2026-11-09: plugins that are not meant for the public catalog are installed from an **own source** — a local
+folder. Only a folder on this Mac, no git URLs. The folder format is the same as for a registry plugin
+(`<id>.<interval>.<extension>` with metadata, `README.md`, `test/`, `fixtures/`); by convention the tool's repository
+keeps the plugin in `agenthub/<id>/` (for example, `~/Projects/my-tool/agenthub/my-tool`). Code:
+`daemon/lib/registry/own-source.mjs` (folder checks) and `PluginManager` (requests, installation, watching).
 
-**Заявка и установка.** `agenthub plugins install --from <папка>` (терминал, скрипт репозитория; можно указать корень
-репозитория — найдётся единственный плагин в `agenthub/`) или кнопка «Добавить из папки…» в менеджере → `POST
-/registry/own/request` (классы app и cli: заявку может создать любой локальный процесс). CLI **не ставит**: демон
-проверяет папку и заводит заявку (сутки, переживает перезапуск демона — `Registry/own-requests.json`; не больше 10 —
-дальше `429 own:too-many-requests`, старые не вытесняются; повтор той же папки заменяет прежнюю, а заявка того же id
-из **другой** папки, пока ждёт прежняя, — `409 own:request-conflict` с путём ждущей: человек подтвердил бы не ту папку),
-событие `plugins.own-request`, в `/state.ownPlugins` и `/registry/installed.requests`. Заявка привязана к своей папке:
-если до «Проверить и установить» папку заменили ссылкой или другой папкой (realpath не тот) — `409 own:path-changed`. Поставить может только человек в
-закреплённом приложении: «Плагины» → «Ждут подтверждения» → «Проверить и установить» → `POST /registry/own/approve`
-без токена — папка проверяется заново, **всегда** 428 с окном согласия (путь, id, версия, отпечаток содержимого,
-права — тот же `ConsentList`, кто может писать в папку; `changedSinceRequest`, если содержимое сменилось после заявки)
-→ с токеном (одноразовый, 120 с, pid приложения) ставятся ровно те байты, что были в окне. Без закреплённого
-приложения (`requirements.app` пуст) заявка не заводится: `409 own:no-app` и в CLI — «Нет закреплённого приложения…».
-На паузе хаба установка — 423 (отклонить можно).
+**Request and installation.** `agenthub plugins install --from <folder>` (terminal, a repository script; you may point
+at the repository root — the single plugin in `agenthub/` will be found) or the "Add from folder…" button in the manager
+→ `POST /registry/own/request` (classes app and cli: any local process may create a request). The CLI **does not
+install**: the daemon checks the folder and creates a request (valid for a day, survives daemon restarts —
+`Registry/own-requests.json`; at most 10 — beyond that `429 own:too-many-requests`, old ones are not evicted; repeating
+the same folder replaces the earlier request, while a request for the same id from a **different** folder while the
+earlier one is waiting gives `409 own:request-conflict` with the waiting one's path: the human would otherwise confirm
+the wrong folder), the `plugins.own-request` event, and entries in `/state.ownPlugins` and `/registry/installed.requests`.
+A request is bound to its folder: if before "Review and install" the folder was replaced with a link or another folder
+(a different realpath) — `409 own:path-changed`. Only a human in the pinned app can install: "Plugins" → "Waiting for
+confirmation" → "Review and install" → `POST /registry/own/approve` without a token — the folder is checked again,
+**always** 428 with a consent window (path, id, version, content fingerprint, permissions — the same `ConsentList`, who
+can write to the folder; `changedSinceRequest` if the content changed after the request) → with a token (single-use,
+120 s, app pid) exactly the bytes shown in the window are installed. Without a pinned app (`requirements.app` is empty)
+no request is created: `409 own:no-app`, and the CLI says "No pinned Agent Hub app…". While the hub is paused,
+installation gives 423 (declining is still possible).
 
-**Проверка папки** — та же, что в CI реестра: без символьных ссылок (ни наружу, ни внутрь), `README.md`, ровно один
-главный файл с известным интерпретатором (не двоичный), метаданные без предупреждений, `lintPlugin` как у официального
-(действия можно, `immediate` с сетью или ценой — ошибка), запретные места во всех файлах копии, пределы размера
-архива. Обход — целиком: файлов (без dot-файлов, вместе с `test/` и `fixtures/`, как в CI) больше 200 или записей
-больше 1000 — ошибка, а не обрыв списка; главный файл не прочитан — ошибка. Чтение — без гонки «проверил —
-прочитал»: `O_NOFOLLOW|O_NONBLOCK`, `fstat` дескриптора — обычный файл с тем же inode, что при обходе, не больше
-предела; подменённый на ссылку файл или FIFO — «файл сменился во время проверки», каталог сверяется повторным `lstat`.
-Путь — `realpath` (ссылка на папку раскрывается при заявке, в lock — настоящий путь). Писать в папку и её файлы
-должен только владелец — вы: чужой владелец, права записи группы или всех, ACL macOS с правом записи для кого-то
-кроме вас (`chmod +a "everyone allow write"` при режиме 644; читается через `/bin/ls -le`), каталог над папкой
-открытый на запись всем без sticky — ошибка. От процессов **под вашим же пользователем** (в том числе агентов,
-которые работают в этом репозитории) проверка не защищает: их правка с тем же набором прав встанет сама (ниже,
-«Обновление»); окно согласия так и пишет. Неудачная проверка — заявки нет (`422 own:lint` с `errors`, в CLI —
-списком). Плагин в папке требует контракт новее, чем у хаба (`<agenthub.contract>`), — заявки нет: `409 own:hub-too-old`
-с `need`/`have`, в CLI — «Плагину … нужен хаб новее»; уже установленный — при слежении `broken` с `error:
-own:hub-too-old`, `need`, `have` (работает прежняя копия; обновится после обновления хаба). Тексты ошибок — на языке хаба (`lang`; линтер `perms.mjs` — тоже, CI реестра зовёт его без `lang`).
-`source.warnings` окна — предупреждения линтера (`immediate`-действия, устаревшие `kind="runs"|"night"`) и `pushWarnings` (`kind="security"`, ключи
-ядра): у своего плагина ревьюера реестра нет, оболочка показывает их в окне плашкой «Проверьте сами».
+**Folder checks** — the same as in registry CI: no symbolic links (neither outward nor inward), `README.md`, exactly one
+main file with a known interpreter (not binary), metadata without warnings, `lintPlugin` as for an official plugin
+(actions are allowed, `immediate` with network or a price is an error), forbidden places in all files of the copy,
+archive size limits. The walk is complete: more than 200 files (excluding dot files, including `test/` and `fixtures/`,
+as in CI) or more than 1000 entries is an error, not a truncated list; an unreadable main file is an error. Reading has
+no "checked — then read" race: `O_NOFOLLOW|O_NONBLOCK`, `fstat` of the descriptor — a regular file with the same inode as
+during the walk, within the limit; a file swapped for a link or a FIFO gives "the file changed during the check", and a
+directory is re-checked with `lstat`. The path is the `realpath` (a link to the folder is resolved at request time; lock
+holds the real path). Only the owner — you — may write to the folder and its files: a foreign owner, group or world
+write permission, a macOS ACL granting write to anyone but you (`chmod +a "everyone allow write"` with mode 644; read via
+`/bin/ls -le`), a parent directory that is world-writable without the sticky bit — all are errors. The check does not
+protect against processes **running as your own user** (including agents working in that repository): their edit with
+the same set of permissions will be installed by itself (below, "Updates"); the consent window says so. A failed check
+means no request (`422 own:lint` with `errors`, listed in the CLI). A plugin in the folder that requires a newer
+contract than the hub (`<agenthub.contract>`) gets no request: `409 own:hub-too-old` with `need`/`have`, and the CLI
+says "Plugin … needs a newer hub"; an already installed one becomes `broken` while watching, with `error:
+own:hub-too-old`, `need`, `have` (the previous copy keeps running; it updates after the hub is updated). Error texts
+are in the hub language (`lang`; the `perms.mjs` linter too — registry CI calls it without `lang`). The window's
+`source.warnings` are linter warnings (`immediate` actions, deprecated `kind="runs"|"night"`) and `pushWarnings`
+(`kind="security"`, core keys): an own plugin has no registry reviewer, so the shell shows them in the window as a
+"Check it yourself" banner.
 
-**Уровень `own`.** Копия — в `Plugins/<id>` (как у установленных, без `test/`, `fixtures/` и dot-файлов; запускается
-она, не папка репозитория), запись lock: `tier: "own"`, `own.path`, `sha256` — отпечаток (sha256 списка «путь —
-sha256 файла»), `archive: null`. Политика: файлы на диске — ровно lock (иначе карантин, как у всех) **и** запись lock
-сделал сам менеджер (`ownTrusted`) → `tier: own`. Поле `tier: "own"` в lock само уровня не даёт (его может записать
-любой процесс пользователя): менеджер помнит отпечаток каждой своей записи own (путь, отпечаток содержимого, файлы,
-права) в памяти демона и в `Registry/own-approvals.json`. Пока демон работает, запись в файле согласий, которой он не
-делал, доверия не даёт — из файла берётся только отзыв (`agenthub plugins remove` из другого процесса); на старте
-согласия берутся из файла. Не совпало — плагин работает как **community** (без действий, своих правил push и
-переменных служб), blocklist к нему применяется, журнал `plugin-own-unexpected`, событие `plugins.own-unexpected` →
-служба push: исключение безопасности `@hub:plugin-own-unexpected:<id>` (как смена закрепления: сразу, в тихие часы,
-баннер мимо оболочки), в менеджере — оранжевая строка `unverified`, и сам хаб заводит заявку на повторное
-подтверждение из папки записи (`reason: "unexpected"`; в окне все права — «новые»). Предел тот же, что у закрепления
-приложения (`daemon/lib/app-pin.mjs`): подделку обоих файлов, пока демон лежит, не отличить; полностью закроет только
-Touch ID. Доверие как у официального: действия (без сети и цены — объявленный уровень, `immediate` без окна, только
-из приложения), свои правила push, `AGENTHUB_USAGE_FILE` и `$ПЕРЕМЕННАЯ` в `<agenthub.watch>`, реестр сессий, MCP через
-хаб. blocklist реестра подтверждённый свой плагин не отключает. Метка в интерфейсе — «свой · <путь>».
+**The `own` tier.** The copy lives in `Plugins/<id>` (as for installed plugins, without `test/`, `fixtures/` and dot
+files; the copy runs, not the repository folder); the lock entry has `tier: "own"`, `own.path`, `sha256` — the
+fingerprint (sha256 of a list of "path — file sha256"), `archive: null`. Policy: the files on disk are exactly lock
+(otherwise quarantine, as for everyone) **and** the lock entry was written by the manager itself (`ownTrusted`) →
+`tier: own`. The `tier: "own"` field in lock gives no tier by itself (any user process can write it): the manager
+remembers the fingerprint of every own entry it wrote (path, content fingerprint, files, permissions) in daemon memory
+and in `Registry/own-approvals.json`. While the daemon runs, an entry in the consent file that it did not write gives no
+trust — only revocations are taken from the file (`agenthub plugins remove` from another process); at startup consents
+are read from the file. On a mismatch the plugin runs as **community** (no actions, own push rules or service
+variables), the blocklist applies to it, journal `plugin-own-unexpected`, event `plugins.own-unexpected` → the push
+service: the security exception `@hub:plugin-own-unexpected:<id>` (like a pin change: immediately, during quiet hours,
+banner bypassing the shell), an orange `unverified` line in the manager, and the hub itself creates a request to
+re-confirm from the entry's folder (`reason: "unexpected"`; all permissions in the window are "new"). The limit is the
+same as for app pinning (`daemon/lib/app-pin.mjs`): forging both files while the daemon is down cannot be detected; only
+Touch ID would close it fully. Trust is as for an official plugin: actions (without network and price — the declared
+level, `immediate` without a window, from the app only), own push rules, `AGENTHUB_USAGE_FILE` and `$VARIABLE` in
+`<agenthub.watch>`, the session registry, MCP through the hub. The registry blocklist does not disable a confirmed own
+plugin. The UI label is "own · <path>".
 
-Права своего плагина — те же виды, что у реестра, плюс `push`: громкие правила `<agenthub.push>` с `kind="security"`
-(приходят при любых выключателях) или `quiet="true"` (и в тихие часы) — `what: "<ключ> [security, quiet]"`, `why` —
-ярлык правила (`loudPushRules` в `perms.mjs`). У реестра этого вида нет (ревьюер видит такие правила предупреждением
-CI); у своего плагина их видит сам человек в окне согласия, а их появление — рост прав.
+An own plugin's permissions are the same kinds as in the registry, plus `push`: loud `<agenthub.push>` rules with
+`kind="security"` (delivered regardless of switches) or `quiet="true"` (during quiet hours too) —
+`what: "<key> [security, quiet]"`, `why` is the rule label (`loudPushRules` in `perms.mjs`). The registry has no such
+kind (the reviewer sees such rules as a CI warning); for an own plugin the human sees them in the consent window, and
+their appearance is a permission increase.
 
-**Обновление.** Служба plugins следит за папками своих плагинов (`fs.watch` с дебаунсом 1,5 с и сверка отпечатка раз
-в минуту — `services.plugins.ownCheck {checkMs, debounceMs}`). Содержимое сменилось, **набор прав ровно тот же**
-(`permissionsFingerprint`, вместе с правами `push`), версия не старше установленной, проверка прошла — новая копия
-ставится **сама** (решение пользователя: «ставит сам»): журнал `plugin-own-updated` со списком сменившихся файлов
-(`files`), тихое событие `plugins.own-updated`, без уведомления (на паузе хаба — `paused`, до снятия паузы). Ставит
-её процесс демона, а писать в папку может любой процесс пользователя — в том числе сессия Claude Code в этом
-репозитории; это цена решения (окно согласия это говорит). Права выросли — состояние `update`: в `pluginUpdates`
-(`tier: "own"`, `notifyKey` — уведомление «Доступно обновление» одно на каждое новое содержимое), в менеджере
-«Обновить · новые права» → `POST /registry/install {id}` берёт свой плагин из его папки → окно согласия с отметкой
-«новое». Права сузились или версия старше установленной (`git checkout` старой ветки; `downgrade: true`) — тоже
-`update`, но без окна: ставится одним щелчком «Обновить» (сужение само не ставится, иначе возврат прежнего
-содержимого снова звал бы окно на то, на что человек уже соглашался). Папка пропала —
-`missing`, не проходит проверку, заменена ссылкой (realpath не тот) или в ней другой плагин — `broken` с причиной:
-плагин работает на последней копии, в менеджере — оранжевая строка, в `/state.ownPlugins.problems` — запись.
+**Updates.** The plugins service watches the folders of own plugins (`fs.watch` with a 1.5 s debounce and a fingerprint
+check once a minute — `services.plugins.ownCheck {checkMs, debounceMs}`). The content changed, **the set of permissions
+is exactly the same** (`permissionsFingerprint`, including `push` permissions), the version is not older than the
+installed one, the check passed — the new copy is installed **by itself** (user decision: "install it yourself"):
+journal `plugin-own-updated` with the list of changed files (`files`), a quiet `plugins.own-updated` event, no
+notification (while the hub is paused — `paused`, until the pause is lifted). The daemon process installs it, while any
+user process can write to the folder — including a Claude Code session in that repository; this is the price of the
+decision (the consent window says so). Permissions grew — the `update` state: in `pluginUpdates` (`tier: "own"`,
+`notifyKey` — one "Update available" notification per new content), in the manager "Update · new permissions" →
+`POST /registry/install {id}` takes the own plugin from its folder → a consent window with "new" marks. Permissions
+narrowed or the version is older than the installed one (`git checkout` of an old branch; `downgrade: true`) — also
+`update`, but without a window: installed with a single "Update" click (narrowing is not installed by itself, otherwise
+returning to the previous content would again trigger a window for what the human already agreed to). The folder
+disappeared — `missing`; it fails the check, was replaced with a link (a different realpath) or contains another plugin
+— `broken` with a reason: the plugin runs on the last copy, the manager shows an orange line, and
+`/state.ownPlugins.problems` gets an entry.
 
-**Переезд.** Свой плагин официальным не становится: lock пишет только менеджер после согласия, архива
-(`Registry/archives/<id>`) и свидетельства (`Registry/attest/<id>`) у него нет (при переезде удаляются), `officialNow`
-для `tier: own` — всегда false. Тот же id уже стоит из реестра (official или community) — заявка и окно согласия несут
-`migrate: {from, version}` («Заменит официальный «…» из каталога на свой из этой папки…», кнопка «Заменить»); данные
-плагина (`PluginData/<id>`) сохраняются. Из другой своей папки — `migrate.from: "own"`. id не установлен, но есть в
-каталоге реестра — `migrate: {from: "catalog", tier, version, title}`: свой плагин получит всё, что хаб хранит под этим
-id (секреты `agent-hub.<id>` в связке, `PluginData/<id>`, правила уведомлений `<id>:<ключ>`) — окно говорит это прямо,
-кнопка «Заменить», CLI печатает предупреждение. Обратно — карточка каталога «Вернуть из каталога» → `POST
-/registry/install {id, source: "registry"}`: окно с `migrate.from: "own"` («Заменит свой «…» из папки … на плагин из
-каталога реестра. Слежение за папкой прекратится»); из терминала `agenthub plugins install <id>` печатает «Замена» и ту
-же строку. Каталог для id, который стоит своим, обновлений не предлагает (`installedOwn`, `updateAvailable: false`).
+**Migration.** An own plugin never becomes official: only the manager writes lock after consent, and it has no archive
+(`Registry/archives/<id>`) and no attestation (`Registry/attest/<id>`) (they are deleted on migration); `officialNow`
+for `tier: own` is always false. If the same id is already installed from the registry (official or community), the
+request and the consent window carry `migrate: {from, version}` ("Will replace the official "…" from the catalog with
+your own from this folder…", a "Replace" button); the plugin data (`PluginData/<id>`) is kept. From another own folder —
+`migrate.from: "own"`. The id is not installed but is in the registry catalog — `migrate: {from: "catalog", tier,
+version, title}`: the own plugin gets everything the hub stores under that id (secrets `agent-hub.<id>` in the keychain,
+`PluginData/<id>`, notification rules `<id>:<key>`) — the window says so plainly, a "Replace" button, the CLI prints a
+warning. Back again — the catalog card's "Restore from catalog" → `POST /registry/install {id, source: "registry"}`: a
+window with `migrate.from: "own"` ("Will replace your own "…" from folder … with the plugin from the registry catalog.
+Folder watching will stop"); from the terminal `agenthub plugins install <id>` prints "Replace" and the same line. The
+catalog offers no updates for an id installed as own (`installedOwn`, `updateAvailable: false`).
 
-## Зависимости в каталоге: «Нужен …» (09.11)
+## Dependencies in the catalog: "Requires …" (2026-11-09)
 
-Плагин объявляет внешнюю программу `<agenthub.requires name="…" url="https://…" check="~/…">зачем</agenthub.requires>`
-(`docs/extension-points.md`); `build-index.mjs` кладёт в запись индекса `requires: [{name, url, check, note}]` и
-перевод в `i18n.<lang>.requires`. `GET /registry/catalog` отдаёт `requires: [{name, url, note, check, present}]` —
-`present` демон считает по наличию `check` в HOME плагинов. Карточка каталога: «Нужен <name>» ссылкой, «не найден на
-этом Mac» / «установлен»; при отсутствии «Установить» приглушена с подсказкой (поставить можно). Сейчас — у hermes
-(«Нужен Hermes», `~/.hermes`). Неверная запись индекса (не https, маска в `check`) отбрасывается.
+A plugin declares an external program with `<agenthub.requires name="…" url="https://…" check="~/…">why</agenthub.requires>`
+([`extension-points.md`](extension-points.md)); `build-index.mjs` puts `requires: [{name, url, check, note}]` into the
+index entry and the translation into `i18n.<lang>.requires`. `GET /registry/catalog` returns
+`requires: [{name, url, note, check, present}]` — the daemon computes `present` from whether `check` exists in the
+plugins' HOME. The catalog card: "Requires <name>" as a link, "not found on this Mac" / "installed"; when missing,
+"Install" is dimmed with a tooltip (installing is still possible). Currently used by hermes ("Requires Hermes",
+`~/.hermes`). An invalid index entry (not https, a mask in `check`) is dropped.
 
-## Индекс: `tier`
+## Index: `tier`
 
-У каждой записи `index.json` — `tier: "official" | "community"` (собирает `build-index.mjs` по `official.json`) и
-прежнее `official: bool`. Они обязаны совпадать (`tier:"official"` ⇔ `official:true`), иначе запись отвергается
-(`registry:index-entry`); `builtin` и `local` индекс назначить не может. Старый индекс без `tier` — по `official`.
+Every `index.json` entry has `tier: "official" | "community"` (built by `build-index.mjs` from `official.json`) and the
+older `official: bool`. They must agree (`tier:"official"` ⇔ `official:true`), otherwise the entry is rejected
+(`registry:index-entry`); the index cannot assign `builtin` or `local`. An old index without `tier` is read by `official`.
 
-## Контракт плагинов 2 (09.11): что нужно от реестра
+## Plugin contract 2 (2026-11-09): what the registry needs
 
-Чистка ядра от названий плагинов (`docs/extension-points.md`, «Версии контракта»). Сторона реестра:
+Cleaning plugin names out of the core ([`extension-points.md`](extension-points.md), "Contract versions"). The registry
+side:
 
-- **`scripts/vendor` — синхронизировать** (`node scripts/sync-vendor.mjs`): `perms.mjs` знает право вида `connections`
-  (подключение `<agenthub.connection>`), линтер проверяет хост подключения против `<agenthub.net>`, свой id подключения
-  и предупреждает об устаревших `kind="runs"|"night"`; `meta.mjs` разбирает `<agenthub.icon>`, `<agenthub.contract>`,
-  `<agenthub.connection>`, `kind="plugin"` и `was=`. Без синхронизации индекс плагина с подключением не сойдётся с
-  архивом (`registry:archive-permissions`): права индекса строит vendored `perms.mjs`.
-- **`build-index.mjs`** переносит в запись индекса `contract` (целое из `<agenthub.contract>`, нет — поле не пишется)
-  и `icon` (`{symbol, color?}` из `<agenthub.icon>`). Демон принимает запись и без них (контракт 1: значок нейтральный);
-  неверный `icon` в индексе запись не роняет — значка нет; непонятный `contract` (не целое 1…9999 — например, «2.1»
-  от будущего build-index) запись тоже не роняет: она помечается «Нужен хаб новее» (`needsHub.need: null`).
-- Плагин с контрактом новее хаба в индексе публиковать можно: хабы **версии 2 и новее** покажут «Нужен хаб новее» и
-  не поставят (версия, которой нужен хаб новее, не предлагается и как «доступное обновление»). **Хабы контракта 1
-  (все, что развёрнуты до 10.11) тег и поле `contract` не знают и такой плагин поставят**, потеряв новые теги
-  (`kind="plugin"`, подключение, `message=`). Поэтому плагины контракта 2 публикуются только после обновления хаба —
-  порядок выкатки в `docs/extension-points.md`, «Версии контракта».
-- Подключение (`<agenthub.connection>`) — только у официальных: линтер с `official=false` считает тег ошибкой. id
-  подключения — id плагина или `<id плагина>.<имя>`, `url` — на имени хоста, не на IP-адресе.
-- Права вида `connections` — тот же «рост прав» при обновлении: появление подключения или нового инструмента в его
-  белом списке — окно согласия (смена `interval`/`budget` — нет: это не доступ).
+- **Sync `scripts/vendor`** (`node scripts/sync-vendor.mjs`): `perms.mjs` knows the `connections` permission kind
+  (a `<agenthub.connection>`), the linter checks the connection host against `<agenthub.net>` and the connection's own
+  id and warns about the deprecated `kind="runs"|"night"`; `meta.mjs` parses `<agenthub.icon>`, `<agenthub.contract>`,
+  `<agenthub.connection>`, `kind="plugin"` and `was=`. Without syncing, the index of a plugin with a connection will not
+  match its archive (`registry:archive-permissions`): the index permissions are built by the vendored `perms.mjs`.
+- **`build-index.mjs`** copies `contract` (an integer from `<agenthub.contract>`; absent — the field is not written) and
+  `icon` (`{symbol, color?}` from `<agenthub.icon>`) into the index entry. The daemon accepts an entry without them
+  (contract 1: a neutral icon); an invalid `icon` in the index does not break the entry — there is just no icon; an
+  unparseable `contract` (not an integer 1…9999 — for example "2.1" from a future build-index) does not break the entry
+  either: it is marked "Requires a newer hub" (`needsHub.need: null`).
+- A plugin with a contract newer than the hub may be published in the index: hubs of **version 2 and newer** will show
+  "Requires a newer hub" and will not install it (a version that needs a newer hub is not offered as an "available
+  update" either). **Contract 1 hubs (everything deployed before 2026-11-10) know neither the tag nor the `contract`
+  field and will install such a plugin**, losing the new tags (`kind="plugin"`, connections, `message=`). So contract 2
+  plugins are published only after the hub is updated — the rollout order is in
+  [`extension-points.md`](extension-points.md), "Contract versions".
+- A connection (`<agenthub.connection>`) is for official plugins only: the linter with `official=false` treats the tag
+  as an error. The connection id is the plugin id or `<plugin id>.<name>`, and `url` uses a host name, not an IP address.
+- `connections` permissions are the same "permission increase" on update: a new connection or a new tool in its
+  allowlist means a consent window (changing `interval`/`budget` does not: that is not access).

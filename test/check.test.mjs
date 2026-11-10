@@ -1,5 +1,5 @@
-// scripts/check.mjs: линтер прав, запретные пути, потолок effects для сторонних, запуск на синтетическом HOME,
-// дифф прав между ревизиями, сверка вендоринга.
+// scripts/check.mjs: the permission linter, forbidden paths, the effects ceiling for third-party plugins, runs on a
+// synthetic HOME, the permission diff between revisions, the vendoring check.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,7 +17,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const run = (root, extra = {}) => runCheck({ root, base: null, baseDir: null, report: null, skipTests: false, only: null, ...extra });
 const errorsOf = (r, id) => r.plugins.find((p) => p.id === id)?.errors || [];
 
-test("хороший сторонний плагин проходит, в том числе пробный запуск на синтетическом HOME", async () => {
+test("a good third-party plugin passes, including the smoke run on a synthetic HOME", async () => {
   const root = makeRegistry({
     hello: {
       "hello.5m.mjs": pluginSource(),
@@ -35,7 +35,7 @@ test("хороший сторонний плагин проходит, в том
   }
 });
 
-test("сторонний плагин с effects=session.stop отвергается", async () => {
+test("a third-party plugin with effects=session.stop is rejected", async () => {
   const root = makeRegistry({ bad: { "bad.1m.mjs": pluginSource({ effects: "open.url,session.stop" }), "README.md": README } });
   try {
     const r = await run(root);
@@ -46,19 +46,19 @@ test("сторонний плагин с effects=session.stop отвергает
   }
 });
 
-test("вывод с effect вне потолка и вне объявленных — ошибка пробного запуска", async () => {
+test("output with an effect above the ceiling or not declared is a smoke-run error", async () => {
   const body = `console.log("X | status=ok");\nconsole.log("---");\nconsole.log('Стоп | effect="session.stop pid=1"');\nconsole.log('Фокус | effect="cmux.focus surface=a"');\n`;
   const root = makeRegistry({ sneaky: { "sneaky.1m.mjs": pluginSource({ body }), "README.md": README } });
   try {
     const errs = errorsOf(await run(root), "sneaky");
-    assert.ok(errs.some((e) => e.includes("session.stop плагину реестра недоступен")), errs.join("\n"));
-    assert.ok(errs.some((e) => e.includes("cmux.focus не объявлен")), errs.join("\n"));
+    assert.ok(errs.some((e) => e.includes("session.stop is not available to a registry plugin")), errs.join("\n"));
+    assert.ok(errs.some((e) => e.includes("cmux.focus is not declared")), errs.join("\n"));
   } finally {
     cleanup(root);
   }
 });
 
-test("<agenthub.action> у стороннего — ошибка, у official — можно", async () => {
+test("<agenthub.action> is an error for a third-party plugin and allowed for an official one", async () => {
   const src = pluginSource({ extra: ['// <agenthub.action id="go" level="confirm">/bin/echo go</agenthub.action>'] });
   const root = makeRegistry({ act: { "act.1m.mjs": src, "README.md": README } });
   try {
@@ -74,7 +74,7 @@ test("<agenthub.action> у стороннего — ошибка, у official �
   }
 });
 
-test("запретные пути в правах и в исходнике", async () => {
+test("forbidden paths in permissions and in the source", async () => {
   for (const p of [
     "~/.claude/projects",
     "~/.claude/projects/x/y.jsonl",
@@ -96,10 +96,10 @@ test("запретные пути в правах и в исходнике", asy
     "~/.cmuxterm/*.jsonl",
     "~/a/../.claude/projects",
   ]) {
-    assert.ok(pathViolation(p), `должно быть запрещено: ${p}`);
+    assert.ok(pathViolation(p), `should be forbidden: ${p}`);
   }
   for (const p of ["~/.claude/sessions/*.json", "~/.claude/cache/kensei-statusline", "~/.cmuxterm/claude-hook-sessions.json", "~/.config/tool/*", "~/Library/Logs/x.log"]) {
-    assert.equal(pathViolation(p), null, `должно быть можно: ${p}`);
+    assert.equal(pathViolation(p), null, `should be allowed: ${p}`);
   }
   const root = makeRegistry({
     reader: {
@@ -123,7 +123,7 @@ test("запретные пути в правах и в исходнике", asy
   }
 });
 
-test("структура: бинарник, ссылка, нет README, лишний исполняемый файл, плохой id", async () => {
+test("structure: binary, link, no README, extra executable file, bad id", async () => {
   const root = makeRegistry({
     bin: { "bin.1m.mjs": "\0\0binary", "README.md": README },
     norm: { "norm.1m.mjs": pluginSource() },
@@ -132,16 +132,16 @@ test("структура: бинарник, ссылка, нет README, лиш�
   });
   try {
     const r = await run(root, { skipTests: true });
-    assert.ok(errorsOf(r, "bin").some((e) => e.includes("двоичный")));
+    assert.ok(errorsOf(r, "bin").some((e) => e.includes("binary")));
     assert.ok(errorsOf(r, "norm").some((e) => e.includes("README")));
-    assert.ok(errorsOf(r, "two").some((e) => e.includes("несколько")));
-    assert.ok(errorsOf(r, "Bad_Id").some((e) => e.includes("имя папки")));
+    assert.ok(errorsOf(r, "two").some((e) => e.includes("several")));
+    assert.ok(errorsOf(r, "Bad_Id").some((e) => e.includes("folder name")));
   } finally {
     cleanup(root);
   }
 });
 
-test("streamable: пробный запуск ждёт первый кадр ~~~", async () => {
+test("streamable: the smoke run waits for the first ~~~ frame", async () => {
   const body = `console.log("S | status=ok");\nconsole.log("~~~");\nsetInterval(() => {}, 1000);\n`;
   const root = makeRegistry({ live: { "live.mjs": pluginSource({ body, extra: ["// <agenthub.type>streamable</agenthub.type>"] }), "README.md": README } });
   try {
@@ -153,12 +153,12 @@ test("streamable: пробный запуск ждёт первый кадр ~~~
   }
 });
 
-test("тесты плагина идут на синтетическом HOME без лишнего окружения", async () => {
+test("plugin tests run on a synthetic HOME without extra environment", async () => {
   const t = `import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-test("HOME синтетический", () => {
+test("HOME is synthetic", () => {
   assert.equal(readFileSync(join(process.env.HOME, ".config", "hello", "state.json"), "utf8").trim(), "ok");
   assert.ok(process.env.AGENTHUB_PLUGIN_FILE.endsWith("hello.5m.mjs"));
   assert.equal(process.env.GITHUB_TOKEN, undefined);
@@ -176,7 +176,7 @@ test("HOME синтетический", () => {
   }
 });
 
-test("дифф прав между ревизиями: рост виден, смена «зачем» — не рост", () => {
+test("permission diff between revisions: growth shows, a changed \"why\" is not growth", () => {
   const before = makeRegistry({ a: { "a.1m.mjs": pluginSource(), "README.md": README }, gone: { "gone.1m.mjs": pluginSource(), "README.md": README } });
   const after = makeRegistry({
     a: {
@@ -199,7 +199,7 @@ test("дифф прав между ревизиями: рост виден, см
   }
 });
 
-test("check с --base-dir кладёт дифф в отчёт", async () => {
+test("check with --base-dir puts the diff in the report", async () => {
   const before = makeRegistry({ a: { "a.1m.mjs": pluginSource(), "README.md": README } });
   const after = makeRegistry({ a: { "a.1m.mjs": pluginSource({ effects: "open.url,open.file" }), "README.md": README } });
   try {
@@ -212,7 +212,7 @@ test("check с --base-dir кладёт дифф в отчёт", async () => {
   }
 });
 
-test("--perms-only: дифф прав без запуска плагина и его тестов (код PR не исполняется)", async () => {
+test("--perms-only: the permission diff without running the plugin or its tests (PR code is not executed)", async () => {
   const before = makeRegistry({ a: { "a.1m.mjs": pluginSource(), "README.md": README } });
   const marker = join(before, "pwned");
   const evil = `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "x");\n`;
@@ -227,16 +227,16 @@ test("--perms-only: дифф прав без запуска плагина и е
     const r = await run(after, { baseDir: before, permsOnly: true });
     assert.equal(r.permissionsGrew, true);
     assert.equal(r.diff[0].added[0].key, "effects:open.file");
-    assert.equal(r.plugins.length, 0, "плагины не проверялись и не запускались");
-    assert.equal(existsSync(marker), false, "ни плагин, ни его тест не исполнялись");
-    await assert.rejects(() => run(after, { permsOnly: true }), /нужна база/);
+    assert.equal(r.plugins.length, 0, "plugins were not checked or run");
+    assert.equal(existsSync(marker), false, "neither the plugin nor its test ran");
+    await assert.rejects(() => run(after, { permsOnly: true }), /needs a base/);
   } finally {
     cleanup(before);
     cleanup(after);
   }
 });
 
-test("ci.yml: job perms без кода PR, без артефакта для метки; запуски main не отменяются посреди подписи", () => {
+test("ci.yml: the perms job runs no PR code and makes no label artifact; main runs are not cancelled mid-signing", () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   const ci = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8");
   const jobs = {};
@@ -247,61 +247,61 @@ test("ci.yml: job perms без кода PR, без артефакта для м�
     else if (/^\S/.test(line)) cur = null;
     if (cur) jobs[cur] = (jobs[cur] || "") + line + "\n";
   }
-  assert.ok(jobs.check && jobs.perms && jobs.sign, "есть jobs check, perms и sign");
-  // для pull_request ci.yml берётся из PR: ничего из этого запуска в метку не идёт
-  assert.doesNotMatch(ci, /perms-artifact|upload-artifact/, "ci артефакт для метки не делает");
+  assert.ok(jobs.check && jobs.perms && jobs.sign, "jobs check, perms and sign exist");
+  // for pull_request, ci.yml comes from the PR: nothing from this run goes into the label
+  assert.doesNotMatch(ci, /perms-artifact|upload-artifact/, "ci makes no artifact for the label");
   assert.match(jobs.perms, /--perms-only/);
   assert.match(jobs.perms, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
-  assert.doesNotMatch(jobs.perms, /check\.sh|node --test|working-directory: pr/, "в job perms код PR не исполняется");
+  assert.doesNotMatch(jobs.perms, /check\.sh|node --test|working-directory: pr/, "the perms job does not execute PR code");
   assert.doesNotMatch(ci, /^\s*pull_request_target:/m);
-  // отмена — только у PR; sign — своя очередь без отмены; архивы до индекса, пара сверяется после загрузки
+  // cancellation only for PRs; sign has its own queue without cancellation; archives before the index, the pair is verified after upload
   assert.match(ci, /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}/);
   assert.match(jobs.sign, /group: sign-index\n\s+cancel-in-progress: false/);
   assert.match(jobs.sign, /--published published\/index\.json/);
   const up = jobs.sign.indexOf('"${archives[@]}"');
-  assert.ok(up > 0 && up < jobs.sign.indexOf("dist/index.json.minisig dist/index.json"), "архивы грузятся раньше индекса");
+  assert.ok(up > 0 && up < jobs.sign.indexOf("dist/index.json.minisig dist/index.json"), "archives are uploaded before the index");
   assert.match(jobs.sign, /cmp -s verify\/index\.json dist\/index\.json/);
 });
 
-test("perms-label.yml: рост прав считает сам скриптами ветки по умолчанию над файлами PR, артефакту запуска не верит", () => {
+test("perms-label.yml: computes permission growth itself with default-branch scripts over PR files, doesn't trust a run artifact", () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   const y = readFileSync(join(root, ".github", "workflows", "perms-label.yml"), "utf8");
-  // запуск не зависит от ci.yml PR (имя и триггеры которого PR может сменить): pull_request_target, не workflow_run
+  // the run doesn't depend on the PR's ci.yml (whose name and triggers the PR can change): pull_request_target, not workflow_run
   assert.match(y, /^\s+pull_request_target:\n\s+branches: \[main\]/m);
   assert.doesNotMatch(y, /^\s+workflow_run:/m);
-  assert.doesNotMatch(y, /secrets\./, "секретов нет");
-  assert.doesNotMatch(y, /^\s+(contents|actions|issues|checks|statuses): write/m, "запись — только pull-requests");
-  assert.equal((y.match(/persist-credentials: false/g) || []).length, 2, "оба checkout без токена");
-  assert.doesNotMatch(y, /gh run download|download-artifact/, "артефакт из запуска PR не читается");
+  assert.doesNotMatch(y, /secrets\./, "no secrets");
+  assert.doesNotMatch(y, /^\s+(contents|actions|issues|checks|statuses): write/m, "write access only for pull-requests");
+  assert.equal((y.match(/persist-credentials: false/g) || []).length, 2, "both checkouts without a token");
+  assert.doesNotMatch(y, /gh run download|download-artifact/, "no artifact from the PR run is read");
   assert.match(y, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}\n\s+path: base/);
   assert.match(y, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n\s+path: pr/);
   assert.match(y, /working-directory: base/);
   assert.match(y, /node scripts\/check\.mjs --perms-only --root \.\.\/pr --base-dir \./);
-  assert.doesNotMatch(y, /working-directory: pr|check\.sh|node --test|npm /, "код PR не исполняется");
-  assert.match(y, /\^\(\\\.github\/\|scripts\/\|official\\\.json\$\|blocklist\\\.json\$\|CODEOWNERS\$\)/, "правка доверенных путей — тоже метка");
+  assert.doesNotMatch(y, /working-directory: pr|check\.sh|node --test|npm /, "PR code is not executed");
+  assert.match(y, /\^\(\\\.github\/\|scripts\/\|official\\\.json\$\|blocklist\\\.json\$\|CODEOWNERS\$\)/, "changing trusted paths also gets the label");
   assert.doesNotMatch(y, /^\s*actions: read/m);
 });
 
-test("blocklist.json и official.json: форма проверяется", async () => {
+test("blocklist.json and official.json: shape is checked", async () => {
   const root = makeRegistry({}, { blocklist: [{ id: "x" }, { id: "Bad!" , reason: "r" }], official: [] });
   try {
     const r = await run(root);
     assert.equal(r.ok, false);
-    assert.ok(r.registry.some((e) => e.includes("нет reason")));
+    assert.ok(r.registry.some((e) => e.includes("no reason")));
     assert.ok(r.registry.some((e) => e.includes("[1]: id")));
   } finally {
     cleanup(root);
   }
 });
 
-test("вендоринг: копии совпадают с VENDOR.json и с agent-hub, если он рядом", () => {
+test("vendoring: copies match VENDOR.json and agent-hub, if it's next door", () => {
   const v = checkVendor();
   assert.deepEqual(v.problems, []);
   assert.deepEqual(v.drift, []);
 });
 
-test("вендоринг: копия контракта — .DS_Store не ошибка; лишний (и с точкой в начале), правленый руками и пропавший — ошибка", () => {
-  // копия scripts/vendor и docs/contract во временном каталоге: общий docs/contract реестра не трогаем
+test("vendoring: contract copy — .DS_Store is not an error; an extra file (dot files too), a hand-edited one and a missing one are errors", () => {
+  // a copy of scripts/vendor and docs/contract in a temp directory: the registry's shared docs/contract stays untouched
   const tmp = mkdtempSync(join(tmpdir(), "vendor-"));
   try {
     const vendorDir = join(tmp, "vendor");
@@ -310,27 +310,27 @@ test("вендоринг: копия контракта — .DS_Store не ош�
     cpSync(join(ROOT, "docs", "contract"), contractDir, { recursive: true });
     const check = () => checkVendor({ from: null, vendorDir, contractDir });
     assert.deepEqual(check().problems, []);
-    // .DS_Store кладёт Finder, .gitignore его не пускает — проверку он не роняет
+    // Finder drops .DS_Store, .gitignore keeps it out — it doesn't fail the check
     writeFileSync(join(contractDir, ".DS_Store"), "x");
     assert.deepEqual(check().problems, []);
-    // остальное с точкой в начале git в коммит возьмёт — это лишний файл, как и любой другой
+    // git would commit any other dot file — so it's an extra file like any other
     writeFileSync(join(contractDir, ".notes.md"), "x");
-    assert.deepEqual(check().problems, ["docs/contract/.notes.md: лишний файл — копию пишет только scripts/sync-vendor.mjs"]);
+    assert.deepEqual(check().problems, ["docs/contract/.notes.md: extra file — only scripts/sync-vendor.mjs writes the copy"]);
     rmSync(join(contractDir, ".notes.md"));
     writeFileSync(join(contractDir, "notes.md"), "x");
-    assert.deepEqual(check().problems, ["docs/contract/notes.md: лишний файл — копию пишет только scripts/sync-vendor.mjs"]);
+    assert.deepEqual(check().problems, ["docs/contract/notes.md: extra file — only scripts/sync-vendor.mjs writes the copy"]);
     rmSync(join(contractDir, "notes.md"));
-    writeFileSync(join(contractDir, "push.md"), readFileSync(join(contractDir, "push.md"), "utf8") + "\nправка\n");
-    assert.deepEqual(check().problems, ["docs/contract/push.md не совпадает с VENDOR.json (правка руками?)"]);
+    writeFileSync(join(contractDir, "push.md"), readFileSync(join(contractDir, "push.md"), "utf8") + "\nedit\n");
+    assert.deepEqual(check().problems, ["docs/contract/push.md doesn't match VENDOR.json (edited by hand?)"]);
     rmSync(join(contractDir, "push.md"));
-    assert.deepEqual(check().problems, ["нет docs/contract/push.md — запустите node scripts/sync-vendor.mjs"]);
+    assert.deepEqual(check().problems, ["docs/contract/push.md is missing — run node scripts/sync-vendor.mjs"]);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test("official: effects тоже под потолком, immediate-действие — только без сети, запретные места — ошибка (исключения нет)", async () => {
-  // 09.11: официальному без сети immediate можно (ядро выполнит без окна, только из приложения); с сетью — нет
+test("official: effects are also under the ceiling, an immediate action only without network, forbidden locations are an error (no exception)", async () => {
+  // 09.11: an official plugin without network may use immediate (the core runs it without a window, only from the app); with network it may not
   const src = pluginSource({
     effects: "open.url,session.stop",
     extra: ['// <agenthub.net>api.example.com — данные</agenthub.net>', '// <agenthub.action id="go" level="immediate">/bin/echo go</agenthub.action>'],
@@ -348,9 +348,9 @@ test("official: effects тоже под потолком, immediate-действ
   }
 });
 
-// Ревью 09.11 (low): «нет сети» не значит «бесплатно» — immediate с ценой (cost=) — ошибка, без цены — пометка «!»
-// для ревьюера в отчёте check.sh (проверка при этом проходит).
-test("official: immediate с cost= — ошибка; immediate без цены — предупреждение ревьюеру, проверка проходит", async () => {
+// Review 09.11 (low): "no network" doesn't mean "free" — immediate with a cost (cost=) is an error, without a cost it's a
+// "!" note for the reviewer in the check.sh report (the check still passes).
+test("official: immediate with cost= is an error; immediate without a cost is a warning for the reviewer, the check passes", async () => {
   const priced = pluginSource({ extra: ['// <agenthub.action id="go" level="immediate" cost-en="quota">/bin/echo go</agenthub.action>'] });
   const plain = pluginSource({ extra: ['// <agenthub.action id="flip" level="immediate" title="Переключить">/bin/echo flip</agenthub.action>'] });
   const root = makeRegistry({ pay: { "pay.1m.mjs": priced, "README.md": README }, flip: { "flip.1m.mjs": plain, "README.md": README } }, { official: ["pay", "flip"] });
@@ -366,7 +366,7 @@ test("official: immediate с cost= — ошибка; immediate без цены �
   }
 });
 
-test("official: action= в выводе — только объявленные и с arg по шаблону", async () => {
+test("official: action= in output — declared ones only, with arg matching the pattern", async () => {
   const body = [
     'console.log("X | status=ok");',
     'console.log("---");',
@@ -387,14 +387,14 @@ test("official: action= в выводе — только объявленные 
     const errs = errorsOf(await run(root), "act");
     assert.equal(errs.filter((e) => e.includes("arg=T-1")).length, 0, errs.join("\n"));
     assert.ok(errs.some((e) => e.includes("arg=-rf")), errs.join("\n"));
-    assert.ok(errs.some((e) => e.includes("action=nope не объявлено")), errs.join("\n"));
-    assert.ok(errs.some((e) => e.includes("action=stop: arg не объявлен")), errs.join("\n"));
+    assert.ok(errs.some((e) => e.includes("action=nope is not declared")), errs.join("\n"));
+    assert.ok(errs.some((e) => e.includes("action=stop: arg is not declared")), errs.join("\n"));
   } finally {
     cleanup(root);
   }
 });
 
-test("скрипты реестра по пути через symlink (/tmp → /private/tmp) — работают, а не молча выходят с кодом 0", async () => {
+test("registry scripts run via a symlinked path (/tmp → /private/tmp) — they work instead of silently exiting 0", async () => {
   const { mkdtempSync, rmSync, symlinkSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { spawnSync } = await import("node:child_process");
@@ -408,7 +408,7 @@ test("скрипты реестра по пути через symlink (/tmp → /
     const bad = node([join(link, "check.mjs"), "--bogus"]);
     assert.equal(bad.status, 2, bad.stdout + bad.stderr);
     assert.match(bad.stderr, /--bogus/);
-    assert.equal(node([join(link, "keygen.mjs")]).status, 2, "keygen без каталога — отказ, а не тишина");
+    assert.equal(node([join(link, "keygen.mjs")]).status, 2, "keygen without a directory refuses instead of staying silent");
     assert.equal(isMain(pathToFileURL(join(scripts, "check.mjs")).href, join(link, "check.mjs")), true);
     assert.equal(isMain(pathToFileURL(join(scripts, "check.mjs")).href, join(link, "keygen.mjs")), false);
     assert.equal(isMain(pathToFileURL(join(scripts, "check.mjs")).href, undefined), false);
@@ -417,16 +417,16 @@ test("скрипты реестра по пути через symlink (/tmp → /
   }
 });
 
-test("--base: файлы плагина изменились, а версия та же — ошибка; подняли версию или поменяли только test/ — нет", async () => {
+test("--base: plugin files changed but the version is the same — error; version bumped or only test/ changed — no error", async () => {
   const { execFileSync } = await import("node:child_process");
   const { writeFileSync } = await import("node:fs");
   const { writePluginFiles } = await import("./helpers.mjs");
-  const root = makeRegistry({ a: { "a.1m.mjs": pluginSource(), "README.md": README, "test/a.test.mjs": "// тест\n" } });
+  const root = makeRegistry({ a: { "a.1m.mjs": pluginSource(), "README.md": README, "test/a.test.mjs": "// test\n" } });
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  // без системного и глобального конфига git (подпись коммитов, хуки и т.п. с машины разработчика не мешают).
-  // Глобальный — пустой файл, а не os.devNull: git для Windows не открывает «\\.\nul» как конфиг.
+  // without the system and global git config (commit signing, hooks etc. from the developer's machine don't interfere).
+  // The global one is an empty file, not os.devNull: git for Windows can't open "\\.\nul" as a config.
   const cfgDir = mkdtempSync(join(tmpdir(), "ahp-gitcfg-"));
   const emptyCfg = join(cfgDir, "gitconfig");
   writeFileSync(emptyCfg, "");
@@ -435,15 +435,15 @@ test("--base: файлы плагина изменились, а версия т
     git("init", "-q");
     git("add", "-A");
     git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "base");
-    // только тест — архив тот же, версия может остаться
-    writePluginFiles(root, "a", { "test/a.test.mjs": "// другой тест\n" });
+    // only the test — the archive is the same, the version may stay
+    writePluginFiles(root, "a", { "test/a.test.mjs": "// another test\n" });
     let r = await run(root, { base: "HEAD", skipTests: true });
     assert.deepEqual(errorsOf(r, "a"), []);
-    // README и новый файл — архив другой
-    writePluginFiles(root, "a", { "README.md": README + "\nправка\n", "lib/x.mjs": "export const x = 1;\n" });
+    // README and a new file — the archive differs
+    writePluginFiles(root, "a", { "README.md": README + "\nedit\n", "lib/x.mjs": "export const x = 1;\n" });
     r = await run(root, { base: "HEAD", skipTests: true });
     assert.equal(r.ok, false);
-    assert.match(errorsOf(r, "a").join("\n"), /файлы изменились относительно HEAD \(README\.md, lib\/x\.mjs\), а версия та же \(1\.0\.0\) — поднимите версию/);
+    assert.match(errorsOf(r, "a").join("\n"), /files changed since HEAD \(README\.md, lib\/x\.mjs\), but the version is the same \(1\.0\.0\) — bump the version/);
     writeFileSync(join(root, "plugins", "a", "a.1m.mjs"), pluginSource({ version: "1.0.1" }));
     r = await run(root, { base: "HEAD", skipTests: true });
     assert.deepEqual(errorsOf(r, "a"), []);
@@ -453,7 +453,7 @@ test("--base: файлы плагина изменились, а версия т
   }
 });
 
-test("push: kind=\"security\" и ключи ядра хаба — предупреждение ревьюеру (проверка не падает)", async () => {
+test("push: kind=\"security\" and hub core keys are a warning for the reviewer (the check doesn't fail)", async () => {
   const root = makeRegistry({
     hello: {
       "hello.5m.mjs": pluginSource({ extra: ['// <agenthub.push key="tamper" kind="security">Маркер подмены</agenthub.push>', '// <agenthub.push key="app-restart-stopped">Agent Hub падает</agenthub.push>', '// <agenthub.push key="job-failed" kind="plugin" was="runs">Задача упала</agenthub.push>', '// <agenthub.push key="job-costly" kind="runs">Дорого</agenthub.push>'] }),
@@ -466,8 +466,8 @@ test("push: kind=\"security\" и ключи ядра хаба — предупр
     const w = r.plugins[0].warnings;
     assert.ok(w.some((x) => x.includes('key="tamper" kind="security"')), w.join("\n"));
     assert.ok(w.some((x) => x.includes('key="app-restart-stopped"') && x.includes("зарезервирован ядром")), w.join("\n"));
-    assert.ok(!w.some((x) => x.includes("job-failed")), "обычное правило (kind=\"plugin\" was=…) — без предупреждения");
-    // контракт 2: устаревший вид контракта 1 работает, но линтер просит kind="plugin" was="…"
+    assert.ok(!w.some((x) => x.includes("job-failed")), "an ordinary rule (kind=\"plugin\" was=…) gets no warning");
+    // contract 2: the deprecated contract 1 form works, but the linter asks for kind="plugin" was="…"
     assert.ok(w.some((x) => x.includes('key="job-costly" kind="runs"') && x.includes('kind="plugin" was="runs"')), w.join("\n"));
     assert.deepEqual(errorsOf(r, "hello"), []);
   } finally {
@@ -475,7 +475,7 @@ test("push: kind=\"security\" и ключи ядра хаба — предупр
   }
 });
 
-test("<agenthub.requires>: зависимость с https-ссылкой и путём проверки проходит; http, маска и запретное место — ошибка", async () => {
+test("<agenthub.requires>: a dependency with an https link and a check path passes; http, a mask and a forbidden location are errors", async () => {
   const good = '// <agenthub.requires name="Tool" url="https://example.com/tool" check="~/.tool">программа, чьё состояние показывает плагин</agenthub.requires>';
   const root = makeRegistry({
     ok: { "ok.5m.mjs": pluginSource({ extra: [good] }), "README.md": README },
@@ -486,15 +486,15 @@ test("<agenthub.requires>: зависимость с https-ссылкой и п�
   try {
     const r = await run(root, { skipTests: true });
     assert.deepEqual(errorsOf(r, "ok"), []);
-    assert.match(errorsOf(r, "http").join("\n"), /url — только https/);
-    assert.match(errorsOf(r, "mask").join("\n"), /без масок/);
+    assert.match(errorsOf(r, "http").join("\n"), /url must be https/);
+    assert.match(errorsOf(r, "mask").join("\n"), /without wildcards/);
     assert.match(errorsOf(r, "secret").join("\n"), /requires name="T".*~\/\.claude\/projects/);
   } finally {
     cleanup(root);
   }
 });
 
-test("копия контракта (docs/contract): разделы по заголовкам, заголовок внутри ``` — не раздел; шапка «не править»", async () => {
+test("contract copy (docs/contract): sections by heading, a heading inside ``` is not a section; \"don't edit\" header", async () => {
   const { pickSections, CONTRACT_DOCS, CONTRACT_DIR } = await import("../scripts/sync-vendor.mjs");
   const md = "# Док\n\nвступление\n\n## Раз\n\nтекст раз\n\n```\n# не заголовок\n```\n\n### Раз.1\n\nвнутри\n\n## Два\n\nтекст два\n\n## Три\n\nтри\n";
   const r = pickSections(md, ["Три", "Раз", "Нет"]);
@@ -504,20 +504,20 @@ test("копия контракта (docs/contract): разделы по заг�
   const { join } = await import("node:path");
   for (const name of ["README.md", ...CONTRACT_DOCS.map((d) => d.out)]) {
     const text = readFileSync(join(CONTRACT_DIR, name), "utf8");
-    assert.match(text.split("\n")[0], /^<!-- Копия из agent-hub, контракт v\d+\. Не править/, name);
+    assert.match(text.split("\n")[0], /^<!-- Copy from agent-hub, contract v\d+\. Don't edit/, name);
   }
 });
 
-test("контракт 2: возможность контракта 2 без <agenthub.contract>2 — предупреждение; контракт новее вендоринга — ошибка", async () => {
+test("contract 2: a contract 2 feature without <agenthub.contract>2 is a warning; a contract newer than the vendored copy is an error", async () => {
   const { contractCheck } = await import("../scripts/lib/registry.mjs");
   const { CONTRACT_VERSION, parseMetaText } = await import("../scripts/vendor/meta.mjs");
   const meta = (tags) => parseMetaText(tags.join("\n")).meta;
   const icon = '// <agenthub.icon symbol="moon" color="#5E5CE6"></agenthub.icon>';
-  assert.match(contractCheck(meta([icon])).warnings.join("\n"), /<agenthub\.icon>.*не объявлен/);
+  assert.match(contractCheck(meta([icon])).warnings.join("\n"), /<agenthub\.icon>.*is not declared/);
   assert.match(contractCheck(meta(['// <agenthub.push key="x" kind="plugin">X</agenthub.push>'])).warnings.join("\n"), /kind="plugin"/);
   assert.match(contractCheck(meta([]), 'console.log("message=Нельзя");').warnings.join("\n"), /message=/);
-  // устаревший kind="runs" — это контракт 1 (предупреждает линтер прав), а не «пользуется контрактом 2»
+  // the deprecated kind="runs" is contract 1 (the permission linter warns about it), not "uses contract 2"
   assert.deepEqual(contractCheck(meta(['// <agenthub.push key="x" kind="runs">X</agenthub.push>'])).warnings, []);
   assert.deepEqual(contractCheck(meta([icon, "// <agenthub.contract>2</agenthub.contract>"])), { errors: [], warnings: [] });
-  assert.match(contractCheck(meta([`// <agenthub.contract>${CONTRACT_VERSION + 1}</agenthub.contract>`])).errors.join("\n"), /вендоринг знает контракт/);
+  assert.match(contractCheck(meta([`// <agenthub.contract>${CONTRACT_VERSION + 1}</agenthub.contract>`])).errors.join("\n"), /vendored copy knows contract/);
 });

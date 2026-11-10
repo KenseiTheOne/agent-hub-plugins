@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // <agenthub.title>Claude Code</agenthub.title>
-// <agenthub.version>1.0.0</agenthub.version>
-// <agenthub.contract>2</agenthub.contract>
+// <agenthub.version>1.1.0</agenthub.version>
+// <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="text.alignleft" color="#D97757"></agenthub.icon>
 // <agenthub.desc>Настройки Claude Code для новых сессий (модель, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
 // <agenthub.desc lang="en">Claude Code settings for new sessions (model, effort, output style, ultracode) and open tabs: which differ from the base, and a button to bring them in line</agenthub.desc>
@@ -26,8 +26,6 @@
 // <agenthub.fsRead lang="en">~/.claude/plugins/installed_plugins.json, ~/.claude/plugins/cache — output styles of enabled Claude Code plugins (plugin name and style name)</agenthub.fsRead>
 // <agenthub.fsRead>~/.claude/sessions/*.json — открытые сессии: pid, папка, имя, состояние (простаивает, работает, ждёт ответа), когда начата (ключи сессий не открываются)</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.claude/sessions/*.json — open sessions: pid, folder, name, state (idle, working, waiting for you), when started (session keys are never opened)</agenthub.fsRead>
-// <agenthub.fsRead>~/.cmuxterm/claude-hook-sessions.json — в какой вкладке cmux идёт сессия (только идентификаторы)</agenthub.fsRead>
-// <agenthub.fsRead lang="en">~/.cmuxterm/claude-hook-sessions.json — which cmux tab a session runs in (identifiers only)</agenthub.fsRead>
 // <agenthub.fsRead>~/.local/bin/claude, ~/.local/share/claude/versions, /opt/homebrew/bin/claude, /usr/local/bin/claude — установлен ли Claude Code</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.local/bin/claude, ~/.local/share/claude/versions, /opt/homebrew/bin/claude, /usr/local/bin/claude — whether Claude Code is installed</agenthub.fsRead>
 // <agenthub.fsRead>$AGENTHUB_CLAUDE_SESSIONS_FILE — модель и effort открытых сессий от хаба (только метаданные, без текста переписки)</agenthub.fsRead>
@@ -38,14 +36,15 @@
 // <agenthub.fsWrite lang="en">~/.claude/backups/settings.json.*-agenthub — a copy of the settings before each change (the last 20 are kept)</agenthub.fsWrite>
 // <agenthub.exec>/bin/ps -o pid=,lstart=,comm= -p … — жива ли сессия и это ли Claude Code (без аргументов и окружения процесса)</agenthub.exec>
 // <agenthub.exec lang="en">/bin/ps -o pid=,lstart=,comm= -p … — whether a session is alive and is Claude Code (no process arguments or environment)</agenthub.exec>
-// <agenthub.exec>/usr/bin/codesign --verify --strict -R … — перед набором во вкладку: подписан ли процесс сессии Anthropic (Claude Code, Team ID Q6L2SF6YDW)</agenthub.exec>
-// <agenthub.exec lang="en">/usr/bin/codesign --verify --strict -R … — before typing into a tab: whether the session's process is signed by Anthropic (Claude Code, Team ID Q6L2SF6YDW)</agenthub.exec>
-// <agenthub.exec>/Applications/cmux.app/Contents/Resources/bin/cmux read-screen|send|send-key — набрать во вкладку сессии только /model и /effort; read-screen читает последние 40 строк вкладки, чтобы убедиться, что поле ввода пустое и сессия подтвердила команду (текст не сохраняется и не показывается)</agenthub.exec>
-// <agenthub.exec lang="en">/Applications/cmux.app/Contents/Resources/bin/cmux read-screen|send|send-key — type only /model and /effort into a session's tab; read-screen reads the tab's last 40 lines to check the input line is empty and the session confirmed the command (the text is neither stored nor shown)</agenthub.exec>
+// <agenthub.terminal>send /model /effort — набрать во вкладку открытой сессии только /model и /effort с базовыми значениями — по вашей кнопке «Привести» или «Проставить всем»; хаб сам проверяет, что сессия свободна, поле ввода пустое и это подписанный Claude Code, и жмёт Enter</agenthub.terminal>
+// <agenthub.terminal lang="en">send /model /effort — type only /model and /effort with the base values into an open session's tab — on your Fix or Apply to all click; the hub checks the session is free, the input line is empty and it's signed Claude Code, and presses Enter</agenthub.terminal>
+// <agenthub.effects>session.focus</agenthub.effects>
 // <agenthub.watch>~/.claude/settings.json — настройки поменяли (вы, /model, /effort или другой плагин)</agenthub.watch>
 // <agenthub.watch lang="en">~/.claude/settings.json — the settings changed (by you, /model, /effort or another plugin)</agenthub.watch>
 // <agenthub.watch>~/.claude/sessions/*.json — сессия освободилась: можно набрать отложенное</agenthub.watch>
 // <agenthub.watch lang="en">~/.claude/sessions/*.json — a session became free: a deferred command can be typed</agenthub.watch>
+// <agenthub.watch>$AGENTHUB_CLAUDE_SESSIONS_FILE — у вкладки сменились модель или effort</agenthub.watch>
+// <agenthub.watch lang="en">$AGENTHUB_CLAUDE_SESSIONS_FILE — a tab's model or effort changed</agenthub.watch>
 // <agenthub.action id="set-model" level="immediate" arg="model:^claude-[a-z]+-[0-9]+(?:-[0-9]+)?$" title="Модель для новых сессий (Opus тратит лимит быстрее остальных)" title-en="Model for new sessions (Opus uses the limit faster than the others)">claude-code.30s.mjs --action set-model {model}</agenthub.action>
 // <agenthub.action id="set-effort" level="immediate" arg="level:^(?:low|medium|high|xhigh)$" title="Effort для новых сессий (чем выше, тем быстрее уходит лимит)" title-en="Effort for new sessions (the higher, the faster the limit goes)">claude-code.30s.mjs --action set-effort {level}</agenthub.action>
 // <agenthub.action id="effort-max" level="confirm-cost" title="Поставить effort max" title-en="Set effort to max" cost="лимит подписки уходит в разы быстрее; действует сразу во всех вкладках, включая открытые, и перебивает /effort в них" cost-en="the subscription limit runs out several times faster; it applies at once in every tab, open ones included, and overrides /effort there">claude-code.30s.mjs --action effort-max</agenthub.action>
@@ -58,41 +57,48 @@
 // <agenthub.action id="apply-stop" level="immediate" title="Остановить «Проставить базовые»" title-en="Stop applying the base">claude-code.30s.mjs --action apply-stop</agenthub.action>
 // <agenthub.action id="apply-done" level="immediate" title="Убрать итог «Проставить базовые»" title-en="Dismiss the apply result">claude-code.30s.mjs --action apply-done</agenthub.action>
 //
-// Плагин «Claude Code» (реестр agent-hub-plugins, tier official). Работу делает сам, хаб — песочница и права:
-//   • читает базовые настройки новых сессий из ~/.claude/settings.json и пишет туда только белый список ключей
-//     (ALLOWED_PATHS ниже): атомарно, с копией до правки и с проверкой, что файл не поменяли между чтением и записью;
-//   • показывает открытые сессии (~/.claude/sessions, вкладка — по ~/.cmuxterm/claude-hook-sessions.json), их модель
-//     и effort, и набирает в их вкладку /model и /effort через cmux — только эти две команды, только в простаивающую
-//     сессию с проверенной подписью Claude Code (codesign — сам плагин, или хаб в своём файле) и только в пустое поле ввода.
-// Модель и effort каждой сессии видны в её транскрипте, а транскрипты плагину реестра читать нельзя: эти данные даёт хаб
-// файлом $AGENTHUB_CLAUDE_SESSIONS_FILE (заявка в сессию хаба, 10.11). Без него плагин показывает только то, что проставил сам.
-// Отложенное («после хода», «после ответа») плагин набирает сам из обычного запуска, только если хаб сообщает, что не на
-// паузе (AGENTHUB_PAUSED=0, заявка 10.11). Хаб старше — отложенное ждёт кнопки «Продолжить» (действие, которое пауза хаба
-// не пускает).
-// Факты Claude Code 2.1.3xx (проверены по установленной версии):
-//   • effortLevel в ~/.claude/settings.json для Opus 5.5 и новее не действует — effort новых сессий берётся из
-//     modelSettings["<id модели>"].effortLevel; поэтому плагин пишет оба ключа;
-//   • effortLevel "max" Claude Code молча выкидывает: max держится только через env.CLAUDE_CODE_EFFORT_LEVEL=max, а
-//     env из settings.json живые сессии подхватывают сразу (поэтому max — с подтверждением); удалённый ключ env живые
-//     сессии не замечают — уход с max пишет "" (пусто = «не задано», не "auto"/"unset": это принудительный auto), а сам
-//     ключ плагин удаляет, когда не осталось живых сессий, начатых до ухода с max;
-//   • outputStyle из ~/.claude/settings.json меняет и открытые сессии — со следующего сообщения;
-//   • /model и /effort, набранные во вкладку, Claude Code сам сохраняет как базовые: плагин набирает ровно базовые
-//     значения в том виде, в каком они записаны (псевдоним вроде opus[1m] остаётся псевдонимом).
-// Действия: `--action <id> [<аргумент>]`; отказ — код 3, строка message=<объяснение> и последней reason=<код>.
+// The "Claude Code" plugin (agent-hub-plugins registry, tier official). It does the work itself; the hub is the sandbox
+// and the permissions:
+//   • reads the base settings for new sessions from ~/.claude/settings.json and writes only an allow list of keys there
+//     (ALLOWED_PATHS below): atomically, with a copy before the change and a check that the file didn't change between
+//     the read and the write;
+//   • shows open sessions (~/.claude/sessions), their model and effort, and types /model and /effort into their tab
+//     through the hub's terminal (contract 3: POST /terminal/send-text on $AGENTHUB_HUB_SOCKET, permission
+//     <agenthub.terminal>) — only these two commands and only into an idle session; the hub finds the tab, checks the
+//     Claude Code signature, the pid and the empty input line, and presses Enter. The plugin knows nothing about the
+//     specific terminal; switching to the tab is the hub effect session.focus <sessionId>.
+// Each session's model and effort are visible in its transcript, but a registry plugin may not read transcripts: the
+// hub provides this data in the file $AGENTHUB_CLAUDE_SESSIONS_FILE (modelId — the model id, at — when it was written).
+// The plugin remembers what it set together with the time typing started: a newer hub record is already the session's
+// answer, and that is what is shown.
+// Deferred typing ("after the turn", "after your answer") is done by the plugin itself from a regular run, only when the
+// hub isn't paused (AGENTHUB_PAUSED=0); otherwise deferred typing waits for the Continue button (an action the hub's
+// pause blocks).
+// Claude Code 2.1.3xx facts (checked against the installed version):
+//   • effortLevel in ~/.claude/settings.json has no effect for Opus 5.5 and newer — new sessions take effort from
+//     modelSettings["<model id>"].effortLevel; that's why the plugin writes both keys;
+//   • Claude Code silently drops effortLevel "max": max holds only via env.CLAUDE_CODE_EFFORT_LEVEL=max, and live
+//     sessions pick up env from settings.json at once (hence max needs confirmation); live sessions don't notice a
+//     removed env key — leaving max writes "" (empty = "not set", not "auto"/"unset": that would be a forced auto), and
+//     the plugin deletes the key itself once no live sessions started before leaving max remain;
+//   • outputStyle from ~/.claude/settings.json changes open sessions too — from their next message;
+//   • Claude Code itself saves /model and /effort typed into a tab as the base: the plugin types exactly the base
+//     values as they are written (an alias like opus[1m] stays an alias).
+// Actions: `--action <id> [<argument>]`; a refusal is exit code 3, a line message=<explanation> and last reason=<code>.
 
 import { execFileSync } from "node:child_process";
+import { request } from "node:http";
 import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Время старта процесса: ядро убивает обычный запуск через 5 с, действие — через 30 с, считая от старта
+// Process start time: the core kills a regular run after 5 s and an action after 30 s, counted from the start
 const T0 = Date.now();
 const RUN_DEADLINE = () => T0 + 4000;
 const ACTION_DEADLINE = () => T0 + 26_000;
 
-// ---------- язык ----------
+// ---------- language ----------
 export function envLang() {
   return process.env.AGENTHUB_LANG === "en" ? "en" : "ru";
 }
@@ -105,13 +111,13 @@ function ruPlural(n, one, few, many) {
   if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
   return many;
 }
-// «3 вкладки» / «3 tabs»
+// "N tabs" in the current language (Russian plural forms included)
 export function tabsN(n, lang = LANG) {
   return lang === "en" ? `${n} ${n === 1 ? "tab" : "tabs"}` : `${n} ${ruPlural(n, "вкладка", "вкладки", "вкладок")}`;
 }
 
-// ---------- модели и effort ----------
-// Модели на странице (утверждённый дизайн 10.11). Подписи остальных — для показа того, что стоит у сессии.
+// ---------- models and effort ----------
+// Models on the page (approved design of 10.11). Labels of the others are for showing what a session has.
 export const MODELS = [
   { id: "claude-opus-5-5", label: "Opus 5.5" },
   { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
@@ -128,11 +134,11 @@ const LABELS = {
   "claude-mythos-5-2": "Mythos 5.2",
   ...Object.fromEntries(MODELS.map((m) => [m.id, m.label])),
 };
-// Псевдонимы /model → id (Claude Code 2.1.321, API Anthropic). opusplan/default — без одного id.
+// /model aliases → id (Claude Code 2.1.321, Anthropic API). opusplan/default have no single id.
 const ALIASES = { opus: "claude-opus-5-5", best: "claude-opus-5-5", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5", fable: "claude-fable-5-2" };
-// Модель без ключа model (по умолчанию у API Anthropic) — для effort: какой записи modelSettings она следует
+// The model when there's no model key (the Anthropic API default) — for effort: which modelSettings entry it follows
 export const DEFAULT_MODEL = "claude-opus-5-5";
-// effort по умолчанию у модели (без modelSettings и без legacy effortLevel)
+// The model's default effort (without modelSettings and without the legacy effortLevel)
 const DEFAULT_EFFORT = {
   "claude-opus-5-5": "medium",
   "claude-sonnet-5-5": "medium",
@@ -145,7 +151,7 @@ const DEFAULT_EFFORT = {
   "claude-fable-5-1": "high",
   "claude-mythos-5-1": "high",
 };
-// Модели, которые effortLevel из ~/.claude/settings.json игнорируют (Opus 5.5 и новее). Остальным он ещё действует.
+// Models that ignore effortLevel from ~/.claude/settings.json (Opus 5.5 and newer). It still works for the others.
 const NEW_EFFORT = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2", "claude-mythos-5-2"]);
 export const LEVELS = ["low", "medium", "high", "xhigh"];
 const ALL_LEVELS = [...LEVELS, "max"];
@@ -154,7 +160,7 @@ const MODEL_ARG_RE = /^(?:claude-[a-z]+-[0-9]+(?:-[0-9]+)?|opus|sonnet|haiku|fab
 const SESSION_RE = /^[0-9a-fA-F-]{36}$/;
 const STYLE_RE = /^[A-Za-z0-9][A-Za-z0-9 _.:()-]{0,79}$/;
 
-// Значение ключа model → id модели или null (нет ключа, default, opusplan, незнакомое)
+// Value of the model key → model id or null (no key, default, opusplan, unknown)
 export function canonModel(v) {
   if (typeof v !== "string") return null;
   const s = v.trim().toLowerCase().replace(/\[1m\]$/, "");
@@ -165,9 +171,9 @@ export function modelLabel(id) {
   return id ? LABELS[id] || id : tr("по умолчанию", "default");
 }
 const isLevel = (v) => typeof v === "string" && LEVELS.includes(v);
-// env.CLAUDE_CODE_EFFORT_LEVEL так, как его понимает Claude Code (Hw): регистр не важен, пробелы не срезаются,
-// med = medium; уровень или max — перебивает всё; auto/unset — у всех effort по умолчанию их модели; целое число —
-// перебивает (уровень неизвестен, показывается как есть); прочее (ultracode, мусор) — Claude Code игнорирует.
+// env.CLAUDE_CODE_EFFORT_LEVEL as Claude Code understands it (Hw): case doesn't matter, spaces aren't trimmed,
+// med = medium; a level or max overrides everything; auto/unset — everyone gets their model's default effort; an
+// integer overrides (the level is unknown, shown as is); anything else (ultracode, junk) Claude Code ignores.
 // → { kind: "level"|"auto"|"number"|"none", value }
 export function envEffort(raw) {
   if (typeof raw !== "string" || raw === "") return { kind: "none", value: null };
@@ -179,16 +185,16 @@ export function envEffort(raw) {
   return { kind: "none", value: null };
 }
 
-// ---------- базовые настройки ----------
+// ---------- base settings ----------
 export const BUILTIN_STYLES = ["Default", "Proactive", "Concise", "Explanatory", "Learning"];
 
-// settings (объект) → базовые новых сессий
+// settings (object) → the base for new sessions
 export function readBase(s) {
   const env = s && typeof s.env === "object" && s.env ? s.env : {};
   const envRaw = typeof env.CLAUDE_CODE_EFFORT_LEVEL === "string" ? env.CLAUDE_CODE_EFFORT_LEVEL : undefined;
   const ev = envEffort(envRaw);
   const model = canonModel(s?.model);
-  const em = model || DEFAULT_MODEL; // модель, по которой считается effort
+  const em = model || DEFAULT_MODEL; // the model effort is computed for
   const ms = s && typeof s.modelSettings === "object" && s.modelSettings ? s.modelSettings : {};
   let effort = null;
   let effortFrom = null;
@@ -200,12 +206,12 @@ export function readBase(s) {
   const modelRaw = typeof s?.model === "string" ? s.model.trim().toLowerCase() : null;
   return {
     model,
-    // что набрать в /model: значение как оно записано (псевдоним, [1m]), если /model его примет; иначе id
+    // what to type in /model: the value as written (alias, [1m]) if /model accepts it; otherwise the id
     modelArg: model ? (modelRaw && MODEL_ARG_RE.test(modelRaw) ? modelRaw : model) : null,
     effort,
     effortFrom,
     maxActive: ev.kind === "level" && ev.value === "max",
-    envOverride: ev.kind !== "none", // env задан и перебивает effort во всех сессиях
+    envOverride: ev.kind !== "none", // env is set and overrides effort in every session
     envAuto: ev.kind === "auto",
     maxPendingClear: envRaw === "",
     outputStyle: typeof s?.outputStyle === "string" && s.outputStyle && s.outputStyle.toLowerCase() !== "default" ? s.outputStyle : "Default",
@@ -213,8 +219,8 @@ export function readBase(s) {
   };
 }
 
-// ---------- запись настроек: белый список ----------
-// Путь ключа → можно ли его менять. Всё остальное в settings.json плагин не трогает НИКОГДА.
+// ---------- writing settings: the allow list ----------
+// Key path → whether it may be changed. The plugin NEVER touches anything else in settings.json.
 const ALLOWED_PATHS = [
   /^model$/,
   /^effortLevel$/,
@@ -227,7 +233,7 @@ export function pathAllowed(path) {
   return ALLOWED_PATHS.some((r) => r.test(path.join(".")));
 }
 
-// Правка — список операций { path: [...], value } | { path: [...], delete: true }. Проверка белого списка — здесь.
+// A change is a list of operations { path: [...], value } | { path: [...], delete: true }. The allow list is checked here.
 export function applyOps(obj, ops) {
   for (const op of ops) {
     if (!Array.isArray(op.path) || !op.path.length || !pathAllowed(op.path)) throw new Error(`not-allowed:${op.path?.join(".")}`);
@@ -252,7 +258,7 @@ export function applyOps(obj, ops) {
   return obj;
 }
 
-// Операции для каждой кнопки: из текущих настроек и выбора. → ops (может быть пустым — «уже так»)
+// Operations for each button, from the current settings and the choice. → ops (may be empty — "already so")
 export function opsFor(kind, value, s) {
   const base = readBase(s);
   const ms = s && typeof s.modelSettings === "object" && s.modelSettings ? s.modelSettings : {};
@@ -260,11 +266,11 @@ export function opsFor(kind, value, s) {
   if (kind === "model") {
     if (!MODELS.some((m) => m.id === value)) throw new Error("bad-arg");
     if (s?.model !== value) ops.push({ path: ["model"], value });
-    // effort переносится на новую модель, иначе она молча начнёт со своего значения по умолчанию
+    // effort carries over to the new model, otherwise it would silently start from its own default
     if (isLevel(base.effort) && ["modelSettings", "effortLevel"].includes(base.effortFrom) && !isLevel(ms[value]?.effortLevel)) ops.push({ path: ["modelSettings", value, "effortLevel"], value: base.effort });
   } else if (kind === "effort") {
     if (!isLevel(value)) throw new Error("bad-arg");
-    // env (max или другой уровень) перебивает всё: уход с него — пустая строка
+    // env (max or another level) overrides everything: leaving it writes an empty string
     if (base.envOverride) ops.push({ path: ["env", "CLAUDE_CODE_EFFORT_LEVEL"], value: "" });
     if (s?.effortLevel !== value) ops.push({ path: ["effortLevel"], value });
     const em = base.model || DEFAULT_MODEL;
@@ -293,7 +299,7 @@ function stamp(now) {
   return new Date(now).toISOString().replace(/[:.]/g, "-");
 }
 
-// Текст настроек → объект; пустой файл — {}; не объект — null
+// Settings text → object; an empty file → {}; not an object → null
 function parseSettings(text) {
   if (text === null || !String(text).trim()) return {};
   try {
@@ -304,9 +310,9 @@ function parseSettings(text) {
   }
 }
 
-// Прочитать → правка (opsFn) → копия → запись во временный файл рядом → сверка, что файл не поменяли → rename.
-// Поменяли между чтением и записью — перечитать и повторить (до 3 раз), иначе отказ settings-busy.
-// settings.json — ссылка (dotfiles)? Пишется файл, на который она указывает; сама ссылка остаётся.
+// Read → change (opsFn) → backup → write to a temp file next to it → check the file didn't change → rename.
+// Changed between the read and the write — re-read and retry (up to 3 times), otherwise refuse with settings-busy.
+// settings.json is a symlink (dotfiles)? The file it points to is written; the link itself stays.
 // → { ok, changed?, reason?, ops? }
 export function writeSettings(home, opsFn, { now = Date.now(), beforeRename = null } = {}) {
   const link = settingsPath(home);
@@ -319,7 +325,7 @@ export function writeSettings(home, opsFn, { now = Date.now(), beforeRename = nu
     try {
       path = realpathSync(link);
     } catch {
-      return { ok: false, reason: "settings-link-broken" }; // ссылка в никуда: не заменять её обычным файлом
+      return { ok: false, reason: "settings-link-broken" }; // dangling link: don't replace it with a regular file
     }
   }
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -379,7 +385,7 @@ export function pruneBackups(home, keep = KEEP_BACKUPS) {
   for (const n of names.slice(0, Math.max(0, names.length - keep))) rmSync(join(backupsDir(home), n), { force: true });
 }
 
-// ---------- стили ответов ----------
+// ---------- output styles ----------
 function styleName(file) {
   let text = "";
   try {
@@ -407,7 +413,7 @@ function mdFiles(dir, depth = 0, out = []) {
   }
   return out;
 }
-// Внутри ли p каталога root (без выхода через .. и ссылки)
+// Whether p is inside the root directory (no escape via .. or links)
 function inside(root, p) {
   try {
     const rel = relative(realpathSync(root), realpathSync(p));
@@ -416,7 +422,7 @@ function inside(root, p) {
     return false;
   }
 }
-// → [{ name, source: builtin|user|plugin }] — встроенные, ~/.claude/output-styles, стили включённых плагинов
+// → [{ name, source: builtin|user|plugin }] — built-in, ~/.claude/output-styles, styles of enabled plugins
 export function listStyles(home, settings) {
   const out = BUILTIN_STYLES.map((name) => ({ name, source: "builtin" }));
   const seen = new Set(out.map((s) => s.name));
@@ -453,43 +459,59 @@ export function listStyles(home, settings) {
   return out;
 }
 
-// ---------- окружение: Claude Code, cmux, ps ----------
-// Двойники в тестах: AGENTHUB_TEST_BIN_DIR/{cmux,ps}. В тестовом режиме настоящие программы не берутся вовсе:
-// нет двойника — значит, программы нет (так тест «без cmux» не дотянется до настоящих вкладок).
+// ---------- environment: Claude Code, ps, the hub ----------
+// Test doubles: AGENTHUB_TEST_BIN_DIR/ps. In test mode the real programs are never used.
 const testMode = () => Boolean(process.env.AGENTHUB_TEST_BIN_DIR);
 function bin(name, real) {
   const dir = process.env.AGENTHUB_TEST_BIN_DIR;
   return dir ? join(dir, name) : real;
 }
-const CMUX = () => bin("cmux", "/Applications/cmux.app/Contents/Resources/bin/cmux");
 const PS = () => bin("ps", "/bin/ps");
-const CODESIGN = () => bin("codesign", "/usr/bin/codesign");
-// Требование к подписи Claude Code — то же, что у хаба (requirements.claudeCode)
-const CLAUDE_REQUIREMENT = 'identifier "com.anthropic.claude-code" and anchor apple generic and certificate leaf[subject.OU] = "Q6L2SF6YDW"';
-// Исполняемый файл подписан как Claude Code? Кэш на время запуска (путь + время изменения файла).
-const signCache = new Map();
-export function signedClaude(exe) {
-  if (typeof exe !== "string" || !exe.startsWith("/")) return false;
-  let key;
-  try {
-    key = `${exe}:${statSync(exe).mtimeMs}`;
-  } catch {
-    if (!testMode()) return false;
-    key = exe;
-  }
-  if (signCache.has(key)) return signCache.get(key);
-  let ok = false;
-  try {
-    execFileSync(CODESIGN(), ["--verify", "--strict", `-R=${CLAUDE_REQUIREMENT}`, exe], { env: { PATH: "/usr/bin:/bin" }, timeout: 3000, stdio: "ignore" });
-    ok = true;
-  } catch {}
-  signCache.set(key, ok);
-  return ok;
+
+// The hub's terminal (contract 3): POST to the $AGENTHUB_HUB_SOCKET socket from the plugin's own process (a child such
+// as curl would get 403 terminal:not-a-plugin). No socket (Windows, a hub without it) — no way to type, view only.
+export function hubSocket() {
+  const p = process.env.AGENTHUB_HUB_SOCKET;
+  return typeof p === "string" && p.startsWith("/") ? p : null;
 }
-export function cmuxAvailable() {
-  return existsSync(CMUX());
+// → { status, body } | { status: 0, error }. timeoutMs — how long to wait for the answer (after it the typing outcome is unknown).
+export function hubPost(path, payload, { timeoutMs = 20_000 } = {}) {
+  const socketPath = hubSocket();
+  if (!socketPath) return Promise.resolve({ status: 0, error: "no-socket" });
+  return new Promise((resolve) => {
+    const data = JSON.stringify(payload);
+    let done = false;
+    const finish = (r) => {
+      if (!done) {
+        done = true;
+        resolve(r);
+      }
+    };
+    const rq = request({ socketPath, path, method: "POST", timeout: Math.max(200, timeoutMs), headers: { Host: "hub", "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, (res) => {
+      let t = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => {
+        t += c;
+        if (t.length > 64 * 1024) rq.destroy();
+      });
+      res.on("end", () => {
+        let body = null;
+        try {
+          body = JSON.parse(t);
+        } catch {}
+        finish({ status: res.statusCode, body });
+      });
+    });
+    rq.on("timeout", () => {
+      rq.destroy();
+      finish({ status: 0, error: "timeout" });
+    });
+    rq.on("error", (e) => finish({ status: 0, error: e?.code || "error" }));
+    rq.end(data);
+  });
 }
-// Установлен ли Claude Code: родная установка, Homebrew/npm, или есть его настройки
+const sleepAsync = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
+// Whether Claude Code is installed: native install, Homebrew/npm, or its settings exist
 export function claudeInstalled(home) {
   if (existsSync(join(home, ".local", "bin", "claude")) || existsSync(join(home, ".claude", "settings.json"))) return true;
   if (!testMode() && ["/opt/homebrew/bin/claude", "/usr/local/bin/claude"].some((p) => existsSync(p))) return true;
@@ -499,18 +521,15 @@ export function claudeInstalled(home) {
     return false;
   }
 }
-// Пауза между командами во вкладку (в тестах — без неё). Ожидание замка — настоящее всегда.
+// Waiting for the state lock
 function realSleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-function sleep(ms) {
-  if (!testMode()) realSleep(ms);
 }
 const CLAUDE_EXE = /(?:^|\/)claude(?:-code)?$|\/claude\/versions\/[^/]+$|@anthropic-ai\/claude-code\//;
 const lstartKey = (s) => String(s || "").trim().replace(/\s+/g, " ");
 
-// pid → { lstart, comm } для живых процессов. ps в UTC: так пишет procStart сам Claude Code.
-// ps не отработал (нет программы, таймаут, сигнал, код > 1) — null: «неизвестно», а не «никого нет».
+// pid → { lstart, comm } for live processes. ps in UTC: that's how Claude Code itself writes procStart.
+// ps failed (no program, timeout, signal, code > 1) — null: "unknown", not "nobody there".
 export function processTable(pids) {
   const list = [...new Set(pids.filter((p) => Number.isInteger(p) && p > 0))];
   const out = new Map();
@@ -519,7 +538,7 @@ export function processTable(pids) {
   try {
     text = execFileSync(PS(), ["-o", "pid=,lstart=,comm=", "-p", list.join(",")], { encoding: "utf8", env: { PATH: "/usr/bin:/bin", TZ: "UTC", LC_ALL: "C" }, timeout: 3000, stdio: ["ignore", "pipe", "ignore"] });
   } catch (e) {
-    // ps выходит с 1, если части pid нет — живые всё равно напечатаны
+    // ps exits with 1 if some pids are missing — the live ones are printed anyway
     if (e.status !== 1 || e.signal) return null;
     text = String(e.stdout || "");
   }
@@ -530,7 +549,7 @@ export function processTable(pids) {
   return out;
 }
 
-// ---------- сессии ----------
+// ---------- sessions ----------
 function readJson(path) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
@@ -538,7 +557,7 @@ function readJson(path) {
     return null;
   }
 }
-// Только нужные поля: идентификаторы, состояние и время (текст переписки там не хранится, но и не берётся)
+// Only the needed fields: ids, state and time (conversation text isn't stored there, and isn't taken either)
 function sessionFiles(home) {
   const dir = join(home, ".claude", "sessions");
   let names = [];
@@ -557,7 +576,7 @@ function sessionFiles(home) {
       sessionId: j.sessionId,
       cwd: typeof j.cwd === "string" ? j.cwd : null,
       name: typeof j.name === "string" ? j.name : null,
-      // незнакомое состояние — как «работает»: в такую вкладку ничего не набирается
+      // an unknown state counts as "working": nothing is typed into such a tab
       status: ["idle", "busy", "waiting"].includes(j.status) ? j.status : "busy",
       startedAt: Number.isFinite(j.startedAt) ? j.startedAt : null,
       procStart: typeof j.procStart === "string" ? j.procStart : null,
@@ -565,19 +584,9 @@ function sessionFiles(home) {
   }
   return out;
 }
-// sessionId → { surfaceId, workspaceId, pid } из ~/.cmuxterm/claude-hook-sessions.json (только идентификаторы)
-function cmuxTabs(home) {
-  const j = readJson(join(home, ".cmuxterm", "claude-hook-sessions.json"));
-  const out = new Map();
-  const s = j && typeof j.sessions === "object" && j.sessions ? j.sessions : {};
-  for (const v of Object.values(s)) {
-    if (!v || !SESSION_RE.test(String(v.sessionId || ""))) continue;
-    if (typeof v.surfaceId !== "string" || typeof v.workspaceId !== "string") continue;
-    out.set(v.sessionId, { surfaceId: v.surfaceId, workspaceId: v.workspaceId, pid: Number.isInteger(v.pid) ? v.pid : null });
-  }
-  return out;
-}
-// Файл хаба с моделью и effort сессий (заявка 10.11): $AGENTHUB_CLAUDE_SESSIONS_FILE
+// The hub's file with the sessions' model and effort (contract 3): $AGENTHUB_CLAUDE_SESSIONS_FILE. modelId is always
+// the id (model holds the display name after /model); the plugin doesn't take the tabs (surfaceId/workspaceId are
+// terminal fields).
 export function hubSessions() {
   const p = process.env.AGENTHUB_CLAUDE_SESSIONS_FILE;
   if (!p) return null;
@@ -585,44 +594,42 @@ export function hubSessions() {
   const out = new Map();
   for (const s of Array.isArray(j?.sessions) ? j.sessions : []) {
     if (!s || !SESSION_RE.test(String(s.sessionId || ""))) continue;
-    out.set(s.sessionId, { model: canonModel(s.model), effort: ALL_LEVELS.includes(s.effort) ? s.effort : null, verified: s.verified === true ? true : s.verified === false ? false : null, at: Date.parse(s.at) || 0 });
+    out.set(s.sessionId, { model: canonModel(s.modelId) ?? canonModel(s.model), effort: ALL_LEVELS.includes(s.effort) ? s.effort : null, verified: s.verified === true ? true : s.verified === false ? false : null, at: Date.parse(s.at) || 0 });
   }
   return out;
 }
 
-// Живые сессии Claude Code: файл сессии + процесс жив, тот же (время старта) и это Claude Code.
-// null — проверить не получилось (ps не отработал).
+// Live Claude Code sessions: a session file + the process is alive, the same one (start time) and it is Claude Code.
+// null — couldn't check (ps failed).
 export function liveSessions(home, { procs = null } = {}) {
   const files = sessionFiles(home);
   const table = procs || processTable(files.map((f) => f.pid));
   if (!table) return null;
-  const tabs = cmuxTabs(home);
   const out = [];
   for (const f of files) {
     const p = table.get(f.pid);
     if (!p || !CLAUDE_EXE.test(p.comm)) continue;
     if (f.procStart && lstartKey(f.procStart) !== p.lstart) continue;
-    const tab = tabs.get(f.sessionId);
-    out.push({ ...f, exe: p.comm, tab: tab && (tab.pid === null || tab.pid === f.pid) ? tab : null, label: f.name || (f.cwd ? basename(f.cwd) : f.sessionId.slice(0, 8)) });
+    out.push({ ...f, label: f.name || (f.cwd ? basename(f.cwd) : f.sessionId.slice(0, 8)) });
   }
   return out.sort((a, b) => a.label.localeCompare(b.label) || a.pid - b.pid);
 }
 
-// ---------- состояние плагина (PluginData) и замок ----------
-// state.json меняют и обычный запуск (очередь), и действия: всё чтение-правка-запись — под замком state.lock,
-// иначе «Остановить» затирается запуском, а одна вкладка получает команду дважды.
+// ---------- plugin state (PluginData) and the lock ----------
+// state.json is changed by both the regular run (the queue) and actions: every read-modify-write is under the
+// state.lock lock, otherwise a run overwrites Stop and one tab gets the command twice.
 function dataDir() {
   return process.env.AGENTHUB_PLUGIN_DATA_PATH || null;
 }
 export const LOCKED = Symbol("locked");
-const STALE_LOCK_MS = 60_000; // запуск убит ядром (таймаут 5 с / 30 с) — замок старше минуты снимается
-// Замок брошен: процесса, записавшего его, нет (ядро убило запуск), или он старше минуты
+const STALE_LOCK_MS = 60_000; // a run killed by the core (5 s / 30 s timeout) — a lock older than a minute is removed
+// The lock is abandoned: the process that wrote it is gone (the core killed the run), or it's older than a minute
 function lockStale(p) {
   try {
     const pid = Number(readFileSync(p, "utf8").trim());
     if (Number.isInteger(pid) && pid > 0) {
       try {
-        process.kill(pid, 0); // проверка существования своего же процесса плагина, сигнал не посылается
+        process.kill(pid, 0); // checks that the plugin's own process exists, no signal is sent
       } catch (e) {
         if (e.code === "ESRCH") return true;
       }
@@ -632,9 +639,10 @@ function lockStale(p) {
     return false;
   }
 }
-export function withLock(fn, { waitMs = 0 } = {}) {
+// Acquire the lock: → lock path | null (no PluginData — no lock) | LOCKED (held longer than waitMs)
+function acquireLock(waitMs) {
   const d = dataDir();
-  if (!d) return fn();
+  if (!d) return null;
   mkdirSync(d, { recursive: true });
   const p = join(d, "state.lock");
   const t0 = Date.now();
@@ -647,7 +655,7 @@ export function withLock(fn, { waitMs = 0 } = {}) {
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
       if (lockStale(p)) {
-        // забрать брошенный замок атомарно: переименовать удаётся только одному
+        // take an abandoned lock atomically: only one process can rename it
         const grab = `${p}.stale.${process.pid}`;
         try {
           renameSync(p, grab);
@@ -659,10 +667,25 @@ export function withLock(fn, { waitMs = 0 } = {}) {
       realSleep(100);
     }
   }
+  return p;
+}
+export function withLock(fn, { waitMs = 0 } = {}) {
+  const p = acquireLock(waitMs);
+  if (p === LOCKED) return LOCKED;
   try {
     return fn();
   } finally {
-    rmSync(p, { force: true });
+    if (p) rmSync(p, { force: true });
+  }
+}
+// The same for work that waits for the hub's answer: the lock is held until typing ends
+export async function withLockAsync(fn, { waitMs = 0 } = {}) {
+  const p = acquireLock(waitMs);
+  if (p === LOCKED) return LOCKED;
+  try {
+    return await fn();
+  } finally {
+    if (p) rmSync(p, { force: true });
   }
 }
 export function loadState() {
@@ -687,9 +710,9 @@ export function saveState(st) {
   renameSync(tmp, p);
 }
 
-// Модель и effort сессии сейчас: что свежее — запись хаба (время записи транскрипта) или то, что проставил сам плагин
-// (после начала сессии; хаб обновит файл позже). Нет ни того, ни другого — неизвестно.
-// env (max или другой уровень) перебивает effort у всех.
+// The session's model and effort now: whichever is fresher — the hub's record (transcript write time) or what the
+// plugin itself set (after the session started; the hub updates the file later). Neither — unknown.
+// env (max or another level) overrides everyone's effort.
 export function sessionNow(sess, base, hub, st) {
   const h = hub?.get(sess.sessionId);
   const own = st.applied?.[sess.sessionId];
@@ -701,12 +724,12 @@ export function sessionNow(sess, base, hub, st) {
   return { model: model || null, effort: effort || null, known: Boolean(h) || Boolean(ownOk), verified: h ? h.verified : null };
 }
 
-// Строка таблицы: отличие от базовых и что можно сделать
+// A table row: how it differs from the base and what can be done
 export function rowFor(sess, base, hub, st) {
   const now = sessionNow(sess, base, hub, st);
   const modelDiffers = Boolean(base.model && now.model && now.model !== base.model);
-  // effort базовых — для модели базовых (не выбрана — Opus 5.5): вкладку на другой модели по effort не сравниваем,
-  // иначе /effort переписал бы сохранённый effort её модели. env auto — у каждой своя модель по умолчанию.
+  // The base effort is for the base model (none chosen — Opus 5.5): a tab on another model isn't compared by effort,
+  // otherwise /effort would overwrite its model's saved effort. env auto — each has its own model default.
   const sameModel = base.model ? true : !now.model || now.model === DEFAULT_MODEL;
   const effortDiffers = Boolean(!base.envAuto && sameModel && base.effort && now.effort && now.effort !== base.effort);
   const differs = modelDiffers || effortDiffers;
@@ -714,101 +737,86 @@ export function rowFor(sess, base, hub, st) {
   return { ...sess, now, modelDiffers, effortDiffers, differs, action };
 }
 
-// ---------- набор во вкладку ----------
-// Поле ввода Claude Code пустое? Последняя строка-приглашение «> …»: после знака — ничего, кроме рамки «│» через пробел.
-export function inputEmpty(screen) {
-  const i = promptLine(screen);
-  if (i < 0) return false;
-  const m = PROMPT_RE.exec(String(screen).split("\n")[i]);
-  // рамка «│» справа срезается, только если строка в рамке и слева; иначе «│» — набранный текст
-  const rest = m[1] ? m[2].replace(/\s*│\s*$/, "") : m[2];
-  return rest.trim() === "";
-}
-const PROMPT_RE = /^\s*(│)?\s*[>❯›](.*)$/;
-// Индекс последней строки-приглашения поля ввода (−1 — нет)
-function promptLine(screen) {
-  const lines = String(screen || "").split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) if (PROMPT_RE.test(lines[i])) return i;
-  return -1;
-}
-// Что появилось на экране после набора: всё ниже последних строк вывода, что были над полем ввода до набора.
-// Не нашли этот «якорь» — null (подтвердить нельзя). Так старое «Set … to …», уехавшее за край, ничего не решает.
-export function newOutput(before, after) {
-  const b = String(before).split("\n");
-  const pi = promptLine(before);
-  const anchor = b
-    .slice(0, pi < 0 ? b.length : pi)
-    .map((l) => l.trimEnd())
-    .filter((l) => l.trim() && !/^[\s─━═-]+$/.test(l))
-    .slice(-3);
-  const a = String(after).split("\n").map((l) => l.trimEnd());
-  if (!anchor.length) return a.join("\n");
-  for (let i = a.length - anchor.length; i >= 0; i--) if (anchor.every((l, k) => a[i + k] === l)) return a.slice(i + anchor.length).join("\n");
-  return null;
-}
-function cmux(args, timeout) {
-  return execFileSync(CMUX(), args, { encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME || homedir() }, timeout, stdio: ["ignore", "pipe", "ignore"] });
-}
-function target(tab) {
-  return ["--workspace", tab.workspaceId, "--surface", tab.surfaceId];
-}
-// Что набрать, чтобы сессия стала как базовые (только /model и /effort). → ["/model …", "/effort …"]
+// ---------- typing into a tab (the hub's terminal) ----------
+// What to type so the session matches the base (only /model and /effort). → ["/model …", "/effort …"]
 export function commandsFor(now, base) {
   const cmds = [];
   if (base.model && now.model !== base.model) cmds.push(`/model ${base.modelArg}`);
-  // env (max или уровень) держит effort у всех — /effort не нужен и не подействовал бы
+  // env (max or a level) holds everyone's effort — /effort isn't needed and wouldn't work
   if (!base.envOverride && isLevel(base.effort) && now.effort !== base.effort) cmds.push(`/effort ${base.effort}`);
   return cmds;
 }
 const COMMAND_RE = /^\/(?:model (?:claude-[a-z]+-[0-9]+(?:-[0-9]+)?|opus|sonnet|haiku|fable|best)(?:\[1m\])?|effort (?:low|medium|high|xhigh))$/;
 
-// Набрать команды во вкладку. Только простаивающая сессия с вкладкой, не отвергнутая хабом, пустое поле ввода.
-// deadline — до какого момента можно работать (обычный запуск ядро убивает через 5 с). onTyping — перед первой
-// отправкой (сохранить «набираю», чтобы убитый запуск не набрал то же второй раз).
-// → { phase: done|skipped|failed|waitTurn|waitAnswer|later, reason?, result? }
-export function typeInto(sess, base, now, { deadline = ACTION_DEADLINE(), onTyping = null } = {}) {
+// A hub refusal (body { error: "terminal:<code>" }) → what the plugin does:
+//   wait    — wait for the next frame (session busy, input not found, rate limit): nothing was typed;
+//   unknown — outcome unknown (the bridge or terminal didn't answer in time): don't type again, let the person check;
+//   else    — skip the tab with a reason (the plugin's code for the text).
+const TERM_WAIT = new Set(["session-busy", "not-foreground", "prompt-not-found", "rate-limited"]);
+// outcome unknown: the hub's deadline and any *-timeout of the bridge or terminal
+const termUnknown = (code) => code === "deadline" || /(?:^|-)timeout$/.test(code);
+const TERM_REASON = {
+  "prompt-not-empty": "input-text",
+  "prompt-mismatch": "input-mixed",
+  "no-tab": "no-tab",
+  "unknown-session": "no-tab",
+  unverified: "unverified",
+  "pid-mismatch": "unverified",
+  "process-unknown": "unverified",
+  disabled: "no-terminal",
+  "no-socket": "no-terminal",
+  "bridge-offline": "terminal-offline",
+  "bridge-outdated": "terminal-offline",
+  estop: "paused",
+};
+export function termOutcome(r) {
+  if (r.status === 200 && r.body?.ok) return { ok: true };
+  const code = r.status === 0 ? r.error : String(r.body?.error || "").replace(/^terminal:/, "") || `http-${r.status}`;
+  if (TERM_WAIT.has(code)) return { ok: false, kind: "wait", code };
+  if (termUnknown(code)) return { ok: false, kind: "unknown", code };
+  return { ok: false, kind: "refused", code, reason: TERM_REASON[code] || "terminal-failed" };
+}
+
+// Type the commands into the tab through the hub. Only an idle session not rejected by the hub; the other checks
+// (signature, pid, tab, empty input line, Enter) are in the hub. deadline — until when the answer may be awaited (the
+// core kills a regular run after 5 s). onTyping — before the first send (save "typing" so a killed run doesn't type
+// the same thing twice). → { phase: done|skipped|failed|waitTurn|waitAnswer|later, reason?, result? }
+export async function typeInto(sess, base, now, { deadline = ACTION_DEADLINE(), onTyping = null } = {}) {
   if (sess.status === "busy") return { phase: "waitTurn" };
   if (sess.status === "waiting") return { phase: "waitAnswer" };
   if (now.verified === false) return { phase: "skipped", reason: "unverified" };
-  if (!sess.tab) return { phase: "skipped", reason: "no-tab" };
-  if (!cmuxAvailable()) return { phase: "skipped", reason: "no-cmux" };
+  if (!hubSocket()) return { phase: "skipped", reason: "no-terminal" };
   const cmds = commandsFor(now, base);
-  if (!cmds.length) return { phase: "done", result: { model: now.model, effort: now.effort } };
+  if (!cmds.length) return { phase: "done", result: { model: now.model, effort: now.effort, at: Date.now() } };
   if (cmds.some((c) => !COMMAND_RE.test(c))) return { phase: "failed", reason: "not-allowed" };
-  // подпись: хаб подтвердил (verified: true) — достаточно; иначе плагин проверяет сам (codesign)
-  if (now.verified !== true && !signedClaude(sess.exe)) return { phase: "skipped", reason: "unverified" };
-  // на одну вкладку: 2 чтения экрана, по 2 вызова на команду и пауза 0,7 с после каждой
-  const need = 800 + cmds.length * 1200;
-  if (deadline - Date.now() < need) return { phase: "later" };
-  const left = () => Math.max(200, Math.min(5000, deadline - Date.now()));
-  try {
-    const before = cmux(["read-screen", ...target(sess.tab), "--lines", "40"], left());
-    if (!inputEmpty(before)) return { phase: "skipped", reason: "input-text" };
-    if (onTyping) onTyping();
-    for (const c of cmds) {
-      cmux(["send", ...target(sess.tab), "--", c], left());
-      cmux(["send-key", ...target(sess.tab), "enter"], left());
-      sleep(Math.min(700, Math.max(0, deadline - Date.now() - 400)));
+  if (deadline - Date.now() < 1500) return { phase: "later" };
+  const sentAt = Date.now();
+  if (onTyping) onTyping();
+  for (let i = 0; i < cmds.length; i++) {
+    let o;
+    for (let attempt = 0; ; attempt++) {
+      // second command: the session is still answering the first — wait and retry (while there's time)
+      if (i > 0) await sleepAsync(attempt ? 600 : 400);
+      o = termOutcome(await hubPost("/terminal/send-text", { sessionId: sess.sessionId, text: cmds[i] }, { timeoutMs: deadline - Date.now() - 100 }));
+      if (o.ok || !(i > 0 && o.kind === "wait" && attempt < 4 && deadline - Date.now() > 1500)) break;
     }
-    const after = cmux(["read-screen", ...target(sess.tab), "--lines", "80"], left());
-    // ответ Claude Code ищется только в том, что появилось после набора
-    const fresh = newOutput(before, after);
-    const okModel = !cmds.some((c) => c.startsWith("/model")) || (fresh !== null && fresh.includes("Set model to "));
-    const okEffort = !cmds.some((c) => c.startsWith("/effort")) || (fresh !== null && fresh.includes(`Set effort level to ${base.effort}`));
-    if (!okModel || !okEffort) return { phase: "failed", reason: "not-confirmed" };
-    return { phase: "done", result: { model: base.model || now.model, effort: base.envOverride ? base.effort : base.effort || now.effort } };
-  } catch {
-    return { phase: "failed", reason: "cmux-failed" };
+    if (o.ok) continue;
+    if (o.kind === "unknown") return { phase: "failed", reason: "unknown-outcome" };
+    // first command not typed — nothing changed: wait or skip; second one — the first already went through
+    if (i === 0 && o.kind === "wait") return { phase: "later", reason: o.code === "rate-limited" ? "rate" : "busy" };
+    if (i === 0) return { phase: o.reason === "input-mixed" ? "failed" : "skipped", reason: o.reason };
+    return { phase: "failed", reason: o.reason || "partial" };
   }
+  return { phase: "done", result: { model: base.model || now.model, effort: base.envOverride ? base.effort : base.effort || now.effort, at: sentAt } };
 }
 
 const PENDING = ["queued", "waitTurn", "waitAnswer", "ready"];
 const FINAL = ["done", "skipped", "failed"];
 const PHASES = [...PENDING, ...FINAL, "typing"];
 
-// Пройти очередь «Проставить»: свободные — набрать (если можно набирать: allowType), занятые — ждать, пропавшие —
-// пропустить. Состояние сохраняется после каждого пункта (save). Вызывать под замком.
-// «набираю» осталось от убитого запуска: второй раз не набираем — пусть человек проверит вкладку
+// Walk the "Apply" queue: free tabs — type (if typing is allowed: allowType), busy ones — wait, vanished ones — skip.
+// The state is saved after each item (save). Call under the lock.
+// "typing" left over from a killed run: don't type a second time — let the person check the tab
 function markInterrupted(job) {
   let ch = false;
   for (const it of job?.items || []) {
@@ -819,7 +827,7 @@ function markInterrupted(job) {
   }
   return ch;
 }
-export function processJob(home, st, { deadline = RUN_DEADLINE(), allowType = true, base, sessions, save = () => {} }) {
+export async function processJob(home, st, { deadline = RUN_DEADLINE(), allowType = true, base, sessions, save = () => {} }) {
   const job = st.job;
   if (!job) return false;
   let changed = markInterrupted(job);
@@ -835,7 +843,7 @@ export function processJob(home, st, { deadline = RUN_DEADLINE(), allowType = tr
     else if (sess.status === "waiting") next = { phase: "waitAnswer" };
     else if (!allowType) next = { phase: "ready" };
     else {
-      next = typeInto(sess, base, sessionNow(sess, base, hub, st), {
+      next = await typeInto(sess, base, sessionNow(sess, base, hub, st), {
         deadline,
         onTyping: () => {
           Object.assign(it, { phase: "typing", at: Date.now() });
@@ -847,7 +855,8 @@ export function processJob(home, st, { deadline = RUN_DEADLINE(), allowType = tr
     if (next.phase === "waitTurn" || next.phase === "waitAnswer") it.waited = next.phase;
     if (next.phase !== it.phase || (next.reason || null) !== (it.reason || null)) {
       Object.assign(it, { phase: next.phase, reason: next.reason || null, result: next.result || null, at: Date.now() });
-      if (next.phase === "done" && next.result) st.applied[it.sessionId] = { ...next.result, at: Date.now() };
+      // the time of what was set is when typing started: a newer hub record is already the session's answer, and it's shown
+      if (next.phase === "done" && next.result) st.applied[it.sessionId] = { model: next.result.model, effort: next.result.effort, at: next.result.at || Date.now() };
       changed = true;
       save();
     }
@@ -860,8 +869,8 @@ export function processJob(home, st, { deadline = RUN_DEADLINE(), allowType = tr
   return changed;
 }
 
-// После ухода с env (max) ключ env.CLAUDE_CODE_EFFORT_LEVEL = "" удаляется, когда не осталось живых сессий, начатых до
-// ухода (у них удалённый ключ так и остался бы прежним). sessions = null (не проверить) — не трогать.
+// After leaving env (max) the key env.CLAUDE_CODE_EFFORT_LEVEL = "" is deleted once no live sessions started before
+// leaving remain (for them a deleted key would stay at the old value). sessions = null (can't check) — leave it.
 export function maybeClearMaxKey(home, st, base, sessions) {
   if (!sessions || !base.maxPendingClear || !st.maxClearedAt) return false;
   if (sessions.some((s) => !s.startedAt || s.startedAt <= st.maxClearedAt)) return false;
@@ -870,7 +879,7 @@ export function maybeClearMaxKey(home, st, base, sessions) {
   return r.ok;
 }
 
-// ---------- сбор ----------
+// ---------- collecting ----------
 function readSettings(home) {
   let text = null;
   try {
@@ -881,27 +890,27 @@ function readSettings(home) {
   return parseSettings(text);
 }
 
-export function collect({ home = homedir() } = {}) {
+export async function collect({ home = homedir() } = {}) {
   if (!claudeInstalled(home)) return { installed: false };
   let settings = readSettings(home);
   const broken = !settings;
   if (broken) settings = {};
   let base = readBase(settings);
   const sessions = liveSessions(home);
-  // отложенное набирается из обычного запуска, только если хаб сообщает, что он не на паузе
+  // deferred typing is done from a regular run only if the hub reports it isn't paused
   const allowType = process.env.AGENTHUB_PAUSED === "0";
   let st = loadState();
   if (!broken) {
-    const r = withLock(() => {
+    const r = await withLockAsync(async () => {
       const s2 = loadState();
-      let ch = processJob(home, s2, { deadline: RUN_DEADLINE(), allowType, base, sessions, save: () => saveState(s2) });
-      // уход с env без отметки времени (замок был занят) — отметить сейчас: ключ удалится, когда закроются сессии старше
+      let ch = await processJob(home, s2, { deadline: RUN_DEADLINE(), allowType, base, sessions, save: () => saveState(s2) });
+      // left env without a timestamp (the lock was busy) — mark it now: the key is deleted once older sessions close
       if (base.maxPendingClear && !s2.maxClearedAt) {
         s2.maxClearedAt = Date.now();
         ch = true;
       }
       if (maybeClearMaxKey(home, s2, base, sessions)) ch = true;
-      // проставленное помнится только для живых сессий
+      // what was set is remembered only for live sessions
       if (sessions) {
         const live = new Set(sessions.map((x) => x.sessionId));
         for (const id of Object.keys(s2.applied)) {
@@ -926,13 +935,13 @@ export function collect({ home = homedir() } = {}) {
     rows: (sessions || []).map((s) => rowFor(s, base, hub, st)),
     sessionsUnknown: !sessions,
     hubData: Boolean(hub),
-    cmux: cmuxAvailable(),
+    terminal: Boolean(hubSocket()),
     autoType: allowType,
     job: st.job,
   };
 }
 
-// ---------- вывод ----------
+// ---------- output ----------
 export function clean(s, max = 120) {
   return String(s ?? "").replace(/[\r\n\t]+/g, " ").replace(/\|/g, "¦").replace(/^[-\s]+/, "").replace(/^~~~$/, "~").slice(0, max);
 }
@@ -955,10 +964,14 @@ const noteText = (a) => ({ same: tr("как базовые", "as base"), afterTu
 const REASONS = {
   "input-text": ["в поле ввода был текст", "there was text in the input line"],
   gone: ["сессия закрылась", "the session closed"],
-  "no-tab": ["вкладка cmux не найдена", "cmux tab not found"],
-  "no-cmux": ["нет cmux", "no cmux"],
-  "not-confirmed": ["сессия не подтвердила команду", "the session didn't confirm the command"],
-  "cmux-failed": ["cmux не ответил", "cmux didn't respond"],
+  "no-tab": ["хаб не нашёл вкладку сессии", "the hub didn't find the session's tab"],
+  "no-terminal": ["набирать во вкладки не через что", "no way to type into tabs"],
+  "terminal-offline": ["терминал хаба не на связи", "the hub's terminal is offline"],
+  "terminal-failed": ["терминал не набрал команду", "the terminal didn't type the command"],
+  "input-mixed": ["в поле ввода осталась набранная строка — проверьте вкладку", "the typed line was left in the input — check the tab"],
+  "unknown-outcome": ["терминал не ответил вовремя — проверьте вкладку", "the terminal didn't answer in time — check the tab"],
+  partial: ["набрана только часть — проверьте вкладку", "only part was typed — check the tab"],
+  paused: ["хаб на паузе", "the hub is paused"],
   "not-allowed": ["команда не из белого списка", "command not on the allow list"],
   stopped: ["остановлено", "stopped"],
   unverified: ["подпись Claude Code не подтверждена", "Claude Code signature not verified"],
@@ -999,7 +1012,7 @@ export function render(r, { lang = envLang() } = {}) {
   const baseText = `${modelLabel(b.model)} · ${effortLabel(b.effort)}`;
   const job = r.job || null;
   const jobActive = Boolean(job && !job.finishedAt);
-  const canType = r.cmux;
+  const canType = r.terminal;
   let differText;
   const unknownN = r.rows.length - known.length;
   if (r.sessionsUnknown) differText = tr("вкладки: не удалось проверить", "tabs: couldn't check");
@@ -1008,13 +1021,13 @@ export function render(r, { lang = envLang() } = {}) {
   else if (unknownN) differText = tr(`как базовые · ${unknownN} без данных`, `as base · ${unknownN} unknown`);
   else differText = tr("как базовые", "as base");
 
-  // шапка: базовые одной строкой, отличия и кнопка
+  // header: the base on one line, differences and the button
   out.push(line(tr(`Базовые: ${baseText}`, `Base: ${baseText}`), { status: jobActive ? "wait" : "ok", tile: baseText }));
   out.push(line(differText));
   if (differ.length && canType && !jobActive) out.push(line(tr("Проставить всем", "Apply to all"), { action: "apply-all" }));
   out.push("---");
 
-  // для новых сессий
+  // for new sessions
   out.push(line(tr("Для новых сессий", "For new sessions")));
   out.push(line(tr("Модель", "Model"), { strip: "true" }));
   for (const m of MODELS) {
@@ -1050,7 +1063,7 @@ export function render(r, { lang = envLang() } = {}) {
   );
   out.push("---");
 
-  // ход и итог «Проставить»
+  // progress and result of "Apply"
   if (job) {
     const done = job.items.filter((i) => i.phase === "done").length;
     const M = job.items.length;
@@ -1065,18 +1078,18 @@ export function render(r, { lang = envLang() } = {}) {
       if (job.items.some((i) => i.phase === "ready") && canType) out.push(line(tr("Продолжить", "Continue"), { action: "apply-continue" }));
       out.push(line(tr("Остановить", "Stop"), { action: "apply-stop" }));
     } else {
-      // повторить — та же кнопка: она берёт вкладки, которые отличаются сейчас
+      // retry is the same button: it takes the tabs that differ now
       if (differ.length && canType) out.push(line(tr(`Повторить для ${differ.length}`, `Retry for ${differ.length}`), { action: "apply-all" }));
       out.push(line(tr("Убрать итог", "Dismiss"), { action: "apply-done" }));
     }
     out.push("---");
   }
 
-  // открытые сессии
+  // open sessions
   out.push(line(r.sessionsUnknown ? tr("Открытые сессии", "Open sessions") : tr(`Открытые сессии · ${r.rows.length}`, `Open sessions · ${r.rows.length}`)));
   if (differ.length && canType && !jobActive) out.push(line(tr(`Проставить базовые всем · ${differ.length}`, `Apply base to all · ${differ.length}`), { action: "apply-all" }));
   if (r.sessionsUnknown) out.push(line(tr("Не удалось проверить, какие сессии живы (ps не ответил) — попробую в следующий раз", "Couldn't check which sessions are alive (ps didn't respond) — will retry"), { color: ORANGE }));
-  if (!canType) out.push(line(tr("Без cmux только просмотр: набирать команды во вкладки не через что", "Without cmux it's view-only: there's no way to type into tabs"), { color: GREY }));
+  if (!canType) out.push(line(tr("Только просмотр: хаб не дал плагину терминал, набирать во вкладки не через что", "View-only: the hub gave the plugin no terminal, there's no way to type into tabs"), { color: GREY }));
   if (!r.hubData) out.push(line(tr("Модель и effort вкладок покажет хаб новее; пока видно то, что проставил плагин", "A newer hub will show each tab's model and effort; for now you see what the plugin set"), { color: GREY }));
   if (!r.rows.length && !r.sessionsUnknown) out.push(line(tr("Открытых сессий нет", "No open sessions")));
   const queued = new Set(jobActive ? job.items.filter((i) => !FINAL.includes(i.phase)).map((i) => i.sessionId) : []);
@@ -1088,23 +1101,21 @@ export function render(r, { lang = envLang() } = {}) {
     let note = null;
     if (queued.has(x.sessionId)) note = tr("в очереди", "queued");
     else if (x.action === "fix") {
-      if (!x.tab) note = tr("нет вкладки cmux", "no cmux tab");
-      else if (x.now.verified === false) note = tr("подпись не подтверждена", "signature not verified");
-      else if (canType && !jobActive) {
-        out.push(`--${line(tr("Привести", "Fix"), { action: "apply", arg: x.sessionId })}`);
-        continue;
-      }
+      if (x.now.verified === false) note = tr("подпись не подтверждена", "signature not verified");
     } else if (x.differs || x.now.known) note = noteText(x.action);
-    if (note) out.push(`--${line(note)}`);
+    if (x.action === "fix" && !note && canType && !jobActive) out.push(`--${line(tr("Привести", "Fix"), { action: "apply", arg: x.sessionId })}`);
+    else if (note) out.push(`--${line(note)}`);
+    // switching to the tab is a hub effect: the hub finds the tab (the plugin knows nothing about the terminal)
+    out.push(`--${line(tr("Перейти", "Switch"), { effect: `session.focus ${x.sessionId}`, sfimage: "arrow.right.square" })}`);
   }
   if (r.rows.length) {
     out.push(line(tr("Подробности", "Details"), { details: "true" }));
-    for (const x of r.rows) out.push(`--${line(`${x.label}: pid ${x.pid}${x.tab ? ` · ${x.tab.surfaceId}` : ""}`)}`);
+    for (const x of r.rows) out.push(`--${line(`${x.label}: pid ${x.pid} · ${x.sessionId}`)}`);
   }
   return `${out.join("\n")}\n`;
 }
 
-// ---------- действия ----------
+// ---------- actions ----------
 export const REFUSALS = {
   "bad-arg": ["Такого значения нет.", "No such value."],
   "no-claude": ["Claude Code не установлен.", "Claude Code isn't installed."],
@@ -1115,14 +1126,19 @@ export const REFUSALS = {
   "settings-busy": ["Настройки менялись одновременно с плагином — попробуйте ещё раз.", "The settings changed at the same time — try again."],
   "not-allowed": ["Этот ключ настроек плагин не меняет.", "The plugin doesn't change this settings key."],
   "unknown-style": ["Такого стиля ответов нет среди установленных.", "No installed output style has this name."],
-  "no-cmux": ["Нет cmux — набирать во вкладки не через что.", "No cmux — there's no way to type into tabs."],
+  "no-terminal": ["Хаб не дал плагину терминал — набирать во вкладки не через что.", "The hub gave the plugin no terminal — no way to type into tabs."],
+  "terminal-offline": ["Терминал хаба не на связи — попробуйте позже.", "The hub's terminal is offline — try later."],
+  "terminal-failed": ["Терминал не набрал команду.", "The terminal didn't type the command."],
+  "input-mixed": ["Строку набрали, но в поле оказался и ваш текст: Enter не нажат — проверьте вкладку.", "The line was typed but your text got mixed in: Enter wasn't pressed — check the tab."],
+  "unknown-outcome": ["Терминал не ответил вовремя — проверьте вкладку, прежде чем повторять.", "The terminal didn't answer in time — check the tab before retrying."],
+  partial: ["Набрана только первая команда — проверьте вкладку.", "Only the first command was typed — check the tab."],
+  paused: ["Хаб на паузе.", "The hub is paused."],
+  rate: ["Слишком часто — попробуйте через минуту.", "Too often — try again in a minute."],
   "no-session": ["Такой открытой сессии нет.", "No such open session."],
-  "no-tab": ["Вкладка cmux этой сессии не найдена.", "This session's cmux tab wasn't found."],
+  "no-tab": ["Хаб не нашёл вкладку этой сессии.", "The hub didn't find this session's tab."],
   "session-busy": ["Сессия сейчас занята — наберу, когда освободится, через «Проставить всем».", "The session is busy — use Apply to all to type once it's free."],
   unverified: ["Подпись Claude Code у этой сессии не подтверждена — набирать не буду.", "This session's Claude Code signature isn't verified — not typing."],
   "input-text": ["В поле ввода есть текст — вкладку не трогаю.", "There's text in the input line — leaving the tab alone."],
-  "not-confirmed": ["Сессия не подтвердила команду — проверьте вкладку.", "The session didn't confirm the command — check the tab."],
-  "cmux-failed": ["cmux не ответил.", "cmux didn't respond."],
   "no-ps": ["Не удалось проверить, жива ли сессия (ps не ответил).", "Couldn't check whether the session is alive (ps didn't respond)."],
   "nothing-to-do": ["Все вкладки уже как базовые.", "Every tab already matches the base."],
   "job-running": ["Уже проставляю — дождитесь или остановите.", "Already applying — wait or stop it."],
@@ -1139,14 +1155,14 @@ function settingsAction(home, kind, value) {
   return r.ok ? { ok: true } : { ok: false, reason: r.reason };
 }
 
-// Действия с вкладками и очередью — под замком состояния
-function tabAction(id, arg, home) {
-  if (!cmuxAvailable() && id !== "apply-stop" && id !== "apply-done") return { ok: false, reason: "no-cmux" };
+// Actions on tabs and the queue run under the state lock
+async function tabAction(id, arg, home) {
+  if (!hubSocket() && id !== "apply-stop" && id !== "apply-done") return { ok: false, reason: "no-terminal" };
   const settings = readSettings(home);
   if (!settings) return { ok: false, reason: "settings-broken" };
   const base = readBase(settings);
-  const r = withLock(
-    () => {
+  const r = await withLockAsync(
+    async () => {
       const st = loadState();
       const save = () => saveState(st);
       if (id === "apply-stop" || id === "apply-done") {
@@ -1163,31 +1179,31 @@ function tabAction(id, arg, home) {
       const sessions = liveSessions(home);
       if (!sessions) return { ok: false, reason: "no-ps" };
       const hub = hubSessions();
-      const deadline = ACTION_DEADLINE(); // от старта процесса: ожидание замка и ps уже в счёте
+      const deadline = ACTION_DEADLINE(); // from the process start: waiting for the lock and ps are already counted
       if (id === "apply") {
         if (!SESSION_RE.test(String(arg || ""))) return { ok: false, reason: "bad-arg" };
         const sess = sessions.find((s) => s.sessionId === arg);
         if (!sess) return { ok: false, reason: "no-session" };
-        const t = typeInto(sess, base, sessionNow(sess, base, hub, st), { deadline });
-        if (t.phase === "waitTurn" || t.phase === "waitAnswer") return { ok: false, reason: "session-busy" };
-        if (t.phase !== "done") return { ok: false, reason: t.reason || "cmux-failed" };
-        st.applied[sess.sessionId] = { ...t.result, at: Date.now() };
+        const t = await typeInto(sess, base, sessionNow(sess, base, hub, st), { deadline });
+        if (t.phase === "waitTurn" || t.phase === "waitAnswer" || (t.phase === "later" && t.reason !== "rate")) return { ok: false, reason: "session-busy" };
+        if (t.phase !== "done") return { ok: false, reason: t.reason || "terminal-failed" };
+        st.applied[sess.sessionId] = { model: t.result.model, effort: t.result.effort, at: t.result.at || Date.now() };
         save();
         return { ok: true };
       }
       if (id === "apply-continue") {
         if (!st.job || st.job.finishedAt) return { ok: true };
-        processJob(home, st, { deadline, allowType: true, base, sessions, save });
+        await processJob(home, st, { deadline, allowType: true, base, sessions, save });
         save();
         return { ok: true };
       }
-      // apply-all («Проставить базовые всем», «Повторить для K»): вкладки, которые отличаются сейчас
+      // apply-all ("Apply base to all", "Retry for K"): the tabs that differ now
       if (st.job && !st.job.finishedAt) return { ok: false, reason: "job-running" };
       const todo = sessions.map((s) => rowFor(s, base, hub, st)).filter((x) => x.differs);
       if (!todo.length) return { ok: false, reason: "nothing-to-do" };
       st.job = { startedAt: Date.now(), target: { model: base.model, effort: base.effort }, items: todo.map((x) => ({ sessionId: x.sessionId, label: x.label, phase: "queued", reason: null, result: null })) };
       save();
-      processJob(home, st, { deadline, allowType: true, base, sessions, save });
+      await processJob(home, st, { deadline, allowType: true, base, sessions, save });
       save();
       return { ok: true };
     },
@@ -1197,7 +1213,7 @@ function tabAction(id, arg, home) {
 }
 
 // → { ok, reason? }
-export function runAction([id, arg], { home = homedir() } = {}) {
+export async function runAction([id, arg], { home = homedir() } = {}) {
   if (!claudeInstalled(home)) return { ok: false, reason: "no-claude" };
   if (id === "set-model") return MODELS.some((m) => m.id === arg) ? settingsAction(home, "model", arg) : { ok: false, reason: "bad-arg" };
   if (id === "set-effort") {
@@ -1205,7 +1221,7 @@ export function runAction([id, arg], { home = homedir() } = {}) {
     const before = readBase(readSettings(home) || {});
     const r = settingsAction(home, "effort", arg);
     if (r.ok && before.envOverride) {
-      // время ухода с env — для удаления ключа, когда закроются сессии, начатые раньше
+      // when env was left — to delete the key once sessions started earlier close
       withLock(
         () => {
           const st = loadState();
@@ -1229,12 +1245,12 @@ export function runAction([id, arg], { home = homedir() } = {}) {
   return { ok: false, reason: "unknown-action" };
 }
 
-function main() {
+async function main() {
   const ai = process.argv.indexOf("--action");
   if (ai >= 2) {
     let r;
     try {
-      r = runAction(process.argv.slice(ai + 1));
+      r = await runAction(process.argv.slice(ai + 1));
     } catch {
       r = { ok: false, reason: "plugin-failed" };
     }
@@ -1244,7 +1260,7 @@ function main() {
     return;
   }
   try {
-    process.stdout.write(render(collect(), { lang: envLang() }));
+    process.stdout.write(render(await collect(), { lang: envLang() }));
   } catch (e) {
     LANG = envLang();
     process.stdout.write(`${line(tr("Claude Code: сбой плагина", "Claude Code: plugin failure"), { status: "error", event: "source-broken" })}\n---\n${clean(e?.message || e)}\n`);

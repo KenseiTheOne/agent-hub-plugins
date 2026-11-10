@@ -1,32 +1,36 @@
 {
-  "note": "копии модулей agent-hub/daemon и контракта плагинов (docs/contract); обновлять только scripts/sync-vendor.mjs",
+  "note": "copies of the agent-hub/daemon modules and the plugin contract (docs/contract); update only with scripts/sync-vendor.mjs",
   "contract": 3,
   "source": {
     "meta.mjs": "daemon/lib/meta.mjs",
     "output.mjs": "daemon/lib/output.mjs",
     "minisign.mjs": "daemon/lib/registry/minisign.mjs",
     "tarball.mjs": "daemon/lib/registry/tarball.mjs",
-    "perms.mjs": "daemon/lib/registry/perms.mjs"
+    "perms.mjs": "daemon/lib/registry/perms.mjs",
+    "messages/parse.mjs": "daemon/lib/messages/parse.mjs"
   },
   "files": {
-    "meta.mjs": "1eef01bba39f9cef61a9bc1c652fd4ab1b67bc73ced60305123a69aba6f61306",
-    "output.mjs": "00cbbb59380db22cc8954e274e69520a07b5c2181ea74e1d4e1404410bf8d1df",
-    "minisign.mjs": "9e098eb3d56e757eb0c7d83c071e5ee78c7ae389f32709fccc33a46a76580285",
-    "tarball.mjs": "e74eed995e971c54a22bb07275caefefe91e4ad4fa506eb69360b4e0ec2b4161",
-    "perms.mjs": "10141a4edfca4fa278c5bfc80e16c44bb4ccffe631cfac3f03f3a39e38fe1aeb",
-    "native.mjs": "7b2ccbad7806c9ed8163150063f25f32ac018f5c11177c228694333dad1597ab"
+    "meta.mjs": "b49022686edafb4802957f3bd030daab739f1a9f5275f117ea4f8070fff25f5a",
+    "output.mjs": "afb454503200685bd73bfc69bf9ec47dfcad79ed43dd567d18fbcb9dbbd8bfdc",
+    "minisign.mjs": "9970eb608a1d5d0ea2d3198b4fd189548d1b792109ffaa70d3042d651a0d95f5",
+    "tarball.mjs": "9a5e79a43c970263870707581526d89795f11045c9ed9f4fdcae11517ec63d41",
+    "perms.mjs": "173740b2d8e5efd2af18ab89cd6b18cc074571444044dd87bfee39de169fdea5",
+    "messages/parse.mjs": "b506962576830f28e48c5899a39d37f3674472b6117a622fa213ea8f082ed5b1",
+    "native.mjs": "7c6e6450148d63dc77542453820ae8dcdd0bec12073dd8becd3116a1c21f3491"
   },
   "docsSource": {
+    "writing-plugins.md": "docs/writing-plugins.md",
     "extension-points.md": "docs/extension-points.md",
-    "push.md": "daemon/lib/push/README.md (Ключи событий для плагинов; Выключатели)",
-    "plugins-registry.md": "docs/plugins-registry.md (Политика для ядра; Свои источники; Зависимости в каталоге; Индекс: `tier`; Контракт плагинов 2)",
-    "api.md": "docs/api.md (`POST /actions/:id`; Подключения)"
+    "push.md": "daemon/lib/push/README.md (Event keys for plugins; Switches)",
+    "plugins-registry.md": "docs/plugins-registry.md (Policy for the core; Own sources; Dependencies in the catalog; Index: `tier`; Plugin contract 2)",
+    "api.md": "docs/api.md (`POST /actions/:id`; Connections; Terminal)"
   },
   "docs": {
-    "README.md": "39df865a0694a6286984ebdfa31567a302120a1d0e3eeee62c7c3e9bb6ab2d98",
-    "extension-points.md": "f6ef4dc8ce12c7b97cfeab24ed58a19c348de216d287215f8d4b73cbd955cacf",
-    "push.md": "6745d40a4352020d58e86e730cd2ccb60602ef18c744ae326035de0b1834aa9e",
-    "plugins-registry.md": "57765f027f3f689a5525089b47223a0901cc28add0634e42552fc1f52ea764bb",
-    "api.md": "8f53641155c833f7b1d6762d81c4493231e9bae0ae8be086cb76ec48f681c1ac"
+    "README.md": "857f0b19092e9ae21408832bf0d7bb7992ffaf750a83c55cdda7a5f8f81333a8",
+    "writing-plugins.md": "545607cd589a52add5bb0ae1f98565226182790427d460d2ab7fbadc805e7770",
+    "extension-points.md": "1dbe8ed015f894ef6073919f183076eeb82ec6e6915b6315ac80f73b370c96d3",
+    "push.md": "08d5ddf442590fbf57758b0fdccaa571f081d3eb97f97ec1c04e192cd3c80ec9",
+    "plugins-registry.md": "9009e78bc0e4e98cc058d5f4a27eb4668e032a98b297e66ace6e8114119d67d2",
+    "api.md": "2a94f52c5d3dd400f27fd32db2a735dc9254fdff3fdff9bf140c788c09b01933"
   }
 }

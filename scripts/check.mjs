@@ -1,22 +1,24 @@
 #!/usr/bin/env node
-// Проверка реестра — один вход для CI и автора (scripts/check.sh).
+// Registry check — one entry point for CI and authors (scripts/check.sh).
 //
-//   node scripts/check.mjs [--base <ревизия git> | --base-dir <каталог>] [--report <файл.json>] [--skip-tests]
-//                          [--only <id>] [--root <каталог реестра>] [--perms-only]
+//   node scripts/check.mjs [--base <git revision> | --base-dir <directory>] [--report <file.json>] [--skip-tests]
+//                          [--only <id>] [--root <registry directory>] [--perms-only]
 //
-// --perms-only — только дифф прав: метаданные плагинов --root читаются как данные, ни плагины, ни их тесты
-// не запускаются, вендоринг не проверяется. Так CI (job perms) считает рост прав скриптами базовой ветки
-// над файлами PR и не исполняет код PR в том же job (иначе тест плагина мог бы подменить скрипт отчёта).
+// --perms-only — the permission diff only: plugin metadata under --root is read as data, neither plugins nor their
+// tests run, vendoring isn't checked. This way CI (the perms job) computes permission growth with the base branch's
+// scripts over the PR's files and doesn't execute PR code in the same job (otherwise a plugin test could replace the
+// report script).
 //
-// 1. Вендоринг: копии разборщиков ядра (scripts/vendor/) совпадают с VENDOR.json (и с agent-hub, если он рядом).
-// 2. blocklist.json, official.json — форма.
-// 3. Каждый plugins/<id>/: структура, метаданные тем же парсером, что у демона, линтер прав (запретные пути;
-//    сторонним — только open.*, cmux.focus и без <agenthub.action>).
-// 4. Дифф прав с базовой ревизией (--base / --base-dir): печать, $GITHUB_STEP_SUMMARY, --report.
-// 5. Тесты на синтетическом HOME: пробный запуск плагина (HOME = копия fixtures/home или пустой каталог,
-//    окружение очищено как у демона, таймаут 5 с) + plugins/<id>/test/*.test.mjs через node --test.
-//    Сети и секретов у тестов нет: в PR из форка CI секретов не даёт, а тесты обязаны работать без сети.
-// Код выхода: 0 — всё хорошо, 1 — ошибки, 2 — неверный вызов.
+// 1. Vendoring: the copies of the core parsers (scripts/vendor/) match VENDOR.json (and agent-hub, if it's next door).
+// 2. blocklist.json, official.json — shape.
+// 3. Each plugins/<id>/: structure, metadata via the same parser the daemon uses, the permission linter (forbidden
+//    paths; third-party plugins get only open.*, session.focus and cmux.focus — deprecated in favour of
+//    session.focus <sessionId> since contract 3 — and no <agenthub.action>).
+// 4. The permission diff against the base revision (--base / --base-dir): printed, $GITHUB_STEP_SUMMARY, --report.
+// 5. Tests on a synthetic HOME: a smoke run of the plugin (HOME = a copy of fixtures/home or an empty directory,
+//    environment cleaned like the daemon does, 5 s timeout) + plugins/<id>/test/*.test.mjs via node --test.
+//    Tests have no network and no secrets: CI gives no secrets to a PR from a fork, and tests must work offline.
+// Exit code: 0 — all good, 1 — errors, 2 — bad invocation.
 
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -39,7 +41,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
-      if (i + 1 >= argv.length) throw new Error(`${a}: нужен аргумент`);
+      if (i + 1 >= argv.length) throw new Error(`${a}: needs an argument`);
       return argv[++i];
     };
     if (a === "--base") o.base = next();
@@ -49,7 +51,7 @@ function parseArgs(argv) {
     else if (a === "--only") o.only = next();
     else if (a === "--skip-tests") o.skipTests = true;
     else if (a === "--perms-only") o.permsOnly = true;
-    else throw new Error(`неизвестный ключ ${a}`);
+    else throw new Error(`unknown flag ${a}`);
   }
   return o;
 }
@@ -62,7 +64,7 @@ function interpreter(ext) {
   return null;
 }
 
-// Окружение как у демона (daemon/lib/runner.mjs buildEnv), HOME — синтетический.
+// Environment like the daemon's (daemon/lib/runner.mjs buildEnv), with a synthetic HOME.
 export function pluginEnv(id, home) {
   const data = join(home, ".agenthub-data", id);
   const cache = join(home, ".agenthub-cache", id);
@@ -81,7 +83,7 @@ export function pluginEnv(id, home) {
     OS_PLATFORM: PLATFORM,
   };
   if (process.platform === "win32") {
-    // без них не стартует ни один процесс Windows; секретов тут нет
+    // no Windows process starts without these; there are no secrets here
     for (const k of ["SystemRoot", "windir", "COMSPEC", "PATHEXT"]) if (process.env[k]) env[k] = process.env[k];
     env.USERPROFILE = home;
   }
@@ -99,13 +101,13 @@ function syntheticHome(info) {
   return home;
 }
 
-// Пробный запуск. → { ok, errors, output }
+// Smoke run. → { ok, errors, output }
 export function smokeRun(info) {
   return new Promise((resolveRun) => {
     const errors = [];
     const fn = parseFileName(info.main);
     const interp = interpreter(fn.ext);
-    if (!interp) return resolveRun({ ok: false, errors: [`нет интерпретатора для .${fn.ext}`] });
+    if (!interp) return resolveRun({ ok: false, errors: [`no interpreter for .${fn.ext}`] });
     const home = syntheticHome(info);
     const streamable = info.meta.type === "streamable";
     const child = spawn(interp[0], [...interp.slice(1), join(info.dir, info.main)], {
@@ -130,47 +132,48 @@ export function smokeRun(info) {
       errors.push(...outputErrors(info, frame));
       resolveRun({ ok: errors.length === 0, errors, output: frame });
     };
-    const timer = setTimeout(() => finish(streamable ? "streamable: нет первого кадра (~~~) за 5 с" : "таймаут 5 с"), RUN_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(streamable ? "streamable: no first frame (~~~) within 5 s" : "5 s timeout"), RUN_TIMEOUT_MS);
     child.stdout.on("data", (c) => {
       out += c;
-      if (out.length > 1024 * 1024) finish("вывод больше 1 МБ");
+      if (out.length > 1024 * 1024) finish("output over 1 MB");
       else if (streamable && /(^|\n)~~~\r?(\n|$)/.test(out)) finish();
     });
     child.stderr.on("data", () => {});
-    child.on("error", (e) => finish(`не запустился: ${e.code || e.message}`));
+    child.on("error", (e) => finish(`failed to start: ${e.code || e.message}`));
     child.on("exit", (code) => {
-      if (streamable) return finish(/(^|\n)~~~/.test(out) ? null : `streamable вышел (код ${code}) без кадра`);
-      finish(code === 0 ? null : `код выхода ${code}`);
+      if (streamable) return finish(/(^|\n)~~~/.test(out) ? null : `streamable exited (code ${code}) without a frame`);
+      finish(code === 0 ? null : `exit code ${code}`);
     });
     if (streamable) child.stdin.write(JSON.stringify({ type: "refresh", reason: "FirstLaunch" }) + "\n");
     else child.stdin.end();
   });
 }
 
-// Вывод: формат, effects только из объявленных и под потолком (open.*, cmux.focus — у всех плагинов реестра),
-// action= — только у official, только объявленные, с arg= по шаблону из метаданных.
+// Output: format; effects only from the declared ones and under the ceiling (THIRD_PARTY_EFFECTS: open.*, session.focus
+// and the deprecated cmux.focus — for all registry plugins); action= — official only, declared only, with arg= matching
+// the pattern from the metadata.
 export function outputErrors(info, text) {
   const errors = [];
   const parsed = parseOutput(text);
-  if (!parsed.header.length) errors.push("пустая шапка вывода");
-  for (const w of parsed.warnings) errors.push(`вывод: ${w}`);
+  if (!parsed.header.length) errors.push("empty output header");
+  for (const w of parsed.warnings) errors.push(`output: ${w}`);
   const declared = info.permissions?.effects || [];
   for (const item of [...parsed.header, ...parsed.body]) {
-    // href= ядро превращает в open.url без объявления; effect= — только из <agenthub.effects>
+    // the core turns href= into open.url without a declaration; effect= — only from <agenthub.effects>
     if (item.effect) {
       const spec = parseEffectSpec(item.effect);
-      if (!spec) errors.push(`вывод: effect «${String(item.effect).slice(0, 40)}» не разобран`);
-      else if (!effectUnderCeiling(spec.primitive, THIRD_PARTY_EFFECTS)) errors.push(`вывод: effect ${spec.primitive} плагину реестра недоступен (только ${THIRD_PARTY_EFFECTS.join(", ")})`);
-      else if (!effectUnderCeiling(spec.primitive, declared)) errors.push(`вывод: effect ${spec.primitive} не объявлен в <agenthub.effects>`);
+      if (!spec) errors.push(`output: effect "${String(item.effect).slice(0, 40)}" could not be parsed`);
+      else if (!effectUnderCeiling(spec.primitive, THIRD_PARTY_EFFECTS)) errors.push(`output: effect ${spec.primitive} is not available to a registry plugin (only ${THIRD_PARTY_EFFECTS.join(", ")}; cmux.focus is deprecated — use session.focus <sessionId>)`);
+      else if (!effectUnderCeiling(spec.primitive, declared)) errors.push(`output: effect ${spec.primitive} is not declared in <agenthub.effects>`);
     }
-    if (item.href && !/^https?:\/\//i.test(item.href)) errors.push(`вывод: href только http(s)`);
-    if (item.action && !info.official) errors.push(`вывод: action=${item.action} — действия только у official`);
+    if (item.href && !/^https?:\/\//i.test(item.href)) errors.push(`output: href must be http(s)`);
+    if (item.action && !info.official) errors.push(`output: action=${item.action} — actions are for official plugins only`);
     else if (item.action) {
       const a = (info.meta?.actions || []).find((x) => x.id === item.action);
       const arg = item.params?.arg;
-      if (!a) errors.push(`вывод: action=${item.action} не объявлено в <agenthub.action>`);
-      else if (a.arg && (typeof arg !== "string" || arg.startsWith("-") || !new RegExp(`^(?:${a.arg.pattern})$`, "u").test(arg))) errors.push(`вывод: action=${item.action} arg=${String(arg).slice(0, 40)} не по шаблону ${a.arg.pattern}`);
-      else if (!a.arg && arg !== undefined) errors.push(`вывод: action=${item.action}: arg не объявлен`);
+      if (!a) errors.push(`output: action=${item.action} is not declared in <agenthub.action>`);
+      else if (a.arg && (typeof arg !== "string" || arg.startsWith("-") || !new RegExp(`^(?:${a.arg.pattern})$`, "u").test(arg))) errors.push(`output: action=${item.action} arg=${String(arg).slice(0, 40)} doesn't match the pattern ${a.arg.pattern}`);
+      else if (!a.arg && arg !== undefined) errors.push(`output: action=${item.action}: arg is not declared`);
     }
   }
   return errors;
@@ -192,18 +195,18 @@ export async function runCheck(opts) {
     bucket.push(msg);
   };
   if (opts.permsOnly) {
-    if (!opts.base && !opts.baseDir) throw new Error("--perms-only: нужна база (--base или --base-dir)");
+    if (!opts.base && !opts.baseDir) throw new Error("--perms-only: needs a base (--base or --base-dir)");
     const base = opts.baseDir ? permissionsAtDir(opts.baseDir) : permissionsAtRef(opts.root, opts.base);
     report.diff = permissionsDiff(base, permissionsAtDir(opts.root));
     report.permissionsGrew = report.diff.some((d) => d.added.length);
     report.vendor = { ok: true, skipped: true, problems: [], drift: [] };
     return report;
   }
-  // 1. вендоринг (копии из этой репы, не из --root: --root нужен тестам с временным реестром)
+  // 1. vendoring (the copies in this repo, not under --root: --root is for tests with a temporary registry)
   const v = checkVendor();
   report.vendor = v;
   if (!v.ok) report.ok = false;
-  // 2. файлы реестра
+  // 2. registry files
   let official = new Set();
   try {
     official = readOfficial(opts.root);
@@ -216,8 +219,8 @@ export async function runCheck(opts) {
   } catch (e) {
     fail(report.registry, `blocklist.json: ${e.message}`);
   }
-  for (const id of official) if (!pluginIds(opts.root).includes(id)) report.registry.push(`official.json: ${id} пока нет в plugins/ (предупреждение)`);
-  // 3. плагины
+  for (const id of official) if (!pluginIds(opts.root).includes(id)) report.registry.push(`official.json: ${id} is not in plugins/ yet (warning)`);
+  // 3. plugins
   const ids = pluginIds(opts.root).filter((id) => !opts.only || id === opts.only);
   for (const id of ids) {
     const info = inspectPlugin(opts.root, id, { official });
@@ -226,26 +229,26 @@ export async function runCheck(opts) {
     if (!opts.skipTests && info.main && info.meta && platformOk) {
       const s = await smokeRun(info);
       rec.smoke = s.ok ? "ok" : "fail";
-      rec.errors.push(...s.errors.map((e) => `запуск: ${e}`));
+      rec.errors.push(...s.errors.map((e) => `run: ${e}`));
       if (info.tests.length) {
         const t = runPluginTests(info);
         rec.tests = t.ok ? "ok" : "fail";
-        if (!t.ok) rec.errors.push(`test/: не прошли\n${t.output}`);
+        if (!t.ok) rec.errors.push(`test/: failed\n${t.output}`);
       }
     } else if (!platformOk && info.meta) rec.smoke = `skip (${PLATFORM})`;
     if (rec.errors.length) report.ok = false;
     report.plugins.push(rec);
   }
-  // 4. правка без новой версии (только с --base: нужна история git) — архив той же версии перезаписался бы
+  // 4. a change without a new version (only with --base: needs git history) — the archive of the same version would be overwritten
   if (opts.base) {
     for (const u of unbumpedChanges(opts.root, opts.base)) {
       const rec = report.plugins.find((p) => p.id === u.id);
       if (!rec) continue;
-      rec.errors.push(`файлы изменились относительно ${opts.base} (${u.files.slice(0, 5).join(", ")}${u.files.length > 5 ? ", …" : ""}), а версия та же (${u.version}) — поднимите версию: иначе опубликованный архив ${u.id}-${u.version}.tar.gz перезапишется другим содержимым`);
+      rec.errors.push(`files changed since ${opts.base} (${u.files.slice(0, 5).join(", ")}${u.files.length > 5 ? ", …" : ""}), but the version is the same (${u.version}) — bump the version: otherwise the published archive ${u.id}-${u.version}.tar.gz gets overwritten with different content`);
       report.ok = false;
     }
   }
-  // 5. дифф прав
+  // 5. permission diff
   if (opts.base || opts.baseDir) {
     const base = opts.baseDir ? permissionsAtDir(opts.baseDir) : permissionsAtRef(opts.root, opts.base);
     report.diff = permissionsDiff(base, permissionsAtDir(opts.root));
@@ -256,16 +259,16 @@ export async function runCheck(opts) {
 
 function printReport(r) {
   const lines = [];
-  for (const p of r.vendor?.problems || []) lines.push(`✗ вендоринг: ${p}`);
-  for (const p of r.vendor?.drift || []) lines.push(`! вендоринг: ${p}`);
-  for (const m of r.registry) lines.push(`${m.includes("предупреждение") ? "!" : "✗"} ${m}`);
+  for (const p of r.vendor?.problems || []) lines.push(`✗ vendoring: ${p}`);
+  for (const p of r.vendor?.drift || []) lines.push(`! vendoring: ${p}`);
+  for (const m of r.registry) lines.push(`${m.includes("(warning)") ? "!" : "✗"} ${m}`);
   for (const p of r.plugins) {
-    lines.push(`${p.errors.length ? "✗" : "✓"} ${p.id}${p.official ? " [official]" : ""}${p.smoke ? ` запуск: ${p.smoke}` : ""}${p.tests ? ` тесты: ${p.tests}` : ""}`);
+    lines.push(`${p.errors.length ? "✗" : "✓"} ${p.id}${p.official ? " [official]" : ""}${p.smoke ? ` run: ${p.smoke}` : ""}${p.tests ? ` tests: ${p.tests}` : ""}`);
     for (const e of p.errors) lines.push(`    ✗ ${e}`);
     for (const w of p.warnings) lines.push(`    ! ${w}`);
   }
   if (r.diff.length) lines.push("", diffMarkdown(r.diff));
-  lines.push(r.ok ? "Проверка пройдена." : "Проверка НЕ пройдена.");
+  lines.push(r.ok ? "Check passed." : "Check FAILED.");
   return lines.join("\n");
 }
 

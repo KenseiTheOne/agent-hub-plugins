@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Реестр плагинов Agent Hub: монорепа, CI, подписанный index.json",
+  "description": "Agent Hub plugin registry: monorepo, CI, signed index.json",
   "license": "MIT",
   "engines": { "node": ">=22" },
   "scripts": {

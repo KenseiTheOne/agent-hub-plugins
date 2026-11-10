@@ -1,27 +1,30 @@
-# agent-hub-plugins — правила для сессии плагинов
+# agent-hub-plugins — rules for the plugins session
 
-Это публичный реестр официальных плагинов Agent Hub. Сессия здесь работает **только над плагинами**.
+This is the public registry of official Agent Hub plugins. A session here works **only on plugins**.
 
-- **Контракт плагинов читать здесь — в `docs/contract/`**, а не в репозитории хаба: это копия документации agent-hub
-  (`extension-points.md` целиком — метаданные, вывод, действия, окружение, версии контракта; `push.md`,
-  `plugins-registry.md`, `api.md` — нужные плагину разделы). Копию пишет только `node scripts/sync-vendor.mjs` (вместе с
-  `scripts/vendor/`), `--check` и CI ловят расхождение; руками не править. Версия контракта — в шапке копии и в
-  `scripts/vendor/VENDOR.json`; плагин объявляет нужную ему тегом `<agenthub.contract>N</agenthub.contract>`.
-- **Хаб не трогать.** Репозиторий хаба `~/Projects/IT/agent-hub` открывать, только когда нужна возможность, которой в
-  `docs/contract/` нет (новый ключ вывода, примитив, право, подключение): не обходить и не править ядро отсюда, а
-  записать, что нужно (что, зачем, какой формат), и отдать в сессию хаба. Хаб не знает названий плагинов: всё
-  плагинное (значок, переключатель уведомлений, подключение, тексты отказов) плагин объявляет сам. Плагин, который
-  пользуется новой возможностью, публикуется только после выпуска хаба с ней (и обновления живого хаба) и объявляет
-  новую версию контракта: хаб версии 2 и новее с контрактом старше покажет «Нужен хаб новее»; хабы контракта 1 тег не
-  знают и поставят плагин молча, потеряв новые теги. После выпуска хаба — `node scripts/sync-vendor.mjs`.
-- **Плагины независимы друг от друга.** У каждого своя папка `plugins/<id>/`, версия, тесты, права. Правка одного
-  не трогает другие; общего кода между плагинами нет (только вендоринг ядра в `scripts/vendor/`, через
-  `scripts/sync-vendor.mjs`, не руками).
-- **Любое изменение файлов плагина = новая версия** (`check.sh --base HEAD` это проверит). Рост прав — окно согласия
-  у пользователя при обновлении; описывать в README плагина, зачем каждое право.
-- **Приватные инструменты сюда не кладём.** Плагин, которому нужен приватный инструмент автора, живёт в репозитории
-  этого инструмента (`agenthub/<id>/`) и ставится из локальной папки. Плагин, которому нужна сторонняя программа,
-  объявляет зависимость («нужен …») в метаданных.
-- **Проверки перед коммитом:** `bash scripts/check.sh`, `bash scripts/check.sh --base HEAD`,
+- **Read the plugin contract here, in `docs/contract/`**, not in the hub repository: it is a copy of the agent-hub
+  documentation (`README.md`; `writing-plugins.md` — the plugin author guide; `extension-points.md` in full — metadata,
+  output, actions, environment, contract versions; `push.md`, `plugins-registry.md`, `api.md` — the sections a plugin
+  needs). The copy is written only by `node scripts/sync-vendor.mjs` (together with `scripts/vendor/`); `--check` and
+  CI catch drift; do not edit by hand. The contract version is in the copy's header and in
+  `scripts/vendor/VENDOR.json`; a plugin declares the version it needs with the tag
+  `<agenthub.contract>N</agenthub.contract>`.
+- **Do not touch the hub.** Open the hub repository `~/Projects/IT/agent-hub` only when you need a capability that
+  `docs/contract/` does not have (a new output key, primitive, permission, connection): do not work around or edit the
+  core from here; write down what is needed (what, why, what format) and hand it to the hub session. The hub does not
+  know plugin names: everything plugin-specific (icon, notification toggle, connection, refusal texts) the plugin
+  declares itself. A plugin that uses a new capability is published only after a hub release with it (and an update of
+  the live hub) and declares the new contract version: a hub of version 2 or newer with an older contract shows "Newer
+  hub required"; contract 1 hubs do not know the tag and install the plugin silently, losing the new tags. After a hub
+  release — `node scripts/sync-vendor.mjs`.
+- **Plugins are independent of each other.** Each has its own `plugins/<id>/` folder, version, tests, permissions.
+  Editing one does not touch the others; there is no shared code between plugins (only core vendoring in
+  `scripts/vendor/`, via `scripts/sync-vendor.mjs`, not by hand).
+- **Any change to a plugin's files = a new version** (`check.sh --base HEAD` checks this). Permission growth means a
+  consent window for the user on update; explain in the plugin's README why each permission is needed.
+- **No private tools here.** A plugin that needs the author's private tool lives in that tool's repository
+  (`agenthub/<id>/`) and is installed from a local folder. A plugin that needs a third-party program declares the
+  dependency ("requires …") in its metadata.
+- **Checks before a commit:** `bash scripts/check.sh`, `bash scripts/check.sh --base HEAD`,
   `env -u NODE_OPTIONS node --test plugins/*/test/*.test.mjs test/*.test.mjs`, `node scripts/sync-vendor.mjs --check`.
-- Коммит и пуш — только по явной команде; пуш в main публикует подписанный каталог (CI).
+- Commit and push only on an explicit command; a push to main publishes the signed catalog (CI).

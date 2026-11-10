@@ -1,29 +1,29 @@
-# Безопасность
+# Security
 
-## Сообщить об уязвимости
+## Reporting a vulnerability
 
-Не открывайте публичный issue. Используйте **Private vulnerability reporting** на GitHub (вкладка Security →
-Report a vulnerability) этой репы. Опишите класс проблемы и затронутый плагин/версию; рабочий эксплойт
-прикладывать не нужно.
+Do not open a public issue. Use GitHub **Private vulnerability reporting** (Security tab → Report a vulnerability)
+in this repo. Describe the class of the problem and the affected plugin/version; a working exploit is not needed.
 
-## Что делаем
+## What we do
 
-- Опасный плагин или версия — в `blocklist.json` (по `id`, `versions` или `sha256` архива). Список входит в
-  подписанный `index.json`; менеджер плагинов отключает такие плагины при следующем обновлении каталога
-  (файлы уходят из `Plugins/` в `Registry/disabled/`, плагин не запускается).
-- Утечка ключа подписи — новый ключ (`scripts/keygen.mjs` у владельца), новый открытый ключ в приложении и
-  конфиге демона; старый индекс перестаёт приниматься.
+- A dangerous plugin or version goes into `blocklist.json` (by `id`, `versions` or archive `sha256`). The list is
+  part of the signed `index.json`; the plugin manager disables such plugins on the next catalog update
+  (the files move from `Plugins/` to `Registry/disabled/`, the plugin does not run).
+- Signing key leak — a new key (`scripts/keygen.mjs`, run by the owner), a new public key in the app and the daemon
+  config; the old index is no longer accepted.
 
-## Модель доверия
+## Trust model
 
-- `index.json` подписан ключом реестра (minisign, Ed25519 + BLAKE2b-512); демон принимает только индекс с
-  подписью этим ключом и не старше уже принятого (защита от отката).
-- Архив плагина ставится, только если его sha256 совпал с индексом; внутри — только обычные файлы под
-  `<id>/`, без ссылок и `..`; права в архиве должны совпасть с правами в индексе.
-- CI на PR: без секретов, токен только на чтение, `persist-credentials: false`; `pull_request_target` — только у
-  `perms-label.yml` (метка `permissions`, токен `pull-requests: write`): скрипты и node — из `main`, файлы PR
-  читаются как данные и не исполняются;
-  подпись — отдельный job только на push в `main`, из environment `registry-signing`.
-- Даже с подписью сторонний плагин не получает ничего, кроме статусов, `open.*` и `cmux.focus`: потолок держит
-  ядро демона. Плагин — отдельный процесс с очищенным окружением, но под тем же пользователем: права в
-  метаданных — это обещание автора, проверенное ревью и линтером, а не песочница.
+- `index.json` is signed with the registry key (minisign, Ed25519 + BLAKE2b-512); the daemon accepts only an index
+  signed with this key and not older than the one already accepted (rollback protection).
+- A plugin archive is installed only if its sha256 matches the index; inside — only regular files under `<id>/`,
+  no links and no `..`; the permissions in the archive must match the permissions in the index.
+- CI on PRs: no secrets, read-only token, `persist-credentials: false`; `pull_request_target` — only in
+  `perms-label.yml` (the `permissions` label, token `pull-requests: write`): scripts and node come from `main`, PR
+  files are read as data and not executed;
+  signing — a separate job only on push to `main`, from the `registry-signing` environment.
+- Even with a signature, a third-party plugin gets nothing beyond statuses, `open.*`, `session.focus` and
+  `cmux.focus` (deprecated): the ceiling is enforced by the daemon core. A plugin is a separate process with a cleared
+  environment, but runs as the same user: the permissions in the metadata are the author's promise, checked by review
+  and the linter, not a sandbox.

@@ -1,5 +1,5 @@
-// Общее для check.mjs и build-index.mjs: обход plugins/, разбор метаданных тем же парсером, что у демона
-// (scripts/vendor/meta.mjs), проверка структуры, линтер прав, права на ревизии git, упаковка архива.
+// Shared by check.mjs and build-index.mjs: walking plugins/, parsing metadata with the same parser the daemon uses
+// (scripts/vendor/meta.mjs), structure checks, the permission linter, permissions at a git revision, packing the archive.
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -9,11 +9,11 @@ import { CONTRACT_VERSION, parseFileName, parseMetaText } from "../vendor/meta.m
 import { diffPermissions, ID_RE, lintPlugin, permissionsFromMeta, pushWarnings, RESERVED_IDS, sourceViolations } from "../vendor/perms.mjs";
 import { LIMITS, packTarGz } from "../vendor/tarball.mjs";
 
-// В реестре — только текстовые плагины с известным интерпретатором: бинарник ревьюер не прочтёт.
+// The registry takes only text plugins with a known interpreter: a reviewer can't read a binary.
 export const ALLOWED_EXT = new Set(["mjs", "js", "cjs", "py", "sh", "bash", "zsh"]);
-// В архив не идут: тесты и фикстуры (они для CI), dot-файлы.
+// Not packed into the archive: tests and fixtures (they're for CI), dot files.
 export const PACK_EXCLUDE_TOP = new Set(["test", "fixtures"]);
-// Попадает ли файл plugins/<id>/<rel> в архив плагина (без test/, fixtures/, dot-файлов и dot-каталогов).
+// Whether the file plugins/<id>/<rel> goes into the plugin archive (excluding test/, fixtures/, dot files and dot directories).
 export const inPack = (rel) => !rel.split("/").some((s) => s.startsWith(".")) && !PACK_EXCLUDE_TOP.has(rel.split("/")[0]);
 
 export const sha256 = (b) => createHash("sha256").update(b).digest("hex");
@@ -21,39 +21,40 @@ export const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 export function readJson(path, fallback = undefined) {
   if (!existsSync(path)) {
     if (fallback !== undefined) return fallback;
-    throw new Error(`нет ${path}`);
+    throw new Error(`${path} is missing`);
   }
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-// Ключи событий ядра хаба и предупреждения о правилах push (kind="security", зарезервированные ключи) — общие с
-// проверкой своей папки в демоне: scripts/vendor/perms.mjs (daemon/lib/registry/perms.mjs).
+// Hub core event keys and warnings about push rules (kind="security", reserved keys) — shared with the daemon's
+// check of a local folder: scripts/vendor/perms.mjs (daemon/lib/registry/perms.mjs).
 export { CORE_PUSH_KEYS, pushWarnings } from "../vendor/perms.mjs";
 
-// Версия контракта (<agenthub.contract>, docs/contract/extension-points.md «Версии контракта»). Плагин, который
-// пользуется возможностями контракта 2, а тега нет, — предупреждение: хаб контракта 2 и новее с тегом показал бы
-// «Нужен хаб новее» там, где контракт старше. (Хаб контракта 1 тег не знает вовсе: поставит и не поймёт — kind="plugin"
-// отбросит, подключения не будет; от него защищает только порядок выкатки, docs/contract/extension-points.md.) Контракт новее того, что
-// знает вендоринг (scripts/vendor/meta.mjs), — ошибка: проверка здесь идёт старым разборщиком.
+// Contract version (<agenthub.contract>, docs/contract/extension-points.md "Contract versions"). A plugin that uses
+// contract 2 features without the tag is a warning: a hub of contract 2 or newer would show "Needs a newer hub" given
+// the tag, where its contract is older. (A contract 1 hub doesn't know the tag at all: it installs the plugin and doesn't
+// understand it — drops kind="plugin", no connection; only the rollout order protects against it,
+// docs/contract/extension-points.md.) A contract newer than the vendored copy knows (scripts/vendor/meta.mjs) is an
+// error: the check here runs on the older parser.
 // → { errors, warnings }
 export function contractCheck(meta, source = "") {
   const errors = [];
   const warnings = [];
   const need = Number.isInteger(meta?.contract) ? meta.contract : 1;
-  if (need > CONTRACT_VERSION) errors.push(`<agenthub.contract>${need}: вендоринг знает контракт ${CONTRACT_VERSION} — запустите node scripts/sync-vendor.mjs у хаба с этим контрактом`);
+  if (need > CONTRACT_VERSION) errors.push(`<agenthub.contract>${need}: the vendored copy knows contract ${CONTRACT_VERSION} — run node scripts/sync-vendor.mjs against a hub with this contract`);
   const v2 = [];
   if (meta?.connections?.length) v2.push("<agenthub.connection>");
   if (meta?.icon) v2.push("<agenthub.icon>");
   if ((meta?.push || []).some((r) => r.kind === "plugin" && !(r.legacyKind && !r.wasDeclared))) v2.push('kind="plugin"');
-  if (/(?:^|["'`\n])message=/m.test(String(source))) v2.push("message= в выводе действия");
-  if (v2.length && need < 2) warnings.push(`пользуется контрактом 2 (${v2.join(", ")}), а <agenthub.contract>2</agenthub.contract> не объявлен: хаб с контрактом старше примет плагин молча и поймёт его не целиком`);
+  if (/(?:^|["'`\n])message=/m.test(String(source))) v2.push("message= in action output");
+  if (v2.length && need < 2) warnings.push(`uses contract 2 (${v2.join(", ")}), but <agenthub.contract>2</agenthub.contract> is not declared: a hub with an older contract will accept the plugin silently and only partly understand it`);
   return { errors, warnings };
 }
 
-// official.json: { "official": ["night-runner", …] } — метку ставит только владелец (CODEOWNERS).
+// official.json: { "official": ["night-runner", …] } — only the owner sets the label (CODEOWNERS).
 export function readOfficial(root) {
   const j = readJson(join(root, "official.json"), { official: [] });
-  if (!Array.isArray(j.official) || !j.official.every((x) => typeof x === "string" && ID_RE.test(x))) throw new Error("official.json: ждём {\"official\": [id…]}");
+  if (!Array.isArray(j.official) || !j.official.every((x) => typeof x === "string" && ID_RE.test(x))) throw new Error("official.json: expected {\"official\": [id…]}");
   return new Set(j.official);
 }
 
@@ -61,14 +62,14 @@ export function readOfficial(root) {
 export function readBlocklist(root) {
   const j = readJson(join(root, "blocklist.json"), { version: 1, entries: [] });
   const errors = [];
-  if (j.version !== 1 || !Array.isArray(j.entries)) errors.push("blocklist.json: ждём {\"version\":1,\"entries\":[…]}");
+  if (j.version !== 1 || !Array.isArray(j.entries)) errors.push("blocklist.json: expected {\"version\":1,\"entries\":[…]}");
   const entries = [];
   for (const [i, e] of (j.entries || []).entries()) {
     if (!e || typeof e.id !== "string" || !ID_RE.test(e.id)) {
       errors.push(`blocklist.json[${i}]: id`);
       continue;
     }
-    if (typeof e.reason !== "string" || !e.reason.trim()) errors.push(`blocklist.json[${i}]: нет reason`);
+    if (typeof e.reason !== "string" || !e.reason.trim()) errors.push(`blocklist.json[${i}]: no reason`);
     if (e.versions !== undefined && !(Array.isArray(e.versions) && e.versions.every((v) => typeof v === "string"))) errors.push(`blocklist.json[${i}]: versions`);
     if (e.sha256 !== undefined && !(Array.isArray(e.sha256) && e.sha256.every((v) => /^[0-9a-f]{64}$/.test(v)))) errors.push(`blocklist.json[${i}]: sha256`);
     entries.push({ id: e.id, ...(e.versions ? { versions: e.versions } : {}), ...(e.sha256 ? { sha256: e.sha256 } : {}), reason: String(e.reason || "") });
@@ -91,7 +92,7 @@ function mainCandidates(names, id) {
   });
 }
 
-// Все файлы каталога плагина. → [{ rel, abs, size, symlink }]
+// All files in the plugin directory. → [{ rel, abs, size, symlink }]
 function walk(dir, rel = "", out = []) {
   for (const name of readdirSync(dir).sort()) {
     const abs = join(dir, name);
@@ -104,33 +105,33 @@ function walk(dir, rel = "", out = []) {
   return out;
 }
 
-// Полный разбор и проверка одного plugins/<id>/. → { id, ok, errors, warnings, meta, permissions, main, pack }
+// Full parse and check of one plugins/<id>/. → { id, ok, errors, warnings, meta, permissions, main, pack }
 export function inspectPlugin(root, id, { official = new Set() } = {}) {
   const errors = [];
   const warnings = [];
   const dir = join(root, "plugins", id);
   const isOfficial = official.has(id);
-  if (!ID_RE.test(id) || RESERVED_IDS.has(id)) errors.push(`имя папки «${id}»: только a-z, 0-9, «-»`);
+  if (!ID_RE.test(id) || RESERVED_IDS.has(id)) errors.push(`folder name "${id}": only a-z, 0-9, "-"`);
   const files = walk(dir);
-  for (const f of files) if (f.symlink) errors.push(`${f.rel}: символьные ссылки запрещены`);
-  if (files.length > LIMITS.maxFiles) errors.push(`файлов больше ${LIMITS.maxFiles}`);
+  for (const f of files) if (f.symlink) errors.push(`${f.rel}: symbolic links are not allowed`);
+  if (files.length > LIMITS.maxFiles) errors.push(`more than ${LIMITS.maxFiles} files`);
   const top = readdirSync(dir);
-  if (!top.includes("README.md")) errors.push("нет README.md");
+  if (!top.includes("README.md")) errors.push("README.md is missing");
   const mains = mainCandidates(top.filter((n) => lstatSync(join(dir, n)).isFile()), id);
   let meta = null;
   let source = "";
   let main = null;
-  if (mains.length !== 1) errors.push(mains.length ? `несколько исполняемых файлов: ${mains.join(", ")}` : `нет файла ${id}.<интервал>.<расширение> или ${id}.<расширение>`);
+  if (mains.length !== 1) errors.push(mains.length ? `several executable files: ${mains.join(", ")}` : `no file ${id}.<interval>.<extension> or ${id}.<extension>`);
   else {
     main = mains[0];
     const fn = parseFileName(main);
-    if (!ALLOWED_EXT.has(fn.ext)) errors.push(`${main}: в реестре только ${[...ALLOWED_EXT].join(", ")} (бинарники и прочее не принимаются)`);
+    if (!ALLOWED_EXT.has(fn.ext)) errors.push(`${main}: the registry takes only ${[...ALLOWED_EXT].join(", ")} (binaries and anything else are not accepted)`);
     const buf = readFileSync(join(dir, main));
-    if (buf.subarray(0, 8192).includes(0)) errors.push(`${main}: двоичный файл`);
+    if (buf.subarray(0, 8192).includes(0)) errors.push(`${main}: binary file`);
     source = buf.toString("utf8");
     const parsed = parseMetaText(buf.subarray(0, 64 * 1024).toString("utf8"));
     meta = parsed.meta;
-    for (const w of parsed.warnings) errors.push(`метаданные: ${w}`);
+    for (const w of parsed.warnings) errors.push(`metadata: ${w}`);
     const lint = lintPlugin({ id, meta, source, official: isOfficial });
     errors.push(...lint.errors);
     warnings.push(...lint.warnings);
@@ -139,22 +140,22 @@ export function inspectPlugin(root, id, { official = new Set() } = {}) {
     errors.push(...c.errors);
     warnings.push(...c.warnings);
   }
-  // остальные текстовые файлы плагина тоже не должны лезть в запретные места
+  // the plugin's other text files must not reach into forbidden locations either
   const pack = files.filter((f) => !f.symlink && inPack(f.rel));
   let total = 0;
   for (const f of pack) {
     total += f.size;
-    if (f.size > LIMITS.maxFileBytes) errors.push(`${f.rel}: больше ${LIMITS.maxFileBytes} байт`);
+    if (f.size > LIMITS.maxFileBytes) errors.push(`${f.rel}: over ${LIMITS.maxFileBytes} bytes`);
     if (f.rel === main) continue;
     const b = readFileSync(f.abs);
     if (b.subarray(0, 8192).includes(0)) {
-      errors.push(`${f.rel}: двоичные файлы в архив плагина не принимаются`);
+      errors.push(`${f.rel}: binary files are not accepted in a plugin archive`);
       continue;
     }
-    // запретные места — ошибка для всех плагинов реестра, исключений по метке official нет
-    for (const what of sourceViolations(b.toString("utf8"))) errors.push(`${f.rel}: упоминает запретное место: ${what}`);
+    // forbidden locations are an error for every registry plugin; the official label grants no exception
+    for (const what of sourceViolations(b.toString("utf8"))) errors.push(`${f.rel}: mentions a forbidden location: ${what}`);
   }
-  if (total > LIMITS.maxTotalBytes) errors.push(`плагин больше ${LIMITS.maxTotalBytes} байт`);
+  if (total > LIMITS.maxTotalBytes) errors.push(`plugin is over ${LIMITS.maxTotalBytes} bytes`);
   return {
     id,
     dir,
@@ -171,15 +172,15 @@ export function inspectPlugin(root, id, { official = new Set() } = {}) {
   };
 }
 
-// Детерминированный архив plugins/<id>/ (без test/, fixtures/, dot-файлов). Все файлы 0644: запуск — по
-// расширению интерпретатором, бит x не нужен и не переносится между macOS и Windows.
+// A deterministic archive of plugins/<id>/ (without test/, fixtures/, dot files). All files are 0644: plugins run by
+// extension through an interpreter, so the x bit isn't needed and doesn't carry over between macOS and Windows.
 export function packPlugin(info) {
   return packTarGz(info.pack.map((f) => ({ path: `${info.id}/${f.rel}`, data: readFileSync(f.abs), mode: 0o644 })));
 }
 
-// ---------- права на ревизии ----------
+// ---------- permissions at a revision ----------
 
-// Права всех плагинов каталога. → Map(id → permissions)
+// Permissions of all plugins in a directory. → Map(id → permissions)
 export function permissionsAtDir(root) {
   const out = new Map();
   for (const id of pluginIds(root)) {
@@ -196,17 +197,17 @@ function git(root, args) {
 }
 
 function checkRef(ref) {
-  if (!/^[\w./~^@{}-]{1,200}$/.test(ref) || ref.startsWith("-")) throw new Error(`странная ревизия: ${ref}`);
+  if (!/^[\w./~^@{}-]{1,200}$/.test(ref) || ref.startsWith("-")) throw new Error(`suspicious revision: ${ref}`);
 }
 
-// Права на ревизии git (только чтение объектов: ls-tree + show). → Map(id → permissions)
+// Permissions at a git revision (object reads only: ls-tree + show). → Map(id → permissions)
 export function permissionsAtRef(root, ref) {
   const out = new Map();
   for (const [id, meta] of metaAtRef(root, ref)) out.set(id, permissionsFromMeta(meta));
   return out;
 }
 
-// Метаданные главных файлов плагинов на ревизии git. → Map(id → meta)
+// Metadata of the plugins' main files at a git revision. → Map(id → meta)
 export function metaAtRef(root, ref) {
   checkRef(ref);
   const names = git(root, ["ls-tree", "-r", "--name-only", ref, "--", "plugins"]).toString("utf8").split("\n").filter(Boolean);
@@ -227,10 +228,10 @@ export function metaAtRef(root, ref) {
   return out;
 }
 
-// Плагины, у которых относительно ревизии ref изменились файлы архива, а версия осталась прежней: архив
-// <id>-<версия>.tar.gz в релизе «index» перезаписался бы другим содержимым, и клиент со старым индексом получил
-// бы при установке registry:sha256. Сравнение — git diff ревизии с рабочим деревом (с учётом .gitattributes),
-// плюс неотслеживаемые файлы. → [{ id, version, files: [rel] }]
+// Plugins whose archive files changed since revision ref while the version stayed the same: the archive
+// <id>-<version>.tar.gz in the "index" release would be overwritten with different content, and a client with the old
+// index would get registry:sha256 on install. The comparison is git diff of the revision against the working tree
+// (respecting .gitattributes), plus untracked files. → [{ id, version, files: [rel] }]
 export function unbumpedChanges(root, ref) {
   const base = metaAtRef(root, ref);
   const out = [];
@@ -253,7 +254,7 @@ export function unbumpedChanges(root, ref) {
   return out;
 }
 
-// Дифф прав между ревизиями. → [{ id, change: "new"|"changed"|"removed", added, removed }]
+// Permission diff between revisions. → [{ id, change: "new"|"changed"|"removed", added, removed }]
 export function permissionsDiff(base, head) {
   const out = [];
   for (const [id, p] of head) {
@@ -269,10 +270,10 @@ export function permissionsDiff(base, head) {
 }
 
 export function diffMarkdown(diff) {
-  if (!diff.length) return "Права плагинов не менялись.\n";
-  const lines = ["## Изменение прав плагинов", "", "Нужен второй ревьюер (CODEOWNERS), если права выросли.", ""];
+  if (!diff.length) return "Plugin permissions did not change.\n";
+  const lines = ["## Plugin permission changes", "", "A second reviewer (CODEOWNERS) is needed if permissions grew.", ""];
   for (const d of diff) {
-    lines.push(`### ${d.id} — ${{ new: "новый плагин", changed: "права изменились", removed: "плагин удалён" }[d.change]}`);
+    lines.push(`### ${d.id} — ${{ new: "new plugin", changed: "permissions changed", removed: "plugin removed" }[d.change]}`);
     for (const p of d.added) lines.push(`- \`+ ${p.kind}\` ${p.what}${p.why ? ` — ${p.why}` : ""}`);
     for (const p of d.removed) lines.push(`- \`- ${p.kind}\` ${p.what}`);
     lines.push("");
