@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // <agenthub.title>Claude Code</agenthub.title>
-// <agenthub.version>1.1.0</agenthub.version>
+// <agenthub.version>1.1.1</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="text.alignleft" color="#D97757"></agenthub.icon>
 // <agenthub.desc>Настройки Claude Code для новых сессий (модель, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
@@ -1093,18 +1093,20 @@ export function render(r, { lang = envLang() } = {}) {
   if (!r.hubData) out.push(line(tr("Модель и effort вкладок покажет хаб новее; пока видно то, что проставил плагин", "A newer hub will show each tab's model and effort; for now you see what the plugin set"), { color: GREY }));
   if (!r.rows.length && !r.sessionsUnknown) out.push(line(tr("Открытых сессий нет", "No open sessions")));
   const queued = new Set(jobActive ? job.items.filter((i) => !FINAL.includes(i.phase)).map((i) => i.sessionId) : []);
+  // One compact row per tab, as in the design table: a state dot, the tab name, "model · effort" as a badge (orange
+  // when it differs from the base), a gray "state · note" line, then the Fix and Switch buttons in one row.
   for (const x of r.rows) {
-    out.push(line(x.label, { strip: "true" }));
-    out.push(`--${line(stateText(x.status), { sfimage: x.status === "busy" ? "circle.fill" : x.status === "waiting" ? "questionmark.circle.fill" : "circle", color: x.status === "busy" ? BLUE : x.status === "waiting" ? ORANGE : null })}`);
-    out.push(`--${line(x.now.model ? modelLabel(x.now.model) : "—", x.modelDiffers ? { color: ORANGE } : {})}`);
-    out.push(`--${line(x.now.effort || "—", x.effortDiffers ? { color: ORANGE } : {})}`);
+    const icon = x.status === "busy" ? ["circle.fill", BLUE] : x.status === "waiting" ? ["questionmark.circle.fill", ORANGE] : ["circle", GREY];
+    const values = `${x.now.model ? modelLabel(x.now.model) : "—"} · ${x.now.effort || "—"}`;
+    out.push(line(x.label, { sfimage: icon[0], iconColor: icon[1], badge: values, badgeColor: x.modelDiffers || x.effortDiffers ? ORANGE : null }));
     let note = null;
     if (queued.has(x.sessionId)) note = tr("в очереди", "queued");
     else if (x.action === "fix") {
       if (x.now.verified === false) note = tr("подпись не подтверждена", "signature not verified");
     } else if (x.differs || x.now.known) note = noteText(x.action);
-    if (x.action === "fix" && !note && canType && !jobActive) out.push(`--${line(tr("Привести", "Fix"), { action: "apply", arg: x.sessionId })}`);
-    else if (note) out.push(`--${line(note)}`);
+    const fixable = x.action === "fix" && !note && canType && !jobActive;
+    out.push(`--${line([stateText(x.status), note].filter(Boolean).join(" · "), { color: GREY })}`);
+    if (fixable) out.push(`--${line(tr("Привести", "Fix"), { action: "apply", arg: x.sessionId })}`);
     // switching to the tab is a hub effect: the hub finds the tab (the plugin knows nothing about the terminal)
     out.push(`--${line(tr("Перейти", "Switch"), { effect: `session.focus ${x.sessionId}`, sfimage: "arrow.right.square" })}`);
   }

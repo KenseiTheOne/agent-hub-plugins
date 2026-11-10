@@ -361,9 +361,11 @@ test("open sessions: model and effort from the hub file, differences in orange, 
     assert.match(text, /^Проставить всем \| action=apply-all$/m);
     assert.match(text, /^Открытые сессии · 3$/m);
     const go = (id) => `\\n--Перейти \\| effect="session\\.focus ${id}" sfimage=arrow\\.right\\.square`;
-    assert.match(text, new RegExp(`^alpha \\| strip=true\\n--простаивает \\| sfimage=circle\\n--Opus 5\\.5\\n--high \\| color=#FFB454\\n--Привести \\| action=apply arg=${S1}${go(S1)}$`, "m"));
-    assert.match(text, new RegExp(`^beta \\| strip=true\\n--работает \\| sfimage=circle\\.fill color=#64A8FF\\n--Sonnet 5\\.5 \\| color=#FFB454\\n--medium\\n--после хода${go(S2)}$`, "m"));
-    assert.match(text, /^gamma \| strip=true\n--ждёт ответа[^\n]*\n--Opus 5\.5\n--medium\n--как базовые\n--Перейти /m);
+    // one compact row per tab: the state icon, "model · effort" as a badge (orange when it differs), a gray state line, buttons
+    assert.match(text, new RegExp(`^alpha \\| sfimage=circle iconColor=#8E8E93 badge="Opus 5\\.5 · high" badgeColor=#FFB454\\n--простаивает \\| color=#8E8E93\\n--Привести \\| action=apply arg=${S1}${go(S1)}$`, "m"));
+    assert.match(text, new RegExp(`^beta \\| sfimage=circle\\.fill iconColor=#64A8FF badge="Sonnet 5\\.5 · medium" badgeColor=#FFB454\\n--работает · после хода \\| color=#8E8E93${go(S2)}$`, "m"));
+    assert.match(text, /^gamma \| sfimage=questionmark\.circle\.fill iconColor=#FFB454 badge="Opus 5\.5 · medium"\n--ждёт ответа · как базовые \| color=#8E8E93\n--Перейти /m);
+    assert.doesNotMatch(text, /strip=true\n--простаивает/, "sessions are no longer strips of cells");
     assert.equal(parsed.status, "ok");
     // without the hub file model and effort are unknown — not "as base" but "no data"
     const bare = run(home).text;
@@ -371,7 +373,7 @@ test("open sessions: model and effort from the hub file, differences in orange, 
     assert.match(bare, /хаб новее/);
     const en = run(home, { ...WITH_HUB, AGENTHUB_LANG: "en" }).text;
     assert.match(en, /^2 tabs differ from the base$/m);
-    assert.match(en, /^--after the turn$/m);
+    assert.match(en, /^--working · after the turn \| color=#8E8E93$/m);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -397,7 +399,7 @@ test("Fix: a busy or unverified session is refused without typing; text in the i
     assert.deepEqual(act(home, ["apply", S2], WITH_HUB), { out: "reason=session-busy", code: 3, message: "Сессия сейчас занята — наберу, когда освободится, через «Проставить всем»." });
     // the hub didn't verify alpha's signature in its file — the plugin doesn't even ask to type
     assert.equal(act(home, ["apply", S1], hubWith(home, { [S1]: { verified: false } })).out, "reason=unverified");
-    assert.match(run(home, hubWith(home, { [S1]: { verified: false } })).text, /^--подпись не подтверждена$/m);
+    assert.match(run(home, hubWith(home, { [S1]: { verified: false } })).text, /^--простаивает · подпись не подтверждена \| color=#8E8E93$/m);
     assert.deepEqual(hubLog(home), []);
     // hub terminal refusals → the plugin's own reasons; nothing typed
     for (const [flag, reason] of [["unsigned", "unverified"], ["typed", "input-text"], ["notab", "no-tab"], ["off", "no-terminal"], ["mixed", "input-mixed"]]) {
@@ -482,7 +484,7 @@ test("Apply to all: a free tab at once, a busy one after the turn (hub not pause
     assert.match(text, /^Проставляю… 1 из 2/m);
     assert.match(text, /^--beta — ждёт конца хода/m);
     assert.match(text, /^Остановить \| action=apply-stop$/m);
-    assert.match(text, /^beta \| strip=true\n(?:--[^\n]*\n){3}--в очереди$/m);
+    assert.match(text, /^beta \| [^\n]*\n--работает · в очереди \| color=#8E8E93$/m);
     assert.equal(act(home, ["apply-all"], AUTO).out, "reason=job-running");
     setStatus(home, 202, "busy", "idle");
     ({ text } = run(home, AUTO));

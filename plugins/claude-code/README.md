@@ -14,9 +14,11 @@ and these docs are in English; this is a documentation change only, with no chan
 
 - **Base for new sessions** from `~/.claude/settings.json`: model, effort, output style, ultracode. The header line
   "Base: Opus 5.5 · medium" and the popover tile say the same on one line.
-- **Open sessions**: every live Claude Code session is a row with its state (idle, working, waiting for you), its
-  current model and effort. A difference from the base is orange; a free tab gets "Fix", a busy one "after the turn"
-  or "after your answer".
+- **Open sessions**: every live Claude Code session is a compact row, as in the design table: a state icon (idle,
+  working, waiting for you), the tab name, "model · effort" as a badge — orange (`badgeColor=`) when it differs from the
+  base —, a gray "state · note" line, then the "Fix" and "Switch" buttons. A free tab gets "Fix", a busy one "after the
+  turn" or "after your answer". Since 1.1.1; 1.1.0 drew each session as a strip of cells, a tall card per tab. The
+  colors are display parameters of hub 0.1.0 (contract 3): an older hub ignores them.
 - **Progress of "Apply base to all"**: what was typed, what waits for the turn to end or for your answer, what was
   skipped and why. The result stays until it is dismissed.
 
