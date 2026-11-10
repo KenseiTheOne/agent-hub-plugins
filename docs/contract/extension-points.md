@@ -120,6 +120,12 @@ builtin, official и own; у community и local ядро лишь помечае
 
 Образцы: `open.url.mjs`, `open.file.mjs`.
 
+`effect=open.file <путь>` открывает только документы (текст, Markdown, JSON/YAML, PDF, офисные, картинки, аудио,
+видео — `OPEN_EXT` в `open.file.mjs`) и обычные папки без расширения. Остальное — исполняемое (бит x), прочие типы
+(`.zip`, `.swift`, файл без расширения…), каталоги-пакеты (`.app`, `.sparsebundle`…), алиасы Finder и файлы со своей
+программой — отказ `409 facts:<причина>` (список — `docs/api.md`, «Примитивы»); такое можно только показать в Finder:
+`effect=open.file reveal=true <путь>`.
+
 ```js
 export const name = "session.stop";          // [a-z][\w]*(\.[a-zA-Z][\w]*)+ ; уникально
 export const level = "confirm";              // "immediate" | "confirm" | "confirm-cost"
