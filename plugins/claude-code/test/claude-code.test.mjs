@@ -332,7 +332,7 @@ test("max: env.CLAUDE_CODE_EFFORT_LEVEL=max; leaving writes an empty string, the
     assert.equal(settings(home).env.CLAUDE_CODE_EFFORT_LEVEL, "max");
     const { text } = run(home, WITH_HUB);
     assert.match(text, /^Базовые: Opus 5\.5 · max/m);
-    assert.match(text, /^--max \| sfimage=exclamationmark\.triangle\.fill/m);
+    assert.match(text, /^max — во всех вкладках[^\n]* \| sfimage=exclamationmark\.triangle\.fill color=#FFB454$/m);
     assert.deepEqual(act(home, ["set-effort", "high"]), { out: "ok", code: 0 });
     assert.equal(settings(home).env.CLAUDE_CODE_EFFORT_LEVEL, "", "empty = \"not set\", not auto/unset");
     assert.equal(settings(home).modelSettings["claude-opus-5-5"].effortLevel, "high");
@@ -358,14 +358,15 @@ test("open sessions: model and effort from the hub file, differences in orange, 
   try {
     const { text, parsed } = run(home, WITH_HUB);
     assert.match(text, /^2 вкладки не как базовые$/m);
-    assert.match(text, /^Проставить всем \| action=apply-all$/m);
-    assert.match(text, /^Открытые сессии · 3$/m);
-    const go = (id) => `\\n--Перейти \\| effect="session\\.focus ${id}" sfimage=arrow\\.right\\.square`;
-    // one compact row per tab: the state icon, "model · effort" as a badge (orange when it differs), a gray state line, buttons
-    assert.match(text, new RegExp(`^alpha \\| sfimage=circle iconColor=#8E8E93 badge="Opus 5\\.5 · high" badgeColor=#FFB454\\n--простаивает \\| color=#8E8E93\\n--Привести \\| action=apply arg=${S1}${go(S1)}$`, "m"));
-    assert.match(text, new RegExp(`^beta \\| sfimage=circle\\.fill iconColor=#64A8FF badge="Sonnet 5\\.5 · medium" badgeColor=#FFB454\\n--работает · после хода \\| color=#8E8E93${go(S2)}$`, "m"));
-    assert.match(text, /^gamma \| sfimage=questionmark\.circle\.fill iconColor=#FFB454 badge="Opus 5\.5 · medium"\n--ждёт ответа · как базовые \| color=#8E8E93\n--Перейти /m);
-    assert.doesNotMatch(text, /strip=true\n--простаивает/, "sessions are no longer strips of cells");
+    assert.doesNotMatch(text, /^Проставить всем/m, "the Apply button moved from the header into the sessions table");
+    assert.match(text, /^Открытые сессии · 3 \| table=true columns="Вкладка¦Состояние¦Модель¦Effort"\n--Проставить базовые · 2 \| action=apply-all header=true$/m);
+    // a table: the rows that differ first (cells, orange where they differ, a state dot), Fix/notes and an icon Switch;
+    // the ones as the base in a collapsible group
+    const go = (id, pre) => `\\n${pre}Перейти \\| effect="session\\.focus ${id}" sfimage=arrow\\.up\\.forward\\.app icon=true`;
+    assert.match(text, new RegExp(`^--alpha \\| cells="простаивает¦Opus 5\\.5¦high" cellColors="¦¦#FFB454" sfimage=circle\\.fill iconColor=#8E8E93\\n----Привести \\| action=apply arg=${S1}${go(S1, "----")}$`, "m"));
+    assert.match(text, new RegExp(`^--beta \\| cells="работает¦Sonnet 5\\.5¦medium" cellColors="¦#FFB454¦" sfimage=circle\\.fill iconColor=#64A8FF\\n----после хода \\| color=#8E8E93${go(S2, "----")}$`, "m"));
+    assert.match(text, new RegExp(`^--Как базовые · 1 \\| group=true\\n----gamma \\| cells="ждёт ответа¦Opus 5\\.5¦medium" sfimage=circle\\.fill iconColor=#FFB454${go("33333333-3333-4333-8333-333333333333", "------")}$`, "m"));
+    assert.doesNotMatch(text, /strip=true/, "no strips of cells: segments and a table");
     assert.equal(parsed.status, "ok");
     // without the hub file model and effort are unknown — not "as base" but "no data"
     const bare = run(home).text;
@@ -373,7 +374,7 @@ test("open sessions: model and effort from the hub file, differences in orange, 
     assert.match(bare, /хаб новее/);
     const en = run(home, { ...WITH_HUB, AGENTHUB_LANG: "en" }).text;
     assert.match(en, /^2 tabs differ from the base$/m);
-    assert.match(en, /^--working · after the turn \| color=#8E8E93$/m);
+    assert.match(en, /^----after the turn \| color=#8E8E93$/m);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -399,7 +400,7 @@ test("Fix: a busy or unverified session is refused without typing; text in the i
     assert.deepEqual(act(home, ["apply", S2], WITH_HUB), { out: "reason=session-busy", code: 3, message: "Сессия сейчас занята — наберу, когда освободится, через «Проставить всем»." });
     // the hub didn't verify alpha's signature in its file — the plugin doesn't even ask to type
     assert.equal(act(home, ["apply", S1], hubWith(home, { [S1]: { verified: false } })).out, "reason=unverified");
-    assert.match(run(home, hubWith(home, { [S1]: { verified: false } })).text, /^--простаивает · подпись не подтверждена \| color=#8E8E93$/m);
+    assert.match(run(home, hubWith(home, { [S1]: { verified: false } })).text, /^----подпись не подтверждена \| color=#8E8E93$/m);
     assert.deepEqual(hubLog(home), []);
     // hub terminal refusals → the plugin's own reasons; nothing typed
     for (const [flag, reason] of [["unsigned", "unverified"], ["typed", "input-text"], ["notab", "no-tab"], ["off", "no-terminal"], ["mixed", "input-mixed"]]) {
@@ -484,7 +485,7 @@ test("Apply to all: a free tab at once, a busy one after the turn (hub not pause
     assert.match(text, /^Проставляю… 1 из 2/m);
     assert.match(text, /^--beta — ждёт конца хода/m);
     assert.match(text, /^Остановить \| action=apply-stop$/m);
-    assert.match(text, /^beta \| [^\n]*\n--работает · в очереди \| color=#8E8E93$/m);
+    assert.match(text, /^--beta \| [^\n]*\n----в очереди \| color=#8E8E93$/m);
     assert.equal(act(home, ["apply-all"], AUTO).out, "reason=job-running");
     setStatus(home, 202, "busy", "idle");
     ({ text } = run(home, AUTO));
@@ -625,7 +626,7 @@ test("a session is live only if it is the same process (UTC start time) and Clau
   try {
     writeFileSync(join(home, "bin", "ps"), `#!/bin/sh\necho "  101 Mon Nov 10 09:00:00 2026 /Users/demo/.local/share/claude/versions/2.1.321"\necho "  202 Mon Nov 10 08:00:00 2026 /usr/bin/python3"\necho "  303 Mon Nov 10 08:00:00 2026 /Users/demo/.local/bin/claude"\n`, { mode: 0o755 });
     const { text } = run(home, WITH_HUB);
-    assert.match(text, /^Открытые сессии · 1$/m, "101 is another process with the same pid, 202 isn't Claude Code");
+    assert.match(text, /^Открытые сессии · 1 \|/m, "101 is another process with the same pid, 202 isn't Claude Code");
     const r = run(home, { ...WITH_HUB, AGENTHUB_HUB_SOCKET: "" });
     assert.match(r.text, /Только просмотр: хаб не дал плагину терминал/);
     assert.doesNotMatch(r.text, /action=apply/);
@@ -685,4 +686,24 @@ test("every refusal code has a ru and en text, up to 120 chars, no newline and n
 test("Russian plurals: вкладка / вкладки / вкладок", () => {
   assert.deepEqual([1, 2, 5, 11, 21, 22, 25].map((n) => mod.tabsN(n, "ru")), ["1 вкладка", "2 вкладки", "5 вкладок", "11 вкладок", "21 вкладка", "22 вкладки", "25 вкладок"]);
   assert.equal(mod.tabsN(1, "en"), "1 tab");
+});
+
+test("design v2: model and effort are segments, Default (Opus 5.5) removes the model key; style is a select, ultracode a toggle", POSIX, () => {
+  const home = makeHome();
+  try {
+    let { text } = run(home, WITH_HUB);
+    assert.match(text, /^Модель \| segment=true\n--По умолчанию \(Opus 5\.5\) \| action=set-model arg=default\n--Opus 5\.5 \| selected=true\n/m);
+    assert.match(text, /^Effort \| segment=true\n--low \| action=set-effort arg=low\n--medium \| selected=true\n/m);
+    assert.match(text, /^Стиль ответов \| select=true note="[^"]+"\n(?:--[^\n]*\n)*--Explanatory \| selected=true\n/m);
+    assert.match(text, /^Ultracode \| toggle=off action=ultracode-on note="[^"]+"$/m);
+    // Default: the model key goes away; the header spells the default model out, the tile names the model itself
+    assert.deepEqual(act(home, ["set-model", "default"]), { out: "ok", code: 0 });
+    assert.equal(settings(home).model, undefined);
+    ({ text } = run(home, WITH_HUB));
+    assert.match(text, /^Базовые: по умолчанию \(Opus 5\.5\) · medium \| status=ok tile="Opus 5\.5 · medium"$/m);
+    assert.match(text, /^--По умолчанию \(Opus 5\.5\) \| selected=true$/m);
+    assert.equal(act(home, ["set-model", "claude-nope-1"]).out, "reason=bad-arg");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

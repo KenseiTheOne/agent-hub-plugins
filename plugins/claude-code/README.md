@@ -14,11 +14,18 @@ and these docs are in English; this is a documentation change only, with no chan
 
 - **Base for new sessions** from `~/.claude/settings.json`: model, effort, output style, ultracode. The header line
   "Base: Opus 5.5 · medium" and the popover tile say the same on one line.
-- **Open sessions**: every live Claude Code session is a compact row, as in the design table: a state icon (idle,
-  working, waiting for you), the tab name, "model · effort" as a badge — orange (`badgeColor=`) when it differs from the
-  base —, a gray "state · note" line, then the "Fix" and "Switch" buttons. A free tab gets "Fix", a busy one "after the
-  turn" or "after your answer". Since 1.1.1; 1.1.0 drew each session as a strip of cells, a tall card per tab. The
-  colors are display parameters of hub 0.1.0 (contract 3): an older hub ignores them.
+- **Page layout (1.2.0, design v2):** model and effort are segmented controls (`segment=true`), the output style a
+  dropdown (`select=true`), ultracode a switch (`toggle=`), open sessions a table (`table=true`): tabs that differ, have
+  no data or are queued come first, the ones as the base sit in a collapsible "As base · N" group (`group=true`). A row:
+  a state dot, the tab, state, model and effort cells (orange where they differ, `cellColors=`), "Fix" or a note, and an
+  icon-only "Switch". "Apply base · N" is the table's header button (`header=true`). These are display lines of hub
+  0.1.1 (contract 3); an older hub draws the children as plain lines and buttons.
+- **Default model:** the first segment is "Default (Opus 5.5)": choosing it removes `model` from settings.json, so
+  Claude Code takes its own default. The model in brackets is the plugin's default-model table (`DEFAULT_MODEL`): the
+  hub's sessions file can't tell a default model from `--model`. The header then reads "Base: default (Opus 5.5) ·
+  medium", the tile "Opus 5.5 · medium".
+- **Open sessions** — what a row says: a free tab that differs gets "Fix", a busy one "after the turn", one waiting for
+  you "after your answer".
 - **Progress of "Apply base to all"**: what was typed, what waits for the turn to end or for your answer, what was
   skipped and why. The result stays until it is dismissed.
 
@@ -191,6 +198,10 @@ and `exec /usr/bin/codesign` are gone — typing, finding the tab and checking t
 `terminal send /model /effort`, `effects session.focus` and `watch $AGENTHUB_CLAUDE_SESSIONS_FILE` — the permissions
 grow, so updating shows a consent window. Needs a hub with contract 3 (`<agenthub.contract>3`): an older hub shows
 "Needs a newer hub".
+
+**What changed in 1.2.0:** the `set-model` action also takes `default` (its argument pattern grew from
+`^claude-…$` to `^(?:default|claude-…)$`): it removes the `model` key from settings.json — still within the allow list,
+nothing new is written or read. A changed action is a permission change, so updating shows a consent window.
 
 ## From the hub (contract 3)
 

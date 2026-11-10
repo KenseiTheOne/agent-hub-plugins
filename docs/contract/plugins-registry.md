@@ -172,8 +172,8 @@ A plugin declares an external program with `<agenthub.requires name="…" url="h
 index entry and the translation into `i18n.<lang>.requires`. `GET /registry/catalog` returns
 `requires: [{name, url, note, check, present}]` — the daemon computes `present` from whether `check` exists in the
 plugins' HOME. The catalog card: "Requires <name>" as a link, "not found on this Mac" / "installed"; when missing,
-"Install" is dimmed with a tooltip (installing is still possible). Currently used by hermes ("Requires Hermes",
-`~/.hermes`). An invalid index entry (not https, a mask in `check`) is dropped.
+"Install" is dimmed with a tooltip (installing is still possible). For example, a registry plugin for an
+agent tool declares the tool itself ("Requires <tool>", `~/.<tool>`). An invalid index entry (not https, a mask in `check`) is dropped.
 
 ## Index: `tier`
 

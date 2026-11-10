@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // <agenthub.title>Claude Code</agenthub.title>
-// <agenthub.version>1.1.1</agenthub.version>
+// <agenthub.version>1.2.0</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="text.alignleft" color="#D97757"></agenthub.icon>
 // <agenthub.desc>Настройки Claude Code для новых сессий (модель, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
@@ -45,7 +45,7 @@
 // <agenthub.watch lang="en">~/.claude/sessions/*.json — a session became free: a deferred command can be typed</agenthub.watch>
 // <agenthub.watch>$AGENTHUB_CLAUDE_SESSIONS_FILE — у вкладки сменились модель или effort</agenthub.watch>
 // <agenthub.watch lang="en">$AGENTHUB_CLAUDE_SESSIONS_FILE — a tab's model or effort changed</agenthub.watch>
-// <agenthub.action id="set-model" level="immediate" arg="model:^claude-[a-z]+-[0-9]+(?:-[0-9]+)?$" title="Модель для новых сессий (Opus тратит лимит быстрее остальных)" title-en="Model for new sessions (Opus uses the limit faster than the others)">claude-code.30s.mjs --action set-model {model}</agenthub.action>
+// <agenthub.action id="set-model" level="immediate" arg="model:^(?:default|claude-[a-z]+-[0-9]+(?:-[0-9]+)?)$" title="Модель для новых сессий (Opus тратит лимит быстрее остальных; default — модель Claude Code по умолчанию)" title-en="Model for new sessions (Opus uses the limit faster than the others; default — Claude Code's default model)">claude-code.30s.mjs --action set-model {model}</agenthub.action>
 // <agenthub.action id="set-effort" level="immediate" arg="level:^(?:low|medium|high|xhigh)$" title="Effort для новых сессий (чем выше, тем быстрее уходит лимит)" title-en="Effort for new sessions (the higher, the faster the limit goes)">claude-code.30s.mjs --action set-effort {level}</agenthub.action>
 // <agenthub.action id="effort-max" level="confirm-cost" title="Поставить effort max" title-en="Set effort to max" cost="лимит подписки уходит в разы быстрее; действует сразу во всех вкладках, включая открытые, и перебивает /effort в них" cost-en="the subscription limit runs out several times faster; it applies at once in every tab, open ones included, and overrides /effort there">claude-code.30s.mjs --action effort-max</agenthub.action>
 // <agenthub.action id="set-style" level="immediate" arg="style:^[A-Za-z0-9][A-Za-z0-9 _.:()-]{0,79}$" title="Стиль ответов" title-en="Output style">claude-code.30s.mjs --action set-style {style}</agenthub.action>
@@ -264,8 +264,12 @@ export function opsFor(kind, value, s) {
   const ms = s && typeof s.modelSettings === "object" && s.modelSettings ? s.modelSettings : {};
   const ops = [];
   if (kind === "model") {
-    if (!MODELS.some((m) => m.id === value)) throw new Error("bad-arg");
-    if (s?.model !== value) ops.push({ path: ["model"], value });
+    if (value !== "default" && !MODELS.some((m) => m.id === value)) throw new Error("bad-arg");
+    // "default": no model key — Claude Code takes its own default model (DEFAULT_MODEL)
+    if (value === "default") {
+      if (s?.model !== undefined) ops.push({ path: ["model"], delete: true });
+      value = DEFAULT_MODEL;
+    } else if (s?.model !== value) ops.push({ path: ["model"], value });
     // effort carries over to the new model, otherwise it would silently start from its own default
     if (isLevel(base.effort) && ["modelSettings", "effortLevel"].includes(base.effortFrom) && !isLevel(ms[value]?.effortLevel)) ops.push({ path: ["modelSettings", value, "effortLevel"], value: base.effort });
   } else if (kind === "effort") {
@@ -1009,7 +1013,9 @@ export function render(r, { lang = envLang() } = {}) {
   const b = r.base;
   const differ = r.rows.filter((x) => x.differs);
   const known = r.rows.filter((x) => x.now.known);
-  const baseText = `${modelLabel(b.model)} · ${effortLabel(b.effort)}`;
+  // tile: the model itself ("Opus 5.5 · high"); header: "default (Opus 5.5) · high" when settings have no model
+  const baseText = `${modelLabel(b.model || DEFAULT_MODEL)} · ${effortLabel(b.effort)}`;
+  const baseLong = b.model ? baseText : `${tr(`по умолчанию (${modelLabel(DEFAULT_MODEL)})`, `default (${modelLabel(DEFAULT_MODEL)})`)} · ${effortLabel(b.effort)}`;
   const job = r.job || null;
   const jobActive = Boolean(job && !job.finishedAt);
   const canType = r.terminal;
@@ -1021,42 +1027,35 @@ export function render(r, { lang = envLang() } = {}) {
   else if (unknownN) differText = tr(`как базовые · ${unknownN} без данных`, `as base · ${unknownN} unknown`);
   else differText = tr("как базовые", "as base");
 
-  // header: the base on one line, differences and the button
-  out.push(line(tr(`Базовые: ${baseText}`, `Base: ${baseText}`), { status: jobActive ? "wait" : "ok", tile: baseText }));
+  // header: the base on one line and the differences (the "Apply" button lives in the sessions table)
+  out.push(line(tr(`Базовые: ${baseLong}`, `Base: ${baseLong}`), { status: jobActive ? "wait" : "ok", tile: baseText }));
   out.push(line(differText));
-  if (differ.length && canType && !jobActive) out.push(line(tr("Проставить всем", "Apply to all"), { action: "apply-all" }));
   out.push("---");
 
-  // for new sessions
+  // for new sessions (design v2: segments, a dropdown and a switch — hub 0.1.0+ draws them; an older hub shows the
+  // children as lines and buttons)
   out.push(line(tr("Для новых сессий", "For new sessions")));
-  out.push(line(tr("Модель", "Model"), { strip: "true" }));
-  for (const m of MODELS) {
-    const sel = b.model === m.id;
-    out.push(`--${line(m.label, sel ? { sfimage: "checkmark.circle.fill", note: tr("выбрана", "selected") } : { action: "set-model", arg: m.id })}`);
+  out.push(line(tr("Модель", "Model"), { segment: "true" }));
+  const defLabel = tr(`По умолчанию (${modelLabel(DEFAULT_MODEL)})`, `Default (${modelLabel(DEFAULT_MODEL)})`);
+  out.push(`--${line(defLabel, !b.model ? { selected: "true" } : { action: "set-model", arg: "default" })}`);
+  for (const m of MODELS) out.push(`--${line(m.label, b.model === m.id ? { selected: "true" } : { action: "set-model", arg: m.id })}`);
+  out.push(line("Effort", { segment: "true" }));
+  for (const l of LEVELS) out.push(`--${line(l, b.effort === l && !b.envOverride ? { selected: "true" } : { action: "set-effort", arg: l })}`);
+  // max is the segment's last option, orange (a separate line would split the settings into separate cards)
+  out.push(`--${line("max", b.maxActive ? { selected: "true", color: ORANGE } : { action: "effort-max", color: ORANGE, tooltip: tr("во всех вкладках, лимит в разы быстрее", "in every tab, the limit runs out faster") })}`);
+  if (b.maxActive) out.push(line(tr("max — во всех вкладках: лимит уходит в разы быстрее; выбор уровня выше его снимет", "max — in every tab: the limit runs out several times faster; picking a level above clears it"), { sfimage: "exclamationmark.triangle.fill", color: ORANGE }));
+  else if (b.envOverride) out.push(line(tr(`Effort ${b.effort} задан в env.CLAUDE_CODE_EFFORT_LEVEL и действует во всех вкладках; выбор уровня выше его снимет`, `Effort ${b.effort} is set in env.CLAUDE_CODE_EFFORT_LEVEL and applies in every tab; picking a level above clears it`), { color: ORANGE }));
+  out.push(line(tr("Стиль ответов", "Output style"), { select: "true", note: tr("открытые вкладки подхватят со следующего сообщения", "open tabs pick it up from their next message") }));
+  for (const st of r.styles) {
+    const note = st.source === "user" ? tr("ваш", "yours") : st.source === "plugin" ? tr("из плагина", "from a plugin") : undefined;
+    out.push(`--${line(st.name, b.outputStyle === st.name ? { selected: "true", note } : { action: "set-style", arg: st.name, note })}`);
   }
-  out.push(line(tr("Effort", "Effort"), { strip: "true" }));
-  for (const l of LEVELS) {
-    const sel = b.effort === l && !b.envOverride;
-    out.push(`--${line(l, sel ? { sfimage: "checkmark.circle.fill", note: tr("выбран", "selected") } : { action: "set-effort", arg: l })}`);
-  }
-  out.push(`--${line("max", b.maxActive ? { sfimage: "exclamationmark.triangle.fill", color: ORANGE, note: tr("включён во всех вкладках", "on in every tab") } : { action: "effort-max", color: ORANGE, note: tr("лимит в разы быстрее", "limit runs out faster") })}`);
-  if (b.envOverride && !b.maxActive) out.push(line(tr(`Effort ${b.effort} задан в env.CLAUDE_CODE_EFFORT_LEVEL и действует во всех вкладках; выбор уровня выше его снимет`, `Effort ${b.effort} is set in env.CLAUDE_CODE_EFFORT_LEVEL and applies in every tab; picking a level above clears it`), { color: ORANGE }));
-  out.push(line(tr(`Стиль ответов: ${b.outputStyle}`, `Output style: ${b.outputStyle}`)));
-  for (const s of r.styles) {
-    const sel = b.outputStyle === s.name;
-    const note = sel ? tr("выбран", "selected") : s.source === "user" ? tr("ваш", "yours") : s.source === "plugin" ? tr("из плагина", "from a plugin") : undefined;
-    out.push(`--${line(s.name, sel ? { sfimage: "checkmark.circle.fill", note } : { action: "set-style", arg: s.name, note })}`);
-  }
-  out.push(
-    b.ultracode
-      ? line(tr("Ultracode: включён · многоагентные воркфлоу на каждую задачу", "Ultracode: on · multi-agent workflows on every task"), { action: "ultracode-off", sfimage: "bolt.fill" })
-      : line(tr("Ultracode: выключен · многоагентные воркфлоу на каждую задачу", "Ultracode: off · multi-agent workflows on every task"), { action: "ultracode-on", sfimage: "bolt.slash" }),
-  );
+  out.push(line("Ultracode", { toggle: b.ultracode ? "on" : "off", action: b.ultracode ? "ultracode-off" : "ultracode-on", note: tr("многоагентные воркфлоу на каждую задачу", "multi-agent workflows on every task") }));
   out.push(
     line(
       tr(
-        "Пишется в ~/.claude/settings.json, прежняя версия — в ~/.claude/backups. Модель и effort — для новых вкладок, открытые переключает кнопка ниже; стиль ответов открытые вкладки подхватят со следующего сообщения",
-        "Written to ~/.claude/settings.json, the previous version goes to ~/.claude/backups. Model and effort are for new tabs, the button below switches open ones; open tabs pick up the output style from their next message",
+        "Пишется в ~/.claude/settings.json, прежняя версия — в ~/.claude/backups. Открытые вкладки модель и effort не меняют — для них «Проставить базовые» ниже",
+        "Written to ~/.claude/settings.json, the previous version goes to ~/.claude/backups. Open tabs keep their model and effort — use Apply base below",
       ),
       { color: GREY },
     ),
@@ -1072,7 +1071,7 @@ export function render(r, { lang = envLang() } = {}) {
     for (const it of job.items) {
       const [icon, color] = phaseIcon[it.phase] || ["circle", null];
       const label = it.phase === "done" && it.waited ? (it.waited === "waitAnswer" ? tr("после ответа", "after your answer") : tr("после хода", "after the turn")) : phaseText(it);
-      out.push(`--${line(`${it.label} — ${label}`, { sfimage: icon, color })}`);
+      out.push(`--${line(`${it.label} — ${label}`, { sfimage: icon, iconColor: color })}`);
     }
     if (jobActive) {
       if (job.items.some((i) => i.phase === "ready") && canType) out.push(line(tr("Продолжить", "Continue"), { action: "apply-continue" }));
@@ -1085,30 +1084,43 @@ export function render(r, { lang = envLang() } = {}) {
     out.push("---");
   }
 
-  // open sessions
-  out.push(line(r.sessionsUnknown ? tr("Открытые сессии", "Open sessions") : tr(`Открытые сессии · ${r.rows.length}`, `Open sessions · ${r.rows.length}`)));
-  if (differ.length && canType && !jobActive) out.push(line(tr(`Проставить базовые всем · ${differ.length}`, `Apply base to all · ${differ.length}`), { action: "apply-all" }));
+  // open sessions: a table (design v2) — the rows that need attention first, the ones as the base in a group
   if (r.sessionsUnknown) out.push(line(tr("Не удалось проверить, какие сессии живы (ps не ответил) — попробую в следующий раз", "Couldn't check which sessions are alive (ps didn't respond) — will retry"), { color: ORANGE }));
   if (!canType) out.push(line(tr("Только просмотр: хаб не дал плагину терминал, набирать во вкладки не через что", "View-only: the hub gave the plugin no terminal, there's no way to type into tabs"), { color: GREY }));
   if (!r.hubData) out.push(line(tr("Модель и effort вкладок покажет хаб новее; пока видно то, что проставил плагин", "A newer hub will show each tab's model and effort; for now you see what the plugin set"), { color: GREY }));
-  if (!r.rows.length && !r.sessionsUnknown) out.push(line(tr("Открытых сессий нет", "No open sessions")));
-  const queued = new Set(jobActive ? job.items.filter((i) => !FINAL.includes(i.phase)).map((i) => i.sessionId) : []);
-  // One compact row per tab, as in the design table: a state dot, the tab name, "model · effort" as a badge (orange
-  // when it differs from the base), a gray "state · note" line, then the Fix and Switch buttons in one row.
-  for (const x of r.rows) {
-    const icon = x.status === "busy" ? ["circle.fill", BLUE] : x.status === "waiting" ? ["questionmark.circle.fill", ORANGE] : ["circle", GREY];
-    const values = `${x.now.model ? modelLabel(x.now.model) : "—"} · ${x.now.effort || "—"}`;
-    out.push(line(x.label, { sfimage: icon[0], iconColor: icon[1], badge: values, badgeColor: x.modelDiffers || x.effortDiffers ? ORANGE : null }));
-    let note = null;
-    if (queued.has(x.sessionId)) note = tr("в очереди", "queued");
-    else if (x.action === "fix") {
-      if (x.now.verified === false) note = tr("подпись не подтверждена", "signature not verified");
-    } else if (x.differs || x.now.known) note = noteText(x.action);
-    const fixable = x.action === "fix" && !note && canType && !jobActive;
-    out.push(`--${line([stateText(x.status), note].filter(Boolean).join(" · "), { color: GREY })}`);
-    if (fixable) out.push(`--${line(tr("Привести", "Fix"), { action: "apply", arg: x.sessionId })}`);
-    // switching to the tab is a hub effect: the hub finds the tab (the plugin knows nothing about the terminal)
-    out.push(`--${line(tr("Перейти", "Switch"), { effect: `session.focus ${x.sessionId}`, sfimage: "arrow.right.square" })}`);
+  const title = r.sessionsUnknown ? tr("Открытые сессии", "Open sessions") : tr(`Открытые сессии · ${r.rows.length}`, `Open sessions · ${r.rows.length}`);
+  if (!r.rows.length) {
+    out.push(line(title));
+    if (!r.sessionsUnknown) out.push(`--${line(tr("Открытых сессий нет", "No open sessions"), { color: GREY })}`);
+  } else {
+    out.push(line(title, { table: "true", columns: tr("Вкладка¦Состояние¦Модель¦Effort", "Tab¦State¦Model¦Effort") }));
+    // the table's header button
+    if (differ.length && canType && !jobActive) out.push(`--${line(tr(`Проставить базовые · ${differ.length}`, `Apply base · ${differ.length}`), { action: "apply-all", header: "true" })}`);
+    const queued = new Set(jobActive ? job.items.filter((i) => !FINAL.includes(i.phase)).map((i) => i.sessionId) : []);
+    const attention = r.rows.filter((x) => x.differs || !x.now.known || queued.has(x.sessionId));
+    const same = r.rows.filter((x) => !attention.includes(x));
+    const row = (x, pre) => {
+      const unknown = !x.now.known;
+      const stColor = x.status === "busy" ? BLUE : x.status === "waiting" ? ORANGE : GREY;
+      const cells = [stateText(x.status) || "—", x.now.model ? modelLabel(x.now.model) : "—", x.now.effort || "—"].map((c) => clean(String(c), 40).replace(/¦/g, "|")).join("¦");
+      const colors = ["", unknown ? GREY : x.modelDiffers ? ORANGE : "", unknown ? GREY : x.effortDiffers ? ORANGE : ""].join("¦");
+      out.push(`${pre}${line(x.label, { cells, cellColors: colors.replace(/¦/g, "") ? colors : null, sfimage: "circle.fill", iconColor: stColor })}`);
+      let note = null;
+      if (queued.has(x.sessionId)) note = tr("в очереди", "queued");
+      else if (unknown) note = tr("нет данных", "no data");
+      else if (x.action === "fix") {
+        if (x.now.verified === false) note = tr("подпись не подтверждена", "signature not verified");
+      } else if (x.differs) note = noteText(x.action);
+      if (x.action === "fix" && !note && canType && !jobActive) out.push(`${pre}--${line(tr("Привести", "Fix"), { action: "apply", arg: x.sessionId })}`);
+      else if (note) out.push(`${pre}--${line(note, { color: GREY })}`);
+      // switching to the tab is a hub effect: the hub finds the tab (the plugin knows nothing about the terminal)
+      out.push(`${pre}--${line(tr("Перейти", "Switch"), { effect: `session.focus ${x.sessionId}`, sfimage: "arrow.up.forward.app", icon: "true" })}`);
+    };
+    for (const x of attention) row(x, "--");
+    if (attention.length && same.length) {
+      out.push(`--${line(tr(`Как базовые · ${same.length}`, `As base · ${same.length}`), { group: "true" })}`);
+      for (const x of same) row(x, "----");
+    } else for (const x of same) row(x, "--");
   }
   if (r.rows.length) {
     out.push(line(tr("Подробности", "Details"), { details: "true" }));
@@ -1217,7 +1229,7 @@ async function tabAction(id, arg, home) {
 // → { ok, reason? }
 export async function runAction([id, arg], { home = homedir() } = {}) {
   if (!claudeInstalled(home)) return { ok: false, reason: "no-claude" };
-  if (id === "set-model") return MODELS.some((m) => m.id === arg) ? settingsAction(home, "model", arg) : { ok: false, reason: "bad-arg" };
+  if (id === "set-model") return arg === "default" || MODELS.some((m) => m.id === arg) ? settingsAction(home, "model", arg) : { ok: false, reason: "bad-arg" };
   if (id === "set-effort") {
     if (!isLevel(arg)) return { ok: false, reason: "bad-arg" };
     const before = readBase(readSettings(home) || {});

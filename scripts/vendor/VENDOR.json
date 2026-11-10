@@ -27,10 +27,10 @@
   },
   "docs": {
     "README.md": "857f0b19092e9ae21408832bf0d7bb7992ffaf750a83c55cdda7a5f8f81333a8",
-    "writing-plugins.md": "545607cd589a52add5bb0ae1f98565226182790427d460d2ab7fbadc805e7770",
-    "extension-points.md": "1dbe8ed015f894ef6073919f183076eeb82ec6e6915b6315ac80f73b370c96d3",
+    "writing-plugins.md": "a2d9a19cbaff17da472fb3a5d6ced19a2264504fa069275d9c10062d78aa6a1a",
+    "extension-points.md": "fbbdf6b4c1ea1afa18b9b6a104484d8dab4dba2c25af002d89695923fcf1e9b6",
     "push.md": "08d5ddf442590fbf57758b0fdccaa571f081d3eb97f97ec1c04e192cd3c80ec9",
-    "plugins-registry.md": "9009e78bc0e4e98cc058d5f4a27eb4668e032a98b297e66ace6e8114119d67d2",
+    "plugins-registry.md": "ae9460aef16a6dcccb46ea513f744fbc3bddaee4eeab2a9eb9a8939fb335d296",
     "api.md": "2a94f52c5d3dd400f27fd32db2a735dc9254fdff3fdff9bf140c788c09b01933"
   }
 }
