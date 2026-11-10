@@ -15,7 +15,7 @@ const LANG_RE = /^[a-z]{2}$/;
 const IGNORED_EXT = new Set(["md", "txt", "json", "lock", "log", "orig", "bak", "swp"]);
 
 // Многозначные теги (повторяются → массив).
-const MULTI = new Set(["watch", "fsRead", "fsWrite", "exec", "secrets", "net"]);
+const MULTI = new Set(["watch", "fsRead", "fsWrite", "exec", "secrets", "net", "terminal"]);
 // Теги со списком через запятую.
 const CSV = new Set(["effects", "platforms"]);
 
@@ -74,9 +74,13 @@ export function parseActionArg(text) {
 // Версия контракта плагинов, которую понимает это ядро (docs/extension-points.md, «Версии контракта»): 1 — до 09.11
 // (неявно), 2 — чистка ядра от названий плагинов: свои переключатели уведомлений (kind="plugin"), значок
 // (<agenthub.icon>), подключения (<agenthub.connection>), текст отказа действия (message=), сам тег
-// <agenthub.contract>. Плагин объявляет минимальную нужную ему версию; новее этой — установка и обновление
-// отказывают «нужен хаб новее» (а не ошибкой линтера).
-export const CONTRACT_VERSION = 2;
+// <agenthub.contract>; 3 (10.11) — метаданные живых сессий Claude Code доверенным плагинам
+// (AGENTHUB_CLAUDE_SESSIONS_FILE), признак паузы хаба в окружении каждого запуска (AGENTHUB_PAUSED) и перезапуск
+// плагинов при её установке и снятии, громкая пометка записи в места перехвата Claude Code и системы в окне согласия,
+// терминал: прочитать экран вкладки и набрать строку во вкладку сессии Claude Code (<agenthub.terminal>, /terminal/*).
+// Плагин объявляет минимальную нужную ему версию; новее этой — установка и обновление отказывают «нужен хаб новее»
+// (а не ошибкой линтера).
+export const CONTRACT_VERSION = 3;
 
 // Правило push для ключа события плагина:
 //   <agenthub.push key="build-blocked" hold="evening" quiet="true" macOnly="true" cooldown="7d" away="5m" kind="plugin">Ярлык</agenthub.push>
@@ -240,6 +244,8 @@ export function parseMetaText(text) {
     exec: [],
     secrets: [],
     net: [],
+    // Терминал (контракт 3): <agenthub.terminal>read-screen | send <слова>|* — зачем</agenthub.terminal> (lib/registry/perms.mjs)
+    terminal: [],
     effects: [],
     actions: [],
     push: [],

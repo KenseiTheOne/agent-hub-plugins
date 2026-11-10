@@ -10,12 +10,12 @@
 // lock и индекс до 05.11) permissionList разбирает так же: ключи старых и новых записей совпадают.
 
 // Потолок effects для сторонних плагинов — тот же, что в ядре (core.mjs: THIRD_PARTY_EFFECTS, LOCAL_EFFECTS).
-export const THIRD_PARTY_EFFECTS = ["open.*", "cmux.focus"];
+export const THIRD_PARTY_EFFECTS = ["open.*", "cmux.focus", "session.focus"];
 export const LOCAL_EFFECTS = ["open.*"];
 
-export const KINDS = ["fsRead", "fsWrite", "watch", "exec", "secrets", "net", "effects", "actions", "connections"];
+export const KINDS = ["fsRead", "fsWrite", "watch", "exec", "secrets", "net", "effects", "actions", "connections", "terminal"];
 // Виды, у которых автор обязан объяснить «зачем».
-const NEED_WHY = new Set(["fsRead", "fsWrite", "exec", "secrets", "net"]);
+const NEED_WHY = new Set(["fsRead", "fsWrite", "exec", "secrets", "net", "terminal"]);
 
 export const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const RESERVED_IDS = new Set(["local", "staging", "disabled"]);
@@ -58,7 +58,79 @@ export function permissionsFromMeta(meta) {
   // него. Пустой список в права не пишется — записи индекса и lock до контракта 2 сверяются как прежде.
   const conns = (meta.connections || []).map((c) => ({ what: connectionWhat(c), why: c.note || null }));
   if (conns.length) out.connections = conns;
+  // Терминал (<agenthub.terminal>, контракт 3): прочитать экран вкладки и набрать строку во вкладку сессии Claude Code.
+  // Как и подключения, пустой список в права не пишется.
+  const term = (meta.terminal || []).map((e) => {
+    const { what, why } = splitWhy(e);
+    return { what: norm(what), why };
+  });
+  if (term.length) out.terminal = term;
   return out;
+}
+
+// ---------- терминал (контракт 3) ----------
+//
+//   <agenthub.terminal>read-screen — зачем</agenthub.terminal>        узнать, пусто ли поле ввода и свободна ли сессия
+//                                                                    (текст экрана плагин не получает)
+//   <agenthub.terminal>send /model /effort — зачем</agenthub.terminal> набрать slash-команду и Enter: первое слово строки —
+//                                                                    одна из перечисленных команд (до 16), дальше не больше
+//                                                                    3 аргументов из [A-Za-z0-9._:[]-] (до 64 знаков)
+//   <agenthub.terminal>send * — зачем</agenthub.terminal>             любую строку, кроме начинающихся с «!» (команда
+//                                                                    оболочки в режиме bash), «#» (запись в память) и «&»
+//                                                                    (фоновая задача); громче в окне согласия
+//   <agenthub.terminal>send ! — зачем</agenthub.terminal>             строку, начинающуюся с этого знака режима («!», «#»,
+//                                                                    «&»; можно несколько: «send ! #»): отдельное право
+//                                                                    (10.11), «*» его не даёт; самое громкое в окне согласия
+// Слово — «/», затем a-z, 0-9, «-» с буквы, до 32 знаков: право по слову — только на slash-команду (слово без «/» было бы
+// правом на произвольный запрос, начинающийся с этого слова). Расширение списка слов — рост прав (ключ — вся запись).
+export const TERMINAL_WORD_RE = /^\/[a-z][a-z0-9-]{0,31}$/;
+const TERMINAL_WORDS_MAX = 16;
+// Аргументы slash-команды по праву-слову: не больше 3, каждый — из этого набора (модель, уровень, id с [1m]).
+export const TERMINAL_ARG_RE = /^[A-Za-z0-9._:[\]-]{1,64}$/;
+const TERMINAL_ARGS_MAX = 3;
+// Первые знаки, которые Claude Code понимает как режим, а не запрос: «!» — команда оболочки сразу, без разрешений
+// Claude Code; «#» — запись в память (CLAUDE.md); «&» — фоновая задача. По праву «*» такие строки не набираются.
+export const TERMINAL_MODE_CHARS = ["!", "#", "&"];
+
+// what → { op: "read-screen" } | { op: "send", any, words, modes } | null (не запись права терминала).
+// Слова права — slash-команды или знаки режимов; «*» — только одно, без других слов.
+export function parseTerminalPerm(what) {
+  const parts = norm(what || "").split(" ").filter(Boolean);
+  if (parts.length === 1 && parts[0] === "read-screen") return { op: "read-screen" };
+  if (parts[0] !== "send" || parts.length < 2) return null;
+  const words = parts.slice(1);
+  if (words.length === 1 && words[0] === "*") return { op: "send", any: true, words: [], modes: [] };
+  if (words.length > TERMINAL_WORDS_MAX || !words.every((w) => TERMINAL_WORD_RE.test(w) || TERMINAL_MODE_CHARS.includes(w))) return null;
+  const modes = [...new Set(words.filter((w) => TERMINAL_MODE_CHARS.includes(w)))];
+  return { op: "send", any: false, words: [...new Set(words.filter((w) => !TERMINAL_MODE_CHARS.includes(w)))], modes };
+}
+
+// Записи <agenthub.terminal> плагина (строки метаданных «что — зачем» или что) → { read, send, any, words: Set, modes: Set }.
+export function terminalGrants(entries) {
+  const out = { read: false, send: false, any: false, words: new Set(), modes: new Set() };
+  for (const e of Array.isArray(entries) ? entries : []) {
+    const p = parseTerminalPerm(splitWhy(String(e)).what);
+    if (!p) continue;
+    if (p.op === "read-screen") out.read = true;
+    else {
+      out.send = true;
+      if (p.any) out.any = true;
+      for (const w of p.words) out.words.add(w);
+      for (const m of p.modes) out.modes.add(m);
+    }
+  }
+  return out;
+}
+
+// Можно ли набрать эту строку по правам. → объявленная slash-команда в начале строки (её аргументы — по
+// TERMINAL_ARG_RE, не больше 3), "*" (любая строка разрешена правом «*» и не начинается с TERMINAL_MODE_CHARS),
+// знак режима (строка начинается с «!», «#» или «&» и этот знак объявлен отдельным правом) или null — нельзя.
+export function terminalTextAllowed(grants, text) {
+  if (!grants?.send || typeof text !== "string" || !text) return null;
+  if (TERMINAL_MODE_CHARS.includes(text[0])) return grants.modes?.has(text[0]) ? text[0] : null;
+  const [head, ...args] = text.split(" ");
+  if (grants.words.has(head) && args.length <= TERMINAL_ARGS_MAX && args.every((a) => TERMINAL_ARG_RE.test(a))) return head;
+  return grants.any && !TERMINAL_MODE_CHARS.includes(text[0]) ? "*" : null;
 }
 
 // id подключения принадлежит плагину pluginId: равен ему или «<pluginId>.<имя>» (та же грамматика, что
@@ -87,16 +159,23 @@ export function indexPermissions(meta) {
 }
 
 // Плоский список прав. → [{ kind, what, why, key }]
-export function permissionList(perms) {
+// opts.pluginId — чей это набор: его PluginData/<id> и Cache/<id> в каталоге хаба не громкие (writeRisk).
+export function permissionList(perms, { pluginId = null } = {}) {
   const list = [];
   if (!perms || typeof perms !== "object") return list;
-  for (const k of ["fsRead", "fsWrite", "watch", "exec", "secrets", "net", "connections"]) {
+  for (const k of ["fsRead", "fsWrite", "watch", "exec", "secrets", "net", "connections", "terminal"]) {
     for (const e of perms[k] || []) {
       if (!e || typeof e.what !== "string") continue;
       let what = e.what;
       let why = e.why ?? null;
       if (k === "watch" && why == null) ({ what, why } = splitWhy(what));
-      list.push({ kind: k, what: norm(what), why, key: `${k}:${norm(what)}` });
+      // запись туда, откуда перехватывают Claude Code или систему (контракт 3): право допустимо, но окно согласия
+      // показывает его громкой строкой с объяснением (risk — вид места, writeRisk); в ключ права не входит.
+      // Набор во вкладку Claude Code (terminal send) — тоже перехват: risk "terminal"; право на знаки режимов
+      // («!» — команда оболочки мимо разрешений Claude Code) — громче всего: risk "terminal-mode".
+      const tp = k === "terminal" ? parseTerminalPerm(what) : null;
+      const risk = k === "fsWrite" ? writeRisk(what, { pluginId }) : tp?.op === "send" ? (tp.modes.length ? "terminal-mode" : "terminal") : null;
+      list.push({ kind: k, what: norm(what), why, key: `${k}:${norm(what)}`, ...(risk ? { risk } : {}) });
     }
   }
   for (const e of perms.effects || []) if (typeof e === "string") list.push({ kind: "effects", what: norm(e), why: null, key: `effects:${norm(e)}` });
@@ -151,17 +230,17 @@ export function permissionKeys(perms) {
 }
 
 // Что прибавилось и что ушло. → { added: [...], removed: [...] }
-export function diffPermissions(before, after) {
-  const a = permissionList(before);
-  const b = permissionList(after);
+export function diffPermissions(before, after, opts = {}) {
+  const a = permissionList(before, opts);
+  const b = permissionList(after, opts);
   const ka = new Set(a.map((p) => p.key));
   const kb = new Set(b.map((p) => p.key));
   return { added: b.filter((p) => !ka.has(p.key)), removed: a.filter((p) => !kb.has(p.key)) };
 }
 
 // Рост прав: ключи after, которых нет в granted.
-export function permissionGrowth(granted, after) {
-  return diffPermissions(granted, after).added;
+export function permissionGrowth(granted, after, opts = {}) {
+  return diffPermissions(granted, after, opts).added;
 }
 
 // Хеш набора прав (для привязки согласия к конкретному набору).
@@ -174,6 +253,8 @@ export function permissionsFingerprint(perms) {
 export function normalizePath(p) {
   let s = String(p).trim().replace(/\\/g, "/");
   s = s.replace(/^(?:\$HOME|\$\{HOME\}|%USERPROFILE%|%HOMEPATH%)(?=\/|$)/i, "~");
+  // firmlink macOS: /System/Volumes/Data/Users/<u>/… — тот же файл, что /Users/<u>/…
+  s = s.replace(/^\/System\/Volumes\/Data(?=\/)/i, "");
   s = s.replace(/^[A-Za-z]:\/Users\/[^/]+(?=\/|$)/i, "~");
   s = s.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
   s = s.replace(/\/{2,}/g, "/").replace(/\/\.(?=\/|$)/g, "");
@@ -202,7 +283,62 @@ function globToRe(glob) {
 }
 
 const isGlob = (s) => /[*?[{]/.test(s);
-const under = (p, tree) => p === tree || p.startsWith(tree + "/");
+// «/» охватывает всё (иначе префикс был бы «//»)
+const under = (p, tree) => p === tree || tree === "/" || p.startsWith(tree + "/");
+
+// Сегменты нормализованного пути: «/» → [""], «/a/b» → ["", "a", "b"], «~/x» → ["~", "x"].
+const segsOf = (p) => (p === "/" ? [""] : p.split("/"));
+// Любой каталог пользователя (/Users/<кто угодно>): литеральное имя normalizePath уже свёл к «~».
+const HOME_ANY = "\u0000";
+// Место в домашнем каталоге — ещё и в абсолютном виде (/Users/*/…, /home/*/…, c:/users/*/…): так маска
+// «/Users/*/.zshrc» и предки «/», «/Users» тоже охватывают «~/.zshrc».
+function placeSegs(place) {
+  const s = segsOf(place);
+  if (s[0] !== "~") return [s];
+  const rest = s.slice(1);
+  return [s, ["", "users", HOME_ANY, ...rest], ["", "home", HOME_ANY, ...rest], ["c:", "users", HOME_ANY, ...rest]];
+}
+// Сегмент пути или маски против сегмента места: true | false | "rest" («**» — дальше что угодно).
+function segHit(m, p) {
+  if (m.includes("**")) return "rest";
+  if (p === HOME_ANY) return m !== "" && isGlob(m);
+  if (!isGlob(m)) return m === p;
+  if (/[[{]/.test(m)) return true; // грубо, но в сторону охвата
+  return globToRe(m).test(p);
+}
+// Путь или маска доходит до места: лежит внутри него или им и является — "inside"; охватывает его как предок (в том
+// числе «/», «/Users», маска «~/Library/*») — "ancestor"; иначе null. Сравнение по сегментам: маска внутри опасного
+// каталога («~/Library/LaunchAgents/*.plist») и маска с подстановкой в середине («~/Library/*/*.plist») ловятся так же,
+// как буквальный путь.
+function reach(p, place) {
+  const ms = segsOf(p);
+  for (const ps of placeSegs(place)) {
+    const n = Math.min(ms.length, ps.length);
+    let ok = true;
+    let rest = false;
+    for (let i = 0; i < n; i++) {
+      const h = segHit(ms[i], ps[i]);
+      if (h === "rest") {
+        rest = true;
+        break;
+      }
+      if (!h) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return rest || ms.length >= ps.length ? "inside" : "ancestor";
+  }
+  return null;
+}
+// Буквальная часть пути: у маски — каталоги до первого сегмента с подстановкой («~/.claude/backups/x.*» →
+// «~/.claude/backups»), у пути — он сам.
+function literalDir(p) {
+  if (!isGlob(p)) return p;
+  const s = segsOf(p);
+  const i = s.findIndex((x) => isGlob(x));
+  return s.slice(0, i).join("/") || (p.startsWith("/") ? "/" : "");
+}
 
 // → null | причина
 export function pathViolation(raw) {
@@ -212,9 +348,12 @@ export function pathViolation(raw) {
   const glob = isGlob(p);
   const re = glob ? globToRe(p) : null;
   for (const tree of FORBIDDEN_TREES) {
-    if (under(p, tree)) return `запрещено: ${tree}`;
-    if (!glob && under(tree, p)) return `охватывает ${tree}`;
-    if (glob && [tree, tree + "/zz", tree + "/zz/zz.jsonl"].some((s) => re.test(s))) return `маска охватывает ${tree}`;
+    const r = reach(p, tree);
+    if (!glob && r === "inside") return `запрещено: ${tree}`;
+    // предок места, в том числе «/», «/Users» и «/System/Volumes/Data/Users/<u>»
+    if (!glob && r === "ancestor") return `охватывает ${tree}`;
+    // маска внутри запретного места (по сегментам) или ловит его образцы; маска короче места («~/*») — по образцам
+    if (glob && (r === "inside" || [tree, tree + "/zz", tree + "/zz/zz.jsonl"].some((s) => re.test(s)))) return `маска охватывает ${tree}`;
   }
   const last = p.split("/").pop();
   if (!isGlob(last) && FORBIDDEN_FILE_RE.some((r) => r.test(last))) return `запрещённый файл: ${last}`;
@@ -225,10 +364,92 @@ export function pathViolation(raw) {
     if (hit) return `маска ${last} ловит запрещённые файлы (${hit[0]})`;
   }
   for (const dir of KEY_DIRS) {
-    if (!glob && under(dir, p)) return `охватывает ${dir} (там *.key)`;
+    if (!glob && (p === dir || reach(p, dir) === "ancestor")) return `охватывает ${dir} (там *.key)`;
     if (glob && [dir + "/x.key", dir + "/zz/x.key"].some((s) => re.test(s))) return `маска в ${dir} ловит *.key`;
   }
   return null;
+}
+
+// ---------- места перехвата (контракт 3) ----------
+//
+// Запись сюда не запрещена (плагину настроек Claude Code она и нужна), но через эти места плагин может перехватить
+// Claude Code или систему: хуки, env, apiKeyHelper, права и MCP-серверы в настройках Claude; автозапуск; файлы запуска
+// оболочки; каталоги программ из PATH (подложить свой «claude»); ssh и git; каталог самого хаба. Окно согласия
+// показывает такое право громкой строкой с объяснением (по виду места), линтер реестра — предупреждением ревьюеру.
+// Вид → места (нормализованные, как normalizePath: ~/…, строчными). Место — файл или каталог (тогда и всё внутри).
+export const WRITE_RISKS = Object.freeze({
+  // весь ~/.claude (кроме WRITE_SAFE): кроме настроек и хуков там statusline-скрипты, ide/*.lock (подложный IDE и его
+  // MCP), local/claude (старая установка, её запускает псевдоним), shell-snapshots (их читает инструмент Bash) и т. п.
+  "claude-code": ["~/.claude", "~/.claude.json", "/library/application support/claudecode", "/etc/claude-code"],
+  autostart: ["~/library/launchagents", "~/library/launchdaemons", "/library/launchagents", "/library/launchdaemons", "/library/startupitems", "~/library/application support/com.apple.backgroundtaskmanagementagent", "/etc/crontab", "/etc/periodic", "/usr/lib/cron", "/var/at", "~/.config/autostart", "~/library/scripts", "~/library/workflows", "~/.hammerspoon", "~/.config/systemd/user", "~/appdata/roaming/microsoft/windows/start menu/programs/startup"],
+  shell: ["~/.zshrc", "~/.zshenv", "~/.zprofile", "~/.zlogin", "~/.zlogout", "~/.bashrc", "~/.bash_profile", "~/.bash_login", "~/.bash_logout", "~/.profile", "~/.config/fish", "~/.oh-my-zsh", "~/.zsh", "~/.config/zsh", "/etc/zshrc", "/etc/zshenv", "/etc/zprofile", "/etc/profile", "/etc/bashrc", "/etc/paths", "/etc/paths.d", "/etc/launchd.conf", "/etc/sudoers", "/etc/sudoers.d", "~/documents/powershell", "~/documents/windowspowershell"],
+  bin: ["~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin", "~/.local/share/claude", "~/.npm-global", "~/.bun/bin", "~/.cargo/bin", "/opt/homebrew/lib/node_modules", "/usr/local/lib/node_modules"],
+  // терминалы: команда запуска вкладки (ghostty command=, kitty, WezTerm, tmux) и привязка сессий к вкладкам, которой
+  // верит набор хаба во вкладки (~/.cmuxterm/claude-hook-sessions.json)
+  terminals: ["~/.cmuxterm", "~/.config/cmux", "~/.config/ghostty", "~/library/application support/com.mitchellh.ghostty", "~/.config/kitty", "~/.config/wezterm", "~/.wezterm.lua", "~/.tmux.conf", "~/.config/tmux"],
+  ssh: ["~/.ssh"],
+  git: ["~/.gitconfig", "~/.config/git", "~/.git-templates"],
+  hub: ["~/library/application support/agenthub"],
+});
+// Внутри опасного места, но не перехват: Claude Code этого не читает (метки прогонов агентов, копии настроек).
+const WRITE_SAFE = ["~/.claude/task-runs", "~/.claude/backups"];
+const HUB_DIR = "~/library/application support/agenthub";
+// Каталог настроек Claude Code в проекте (.claude целиком — хуки, команды, агенты, настройки) и .mcp.json: путь или
+// маска, нацеленные на них, где бы ни был проект.
+const PROJECT_CLAUDE_RE = /(?:^|\/)\.claude(?:\/|$)|(?:^|\/)\.mcp\.json$/;
+// Места этой машины, найденные по настоящим путям (setLocalWritePlaces): ~/.zshrc — ссылка в dotfiles и т. п.
+let localPlaces = [];
+
+// Демон на машине человека: настоящие пути опасных мест, если это ссылки ([{ place, kind }], place — как normalizePath).
+// Модуль сам к диску не ходит (его копирует реестр) — список собирает демон.
+export function setLocalWritePlaces(list) {
+  localPlaces = Array.isArray(list) ? list.filter((e) => e && typeof e.place === "string" && WRITE_RISKS[e.kind]).map((e) => ({ place: normalizePath(e.place), kind: e.kind })) : [];
+}
+
+// → вид места (ключ WRITE_RISKS) или null. Путь внутри места, путь-предок места («/», «/Users», «~», «~/.claude») и
+// маска, которая может дойти до места (по сегментам или по образцам), — всё перехват.
+// pluginId — свой плагин: его PluginData/<id> и Cache/<id> в каталоге хаба — не перехват. Без pluginId (или чужой
+// id, весь PluginData, файлы служб прямо в Cache — claude-sessions.json, usage.json) — перехват «hub».
+export function writeRisk(raw, { pluginId = null } = {}) {
+  const p = normalizePath(raw);
+  if (!p) return null;
+  const glob = isGlob(p);
+  const re = glob ? globToRe(p) : null;
+  const lit = literalDir(p);
+  // «..» уводит из безопасного подкаталога — исключения не действуют
+  const dotdot = p.split("/").includes("..");
+  const hits = (place) => Boolean(reach(p, place)) || (glob && [place, place + "/zz", place + "/zz/zz.json"].some((x) => re.test(x)));
+  const own = pluginId && ID_RE.test(pluginId) ? [`${HUB_DIR}/plugindata/${pluginId}`, `${HUB_DIR}/cache/${pluginId}`] : [];
+  const places = [...Object.entries(WRITE_RISKS).flatMap(([kind, list]) => list.map((place) => ({ place, kind }))), ...localPlaces];
+  for (const { place, kind } of places) {
+    if (!hits(place)) continue;
+    // безопасное внутри ~/.claude и своё в каталоге хаба — не перехват, если запись (буквальная часть маски) лежит в нём
+    if (!dotdot && kind === "claude-code" && WRITE_SAFE.some((safe) => under(lit, safe))) continue;
+    if (!dotdot && kind === "hub" && own.some((o) => under(lit, o))) continue;
+    return kind;
+  }
+  // .claude проекта (домашний ~/.claude — выше, с WRITE_SAFE)
+  if ((dotdot || !under(p, "~/.claude")) && PROJECT_CLAUDE_RE.test(glob ? p.replace(/[*?[\]{}]/g, "") : p)) return "claude-code";
+  return null;
+}
+
+// Тексты для линтера реестра (ревьюер) и окна в терминале — что даёт запись в такое место.
+export const WRITE_RISK_TEXT = Object.freeze({
+  "claude-code": ["настройки Claude Code: через хуки, env, apiKeyHelper, права, MCP-серверы, statusLine и команды плагин сможет запускать свои команды в каждой сессии, читать переписку и выдать себе разрешения", "Claude Code settings: through hooks, env, apiKeyHelper, permissions, MCP servers, statusLine and commands the plugin can run its own commands in every session, read conversations and grant itself permissions"],
+  autostart: ["автозапуск: плагин сможет поставить программу, которая будет запускаться при каждом входе — мимо хаба и окна согласия", "autostart: the plugin can install a program that runs at every login — bypassing the hub and the consent window"],
+  shell: ["файлы запуска оболочки: их команды выполняются в каждом новом терминале и в сессиях Claude Code (окружение, PATH, псевдонимы)", "shell startup files: their commands run in every new terminal and in Claude Code sessions (environment, PATH, aliases)"],
+  bin: ["каталог программ из PATH или глобальных пакетов npm: можно подложить свою программу под именем claude, git или node (или подменить сам Claude Code) — она запустится вместо настоящей", "a program folder on PATH or the global npm packages: a program named claude, git or node placed here (or a replaced Claude Code) runs instead of the real one"],
+  terminals: ["настройки терминала и привязка вкладок: команда, которую терминал запускает в каждой новой вкладке, и сведения, в какой вкладке какая сессия Claude Code (по ним хаб набирает во вкладки)", "terminal settings and tab bindings: the command a terminal runs in every new tab, and which tab holds which Claude Code session (the hub types into tabs by it)"],
+  ssh: ["SSH: можно добавить свой ключ доступа или перенаправить подключения", "SSH: the plugin can add its own access key or redirect connections"],
+  git: ["настройки git: хуки и псевдонимы git выполняют команды в каждом репозитории", "git settings: git hooks and aliases run commands in every repository"],
+  hub: ["каталог самого Agent Hub: настройки хаба, установленные плагины и закрепление приложения — так обходят проверки хаба", "Agent Hub's own folder: hub settings, installed plugins and the app pin — a way around the hub's checks"],
+  // не место на диске, а право <agenthub.terminal>send (контракт 3): тот же громкий показ
+  terminal: ["набор во вкладки Claude Code: плагин сможет вводить строки в ваши сессии от вашего имени — команды и запросы, которые Claude Code исполнит с вашими правами", "typing into Claude Code tabs: the plugin can enter lines into your sessions on your behalf — commands and prompts Claude Code will run with your permissions"],
+  "terminal-mode": ["режимы Claude Code во вкладках: строка с «!» — команда оболочки, которую Claude Code выполнит сразу, без своих разрешений; с «#» — запись в память, которую Claude Code будет читать в каждой сессии; с «&» — фоновая задача", "Claude Code modes in tabs: a line starting with \"!\" is a shell command Claude Code runs at once, without its own permissions; \"#\" writes to memory Claude Code reads in every session; \"&\" starts a background task"],
+});
+export function writeRiskText(kind, lang = "ru") {
+  const t = WRITE_RISK_TEXT[kind];
+  return t ? (lang === "en" ? t[1] : t[0]) : null;
 }
 
 // Токены команды exec, похожие на пути.
@@ -275,7 +496,7 @@ export function lintPlugin({ id, meta, source = "", official = false, local = fa
   if (!meta.platforms?.length) errors.push(L(lang, "нет <agenthub.platforms>", "no <agenthub.platforms>"));
   for (const pl of meta.platforms || []) if (!PLATFORMS.has(pl)) errors.push(L(lang, `неизвестная платформа «${pl}»`, `unknown platform "${pl}"`));
   for (const k of NEED_WHY) {
-    for (const e of perms[k]) if (!e.why) errors.push(L(lang, `<agenthub.${k}>${e.what}: нет пояснения «— зачем»`, `<agenthub.${k}>${e.what}: no "— why" explanation`));
+    for (const e of perms[k] || []) if (!e.why) errors.push(L(lang, `<agenthub.${k}>${e.what}: нет пояснения «— зачем»`, `<agenthub.${k}>${e.what}: no "— why" explanation`));
   }
   for (const k of ["fsRead", "fsWrite", "watch"]) {
     for (const e of perms[k]) {
@@ -324,6 +545,21 @@ export function lintPlugin({ id, meta, source = "", official = false, local = fa
       if (h && !netHosts.has(String(h).toLowerCase())) errors.push(L(lang, `<agenthub.connection id="${name}">: хост ${h} не объявлен в <agenthub.net>`, `<agenthub.connection id="${name}">: host ${h} isn't declared in <agenthub.net>`));
     }
     if (id && !connectionIdOk(id, c.id)) errors.push(L(lang, `<agenthub.connection id="${name}">: id подключения — id плагина или «${id}.<имя>» (имя: a-z, 0-9, «-», с буквы, до 32; целиком — с буквы, до 64)`, `<agenthub.connection id="${name}">: the connection id must be the plugin id or "${id}.<name>" (name: a-z, 0-9, "-", starting with a letter, up to 32; the whole id starts with a letter, up to 64)`));
+  }
+  // Терминал (контракт 3): только у официальных и своих (маршрут /terminal/* ядро даёт только builtin/official/own);
+  // запись — read-screen или send <слова>|*; набор во вкладку — предупреждение ревьюеру.
+  if (!official && (perms.terminal || []).length) errors.push(L(lang, "<agenthub.terminal>: терминал есть только у официальных и своих плагинов", "<agenthub.terminal>: only official and your own plugins may use the terminal"));
+  for (const e of perms.terminal || []) {
+    const t = parseTerminalPerm(e.what);
+    if (!t) errors.push(L(lang, `<agenthub.terminal>${e.what}: ждём «read-screen», «send /команда …» (slash-команда: «/», затем a-z, 0-9, «-»; до ${TERMINAL_WORDS_MAX}), «send ! # &» (знаки режимов) или «send *»`, `<agenthub.terminal>${e.what}: expected "read-screen", "send /command …" (a slash command: "/" then a-z, 0-9, "-"; up to ${TERMINAL_WORDS_MAX}), "send ! # &" (mode characters) or "send *"`));
+    else if (t.op === "send" && t.modes.length) warnings.push(L(lang, `<agenthub.terminal>${e.what}: ${writeRiskText("terminal-mode", "ru")}. Право нужно только плагину, который без этого не может; проверьте, что плагин набирает такие строки только по явному действию человека и показывает их текст в окне подтверждения`, `<agenthub.terminal>${e.what}: ${writeRiskText("terminal-mode", "en")}. Only a plugin that cannot do without it needs this; check the plugin types such lines only on an explicit action of the person and shows their text in the confirmation`));
+    else if (t.op === "send") warnings.push(L(lang, `<agenthub.terminal>${e.what}: ${writeRiskText("terminal", "ru")}. Проверьте, что плагин набирает только обещанное и только по действию человека или его настройке${t.any ? "; «send *» — любой запрос и любая slash-команда (кроме строк с «!», «#», «&» в начале — на них отдельное право «send !»)" : ""}`, `<agenthub.terminal>${e.what}: ${writeRiskText("terminal", "en")}. Check the plugin types only what it promises and only on the person's action or setting${t.any ? '; "send *" — any prompt and any slash command (except lines starting with "!", "#", "&" — those need the separate "send !" right)' : ""}`));
+  }
+  // Запись в места перехвата Claude Code и системы (контракт 3): допустимо, но ревьюер проверяет, что плагин пишет
+  // туда ровно то, что обещает (белый список ключей, копия до правки), — окно согласия покажет это громко.
+  for (const e of perms.fsWrite) {
+    const risk = writeRisk(e.what, { pluginId: id });
+    if (risk) warnings.push(L(lang, `<agenthub.fsWrite>${e.what}: место перехвата (${risk}) — ${writeRiskText(risk, "ru")}. Проверьте, что плагин пишет туда только обещанное; окно согласия показывает это право громкой строкой`, `<agenthub.fsWrite>${e.what}: a takeover location (${risk}) — ${writeRiskText(risk, "en")}. Check the plugin writes only what it promises there; the consent window shows this permission as a loud line`));
   }
   // Устаревшие виды push контракта 1: работают как свой переключатель плагина, но пора перейти на kind="plugin".
   for (const r of meta.push || []) {

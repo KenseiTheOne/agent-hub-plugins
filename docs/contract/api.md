@@ -1,5 +1,5 @@
-<!-- Копия из agent-hub, контракт v2. Не править: файл пишет node scripts/sync-vendor.mjs, --check ловит расхождение. -->
-> **Копия из agent-hub, контракт v2 — не править.** Источник: `docs/api.md`, разделы: «POST /actions/:id», «Подключения». Обновляет
+<!-- Копия из agent-hub, контракт v3. Не править: файл пишет node scripts/sync-vendor.mjs, --check ловит расхождение. -->
+> **Копия из agent-hub, контракт v3 — не править.** Источник: `docs/api.md`, разделы: «POST /actions/:id», «Подключения». Обновляет
 > `node scripts/sync-vendor.mjs` (рядом с agent-hub); `node scripts/sync-vendor.mjs --check` и CI ловят расхождение.
 > Пути и ссылки в тексте — от корня репозитория agent-hub. Нужна возможность, которой здесь нет, — запишите, что
 > нужно, и отдайте в сессию хаба (CLAUDE.md реестра).

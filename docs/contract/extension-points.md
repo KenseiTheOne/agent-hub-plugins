@@ -1,5 +1,5 @@
-<!-- Копия из agent-hub, контракт v2. Не править: файл пишет node scripts/sync-vendor.mjs, --check ловит расхождение. -->
-> **Копия из agent-hub, контракт v2 — не править.** Источник: `docs/extension-points.md` целиком. Обновляет
+<!-- Копия из agent-hub, контракт v3. Не править: файл пишет node scripts/sync-vendor.mjs, --check ловит расхождение. -->
+> **Копия из agent-hub, контракт v3 — не править.** Источник: `docs/extension-points.md` целиком. Обновляет
 > `node scripts/sync-vendor.mjs` (рядом с agent-hub); `node scripts/sync-vendor.mjs --check` и CI ловят расхождение.
 > Пути и ссылки в тексте — от корня репозитория agent-hub. Нужна возможность, которой здесь нет, — запишите, что
 > нужно, и отдайте в сессию хаба (CLAUDE.md реестра).
@@ -29,6 +29,8 @@
 - По умолчанию `~/Library/Application Support/AgentHub/`: `hub.sock`, `journal.jsonl`, `config.json`, `ESTOP`,
   `Plugins/`, `plugins.lock` (этап 8), `Registry/` (каталог реестра, карантин), `PluginData/<id>/`, `Cache/<id>/`,
   `Cache/usage.json` (квота подписки Claude от службы `usage`, 0600; формат — `docs/api.md`),
+  `Cache/claude-sessions.json` (метаданные живых сессий Claude Code от службы `sessions`, 0600; контракт 3, формат — ниже,
+  «Окружение плагина»),
   `logs/`, `push-state.json` (служба push), `launch/` (0700, промпты `session.launch`; брошенные старше 10 мин
   удаляет служба actions).
 - `AGENTHUB_HOME=<каталог>` — всё то же во временном каталоге (тесты, ручные проверки). Путь сокета ≤ 103 байт:
@@ -69,7 +71,7 @@
 | `sessions` | реестр сессий (ниже) |
 | `emit(event)` | событие в шину: `{type, ...}`; `type` — `[\w.:-]{1,64}`, для своих событий — с префиксом расширения (`push.sent`, `bridge.connected`). Добавляются `id`, `ts`, `source`. Уходит подписчикам `ctx.on` и в SSE `GET /events`. Только метаданные. |
 | `on(type, fn)`, `off(type, fn)` | подписка на шину; `type = "event"` — все события. Внутреннее событие ядра `app.peer` (`{connected, pid, startSec, path, alive?, count}` — соединение класса app открылось или закрылось; `alive` — жив ли процесс, `count` — сколько соединений app осталось) идёт только подписчикам `on("app.peer")`, в SSE и в `on("event")` — нет |
-| `estop()` | `true`, если хаб на паузе (есть файл `ESTOP`; в интерфейсе — «Пауза хаба») |
+| `estop()` | `true`, если хаб на паузе (есть файл `ESTOP`; в интерфейсе — «Пауза хаба»). Установка и снятие паузы перезапускают плагины (контракт 3: `AGENTHUB_PAUSED`, `AGENTHUB_REFRESH_REASON=Paused\|Resumed`) |
 | `lang()`, `t(key, params)` | действующий язык хаба (`ru` \| `en`, настройка — `<home>/settings.json`, `docs/api.md`) и сообщение ядра на нём (`daemon/lib/i18n.mjs`) |
 | `settings.get(key)` | настройка оболочки из `<home>/settings.json`, только чтение: `lang`, `checkPluginUpdates` (служба plugins — фоновая проверка обновлений), `checkHubUpdates` (служба hub-update), `launchAtLogin` (служба app — «Запускать при входе»). Пишет только app (`PUT /settings/*`); смена — событие `settings.changed` с этим ключом |
 | `exec(file, args, {timeoutMs, cwd, env})` | `Promise<{code, stdout, stderr, timedOut?}>` через `execFile` (без shell); в тестовом режиме — запись в `AGENTHUB_TEST_EXEC_LOG` |
@@ -77,7 +79,7 @@
 | `refreshPlugin(pluginId, reason)` | перезапуск standard / `{"type":"refresh"}` streamable |
 | `rescanPlugins()` | пересканировать каталоги плагинов сейчас и пересмотреть политику уже запущенных (после установки, удаления, blocklist). Хост и сам пересканирует раз в `plugins.rescanIntervalMs` (60 с): fs.watch теряет события |
 | `onHook(handler)` | регистрирует обработчик `POST /hook` (этап 6): `handler(body, {peer, signal})`, `signal` — `AbortSignal` обрыва соединения хука; возвращает функцию снятия. Обработчики зовутся по порядку; первый, вернувший не `undefined`/`null`, задаёт ответ хуку. Нет обработчика, ESTOP или ошибка → `{}`; на паузе хаба обработчики зовутся только для `SessionStart`, `SessionEnd`, `Stop` (ответ — `{}`) |
-| `providePluginEnv(name, value)` | служба даёт **доверенным** плагинам (`builtin` и `official` — по политике ядра, не по метаданным) переменную окружения: `AGENTHUB_<ИМЯ>` (не `AGENTHUB_SECRET_*` и не занятые ядром: `AGENTHUB_PLUGIN_ID`, `…_DATA_PATH`, `…_CACHE_PATH`, `AGENTHUB_REFRESH_REASON`, `AGENTHUB_LANG`); `value: null` — снять. Значение — не секрет (путь к своему кэшу и т.п.). Уже запущенные плагины увидят её со следующего запуска; службы стартуют до плагинов. Сейчас: `AGENTHUB_USAGE_FILE` (служба `usage`), `AGENTHUB_HUB_SOCKET` (служба `oauth`: путь к сокету хаба — так плагин зовёт `POST /connections/:id/mcp`) |
+| `providePluginEnv(name, value)` | служба даёт **доверенным** плагинам (`builtin` и `official` — по политике ядра, не по метаданным) переменную окружения: `AGENTHUB_<ИМЯ>` (не `AGENTHUB_SECRET_*` и не занятые ядром: `AGENTHUB_PLUGIN_ID`, `…_DATA_PATH`, `…_CACHE_PATH`, `AGENTHUB_REFRESH_REASON`, `AGENTHUB_LANG`, `AGENTHUB_PAUSED`); `value: null` — снять. Значение — не секрет (путь к своему кэшу и т.п.). Уже запущенные плагины увидят её со следующего запуска; службы стартуют до плагинов. Сейчас: `AGENTHUB_USAGE_FILE` (служба `usage`), `AGENTHUB_HUB_SOCKET` (путь к сокету хаба: с контракта 3 ядро даёт её доверенным плагинам всегда, не только при службе `oauth` — так плагин зовёт `POST /connections/:id/mcp` и `/terminal/*`), `AGENTHUB_CLAUDE_SESSIONS_FILE` (служба `sessions`, контракт 3: метаданные живых сессий Claude Code) |
 | `registerSecretsProvider(fn)` | `fn(pluginId, key, plugin) → Promise<string|undefined>`; ядро зовёт его для каждого `<agenthub.secrets>` плагина и кладёт значение в окружение как `AGENTHUB_SECRET_<KEY>` (`example.token` → `AGENTHUB_SECRET_EXAMPLE_TOKEN`). Один провайдер на демон; сейчас его ставит служба `secrets` (связка ключей, `agent-hub.<служба>` / `<запись>`; встроенным — любые ключи кроме `telegram.*` и `oauth.*`, установленным — только `<id>.*` (и не `oauth.*`, даже у плагина с id `oauth`), `Plugins/local` — ничего; в тестовом режиме связка не читается). Та же служба даёт другим службам факт `secrets.store` — `get/set/delete` записей `agent-hub.oauth` / `<подключение>.client|token` (JSON; запись через stdin `security -i`, не argv): так служба `oauth` хранит регистрацию клиента и токены |
 | `setPluginPolicy(fn)` | этап 8: `fn(plugin, defaults) → {allowed, reason?, effects?, tier?}`; `tier: "official"` уважается только у `installed` (служба plugins даёт его, только если проверенный каталог сейчас называет id official, sha256 из `plugins.lock` подписан как официальный — текущим каталогом или сохранённым прежним индексом `Registry/attest/<id>` (вышедшая новая версия не понижает установленную до обновления), а файлы — с сохранённым архивом `Registry/archives/<id>.tar.gz`); ядро всё равно режет effects не встроенных до потолка и запрещает `<agenthub.action>` всем, кроме `builtin` и `official`. Политики нет (служба plugins выключена, не в `AGENTHUB_SERVICES` или упала на старте) — установленные (`Plugins/<id>`) не допускаются (`policy:no-manager` в журнале); встроенные и локальные работают как обычно |
 | `invoke({id, args, confirmToken, peer})` | вызвать действие так же, как `POST /actions/:id`. `peer` передаётся как есть — передавайте только настоящий `peer` из обработчика маршрута |
@@ -104,7 +106,7 @@
 (`com.anthropic.claude-code`, Team ID `Q6L2SF6YDW`). Шим cmux и подброшенный `~/.claude/sessions/<pid>.json`
 с чужим pid проверку не проходят.
 
-- `register(sessionId, {pid, source, status?, waitingFor?, name?, interactive?, surfaceId?, workspaceId?})` →
+- `register(sessionId, {pid, source, status?, waitingFor?, name?, interactive?, surfaceId?, workspaceId?, effort?, ultracode?, model?, modelSource?, effortSource?, metaAt?})` →
   `Promise<{verified, reason?}>`. `source` — откуда сведения (`plugin:<id>`, `hook`). Не прошедшая проверку
   сессия в реестр не попадает.
 - `unregister(sessionId, source)` — снять источник; запись удаляется, когда источников не осталось.
@@ -161,8 +163,10 @@ export async function run(args, ctx) {       // ctx + ctx.requester (peer) + ctx
   действия их плагинов (ниже, «Действия плагина»).
 - Уровень не `immediate` — только от `app` и только с подтверждением (см. `docs/api.md`, 428).
 - На паузе хаба (estop) работают лишь примитивы с `safeUnderEstop: true` (сейчас `open.url`, `open.file`); остальное — 423.
-- Сторонний плагин может предложить только `open.*` и `cmux.focus` (`Plugins/local` — только `open.*`),
-  что бы ни стояло в его `<agenthub.effects>`.
+- Сторонний плагин может предложить только `open.*`, `session.focus` и `cmux.focus` (`Plugins/local` — только `open.*`),
+  что бы ни стояло в его `<agenthub.effects>`. **Новым плагинам — `session.focus <sessionId>`** (контракт 3): вкладку
+  сессии находит слой терминалов ядра, плагину не нужно знать терминал и читать его файлы. `cmux.focus <surfaceId>`
+  оставлен для совместимости с уже установленными плагинами.
 - `verifyFacts` зовётся перед каждым запуском — и для предложений плагинов, и для прямых вызовов из приложения.
 
 ## Маршрут (`daemon/lib/routes/<имя>.mjs`)
@@ -202,10 +206,11 @@ export async function stop(ctx) { ... }      // снять подписки и �
   запуск при старте демона, лимит 3 за 10 мин, `services.app.supervise: false` — выключить; в тестовом режиме
   настоящее приложение не запускается — только двойник `services.app.test.launch`, таблица процессов —
   `services.app.test.processes`; `docs/api.md`, раздел «Надзор за приложением»), `actions` (мост cmux, `bridge.online`/`bridge.channel`, состояние моста — в `/state.bridge`),
-  `hook`, `oauth` (подключения к внешним сервисам по OAuth 2.1 и вызовы их MCP за доверенные плагины — какие именно,
+  `hook`, `sessions` (контракт 3: реестр сессий → `Cache/claude-sessions.json`, переменная `AGENTHUB_CLAUDE_SESSIONS_FILE`
+  доверенным плагинам; только метаданные, не чаще раза в 2 с; `services.sessions.enabled: false` — выключить), `oauth` (подключения к внешним сервисам по OAuth 2.1 и вызовы их MCP за доверенные плагины — какие именно,
   объявляют сами плагины тегом `<agenthub.connection>`, ниже; `docs/api.md` «Подключения»; сеть — только хосты
   объявленного подключения и временный приёмник кода на 127.0.0.1; токены — только в связке через `secrets.store`; в
-  тестовом режиме — двойники `services.oauth.<id>.resource` на 127.0.0.1 и `services.secrets.securityPath`), `plugins` (реестр), `push`, `secrets`, `usage` (квота подписки Claude → `Cache/usage.json`, переменная
+  тестовом режиме — двойники `services.oauth.<id>.resource` на 127.0.0.1 и `services.secrets.securityPath`), `plugins` (реестр), `push`, `secrets`, `terminal` (контракт 3: «прочитать экран вкладки» и «набрать строку во вкладку» сессии Claude Code для доверенных плагинов с правом `<agenthub.terminal>`, маршруты `/terminal/*`, факт `terminal.api`; слой терминалов `lib/terminals/` — адаптер на терминал, сейчас cmux через мост; `services.terminal` — частоты), `usage` (квота подписки Claude → `Cache/usage.json`, переменная
   `AGENTHUB_USAGE_FILE` доверенным плагинам; сеть — только `api.anthropic.com`; токен Claude Code не покидает службу:
   ни на диск, ни в журнал, ни в шину, ни плагинам; истёкший не обновляется. В тестовом режиме — только двойники:
   `services.usage.securityPath`, `services.usage.credentialsFile`, `services.usage.url` на 127.0.0.1/localhost;
@@ -223,7 +228,7 @@ export async function stop(ctx) { ... }      // снять подписки и �
 **Метаданные** — теги `<agenthub.X>…</agenthub.X>` в первых 64 КБ файла (у бинарника — xattr
 `com.kensei.agenthub.meta`, текст или base64): `title`, `version`, `desc`, `author.*`, `type`
 (`standard|streamable`), `schedule` (cron, 5 полей), `platforms` (`macos,windows`), повторяемые `watch`, `fsRead`,
-`fsWrite`, `exec`, `secrets`, `net` (запись «что — зачем»), `effects` (через запятую, `open.*` допустимо),
+`fsWrite`, `exec`, `secrets`, `net`, `terminal` (контракт 3) (запись «что — зачем»), `effects` (через запятую, `open.*` допустимо),
 `<agenthub.action id="…" level="immediate|confirm|confirm-cost" title="…" cost="…" arg="имя:^шаблон$">команда</agenthub.action>`
 (без `level` — `confirm`), `<agenthub.push key="…" …>Ярлык</agenthub.push>` (правила push, `daemon/lib/push/README.md`),
 `<agenthub.requires name="Tool" url="https://…" check="~/.tool">зачем</agenthub.requires>` (09.11, до 8) — зависимость:
@@ -274,6 +279,149 @@ export async function stop(ctx) { ... }      // снять подписки и �
 - `<agenthub.push … kind="plugin" was="runs|night">` — свой переключатель уведомлений плагина (ниже, «Ключи `event=`»).
 - `message=<текст>` в выводе действия — объяснение отказа (ниже, «Действия плагина»).
 
+**Контракт 3 (10.11): сессии, пауза, терминал, громкие права.** Объявляйте `<agenthub.contract>3</agenthub.contract>`, если плагин
+без этого не работает (хаб старше скажет «нужен хаб новее»); плагин, который умеет жить и без них, может объявить 2 и
+проверять переменные сам.
+
+- **Метаданные живых сессий Claude Code** — `AGENTHUB_CLAUDE_SESSIONS_FILE` (только `builtin`, `official`, `own`; служба
+  ядра `sessions`). Путь к `<home>/Cache/claude-sessions.json` (0600, атомарная запись, по событию `sessions` шины, не чаще
+  раза в 2 с и только при изменении):
+
+  ```json
+  { "version": 1, "updatedAt": "2026-11-10T12:00:00.000Z",
+    "sessions": [{ "sessionId": "<uuid>", "pid": 12345, "verified": true, "status": "idle | busy | waiting | null",
+                   "model": "claude-opus-5-5", "modelId": "claude-opus-5-5 | null", "modelSource": "turn | command | null",
+                   "effort": "low | medium | high | xhigh | max | null", "effortSource": "turn | command | null",
+                   "ultracode": false, "surfaceId": "<вкладка cmux | null>", "workspaceId": "<workspace cmux | null>",
+                   "name": "<имя сессии или вкладки | null>", "at": "<время записи транскрипта, из которой взяты model/effort | null>" }] }
+  ```
+
+  Только метаданные: ни текста переписки, ни папки, ни того, чего ждёт сессия, ни автозаголовка сессии (`name` —
+  `null`, если имя — заголовок, который Claude Code составил по переписке: `nameSource: auto` в
+  `~/.claude/sessions/<pid>.json`, параметр строки `sessionNameSource=`). Источник — реестр сессий ядра (туда пишут
+  только доверенные плагины строками `session=… pid=…` с подписью, проверенной ядром); модель и effort в него приносит
+  встроенный плагин сессий параметрами `sessionModel=`, `sessionEffort=`, `sessionModelSource=`, `sessionEffortSource=`,
+  `sessionAt=` — он сам читает хвост транскрипта (`~/.claude/projects` — запретное место для плагинов реестра).
+  `model` — `message.model` (или `requestedModel`) последней записи `assistant`, а если после неё в транскрипте вывод
+  `/model` («Set model to `<x>`…» или «Kept model as `<x>`»; запись `user` со строкой или `system`/`local_command`) —
+  `<x>`. **При `modelSource: "command"` это отображаемое название, а не id**: `Opus 5.5 (default)`, `Fable 5.2`,
+  `Sonnet 4.5 [1m]`; при `"turn"` — id (`claude-opus-5-5`). Сравнивайте по семейству и версии (без `(default)` и
+  регистра) или ждите следующего хода — тогда снова id. **`modelId` — всегда id**: при `"turn"` — сам `model`, при
+  `"command"` — нормализованное название: скобки-пометки меню отбрасываются, «<Семейство> <версия>» (Opus, Sonnet,
+  Haiku, Fable) → `claude-<семейство>-<версия через дефис>` (`Opus 5.5 (default)` → `claude-opus-5-5`, `Fable 5.2` →
+  `claude-fable-5-2`, `Sonnet 4.5 (1M context)` → `claude-sonnet-4-5`); id в названии (`claude-opus-5-5`) — как есть;
+  не узнали (`Default (recommended)`, незнакомое семейство) — `null`. Пометка контекста (`[1m]`) остаётся только в
+  `model` из хода. `effort` — `perTurnEffort ?? effort` последнего хода, а если
+  после него вывод `/effort` («Set effort level to <уровень> …») — этот уровень. **Команда важнее хода**
+  (`…Source: "command"`): у простаивающей сессии ход мог быть до команды. `at` — время записи, из которой взяты модель и
+  effort (самой свежей из двух): плагин сравнивает его со временем своего последнего набора в эту вкладку и показывает
+  более свежее (запись команды новее вашего набора — это результат набора, повторять не нужно). `verified` — подпись
+  `requirements.claudeCode` проверена ядром при записи файла (процесс жив, pid не занят другим); при `false` в сессию не
+  набирают. Право — `<agenthub.fsRead>$AGENTHUB_CLAUDE_SESSIONS_FILE — зачем</agenthub.fsRead>`; запуск сразу после
+  записи — `<agenthub.watch>$AGENTHUB_CLAUDE_SESSIONS_FILE — зачем</agenthub.watch>`. Нет переменной — хаб старше или служба
+  выключена (`services.sessions.enabled: false`).
+- **Переход во вкладку сессии** — эффект `session.focus <sessionId>` (UUID, позиционный, как у `session.interrupt`):
+  `<agenthub.effects>open.url,session.focus</agenthub.effects>`, строка `Перейти | effect="session.focus <uuid>"`.
+  Уровень «сразу» (без подтверждения), доступен и сторонним плагинам (безвредный потолок, как `open.*`), не с удалённых
+  каналов. Вкладку по реестру сессий ядра находит слой терминалов (`lib/terminals/`, `locate`), переходит адаптер
+  терминала (операция `focus`; у cmux — операция моста `surface.focus`). Отказы — 409 `facts:<код>`: `unknown-session`
+  (сессии нет в реестре), `no-terminal` (ни один адаптер не знает её вкладку), `pid-mismatch` (вкладка за другим
+  процессом), `focus-unsupported` (адаптер не умеет переходить), код недоступного адаптера (`bridge-offline`); сбой
+  самого перехода — `200 {ok: false, result: {error}}`. Описание действия — «Перейти во вкладку «<имя сессии>»» (иначе по
+  началу `sessionId`). `sessionId` плагин знает из `$AGENTHUB_CLAUDE_SESSIONS_FILE` или `~/.claude/sessions/*.json`.
+  В `/state.sessions[]` ядро отдаёт `terminal` (адаптер, нашедший вкладку, или `null`) и `focusable` (вкладка найдена и
+  адаптер умеет в неё перейти) — по ним оболочка рисует кнопку «Перейти».
+- **Признак паузы хаба** — `AGENTHUB_PAUSED=1|0` в окружении **каждого** запуска (и действия), любого уровня плагина:
+  `1`, пока есть `ESTOP` («Пауза хаба»), иначе `0`. Передаётся всегда: по явному `0` плагин узнаёт, что хаб достаточно
+  новый и фоновую работу делать можно (хаб старше переменную не передаёт — тогда фоновую работу лучше не делать).
+  Установка и снятие паузы (маршрутом `/estop`, `agenthub pause` или файлом) перезапускают плагины, как смена языка:
+  streamable — заново, интервальные — вне очереди, с `AGENTHUB_REFRESH_REASON=Paused|Resumed`. Действия на паузе ядро
+  и так не пускает (423); переменная — для отложенной работы самого плагина.
+- **Терминал: прочитать экран вкладки и набрать строку во вкладку** сессии Claude Code — право
+  `<agenthub.terminal>` (только `builtin`, `official`, `own`; у плагина сообщества — ошибка линтера, ядро откажет
+  `terminal:untrusted`). Записи:
+  - `<agenthub.terminal>read-screen — зачем</agenthub.terminal>` — узнать, пусто ли поле ввода и свободна ли сессия
+    (текст экрана плагин не получает);
+  - `<agenthub.terminal>send /model /effort — зачем</agenthub.terminal>` — набрать **slash-команду** и Enter: первое
+    слово строки — одна из перечисленных (`/`, затем a-z, 0-9, `-`, до 32 знаков; до 16 команд), дальше — не больше 3
+    аргументов из `[A-Za-z0-9._:[]-]` до 64 знаков (`/model claude-opus-5-5[1m]`, `/effort xhigh`). Слово без `/`
+    правом не бывает: оно разрешало бы любой запрос агенту, начинающийся с этого слова;
+  - `<agenthub.terminal>send * — зачем</agenthub.terminal>` — любой запрос и любая slash-команда, **кроме строк с
+    `!`, `#`, `&` в начале** (режимы Claude Code: `!` — команда оболочки сразу, без разрешений Claude Code и мимо
+    `<agenthub.exec>` плагина; `#` — запись в память; `&` — фоновая задача): на них нужно отдельное право;
+  - `<agenthub.terminal>send ! — зачем</agenthub.terminal>` — строки, начинающиеся с объявленного знака режима (`!`, `#`,
+    `&`; можно несколько: `send ! #`; вместе со slash-командами: `send /model !`). Отдельное право (10.11): `send *`
+    его не даёт. В окне согласия — самая громкая строка (`risk: "terminal-mode"`: «команда оболочки сразу, без
+    разрешений Claude Code»), линтер — предупреждение ревьюеру. Нужно только плагину, который без этого не может.
+
+  Набор — громкий: в окне согласия красная строка «Набор в сессии Claude Code…» (`risk: "terminal"`; у `send *` — прямо
+  «любые запросы и slash-команды»), линтер реестра — предупреждение ревьюеру; расширение списка команд — рост прав
+  (снова окно согласия). Звать — HTTP на сокет хаба `$AGENTHUB_HUB_SOCKET` **из процесса самого плагина**: идущий
+  интервальный запуск, процесс streamable или **идущее действие** (`<agenthub.action>`, его запускает человек). Ядро
+  узнаёт плагин по pid собеседника на сокете: потомок вроде `curl` получит `403 terminal:not-a-plugin`. У действия
+  бюджет — `actionTimeoutMs` (30 с), у интервального запуска — `standardTimeoutMs` (5 с): набор с проверками занимает
+  ~0,5–1 с, но ждать ответа можно до 20 с (мост, cmux).
+
+  | Маршрут | Тело | Ответ 200 |
+  |---|---|---|
+  | `POST /terminal/read-screen` | `{sessionId, lines?}` (`lines` 1…30 — сколько последних строк экрана смотреть) | `{ok, sessionId, terminal, idle, foreground, promptFound, promptEmpty, busy, ready}` |
+  | `POST /terminal/send-text` | `{sessionId, text}` | `{ok, sessionId, terminal}` |
+
+  `idle` — сессия свободна: по реестру (свой статус Claude Code — `idle`; `busy`/`waiting` — нет), а без статуса — по
+  терминалу (cmux: `agentLifecycle: idle`); после Esc посреди хода cmux остаётся в `running`, реестр — нет, решает
+  реестр. `foreground` — процесс Claude Code не остановлен (Ctrl+Z) и в группе переднего плана своего терминала (иначе
+  строку получила бы оболочка). `promptFound`, `promptEmpty`, `busy` — поле ввода по видимому экрану (`busy` — «esc to
+  interrupt» вне поля); `promptEmpty: null` — поля нет. `ready` = `idle && foreground && promptFound && promptEmpty &&
+  !busy` — можно набирать прямо сейчас (`send-text` всё равно проверит заново). Строка — печатные ASCII без `\`, без
+  пробела по краям, 1…200 знаков: ни управляющих символов, ни перевода строки (Enter жмёт хаб одной клавишей после
+  проверки поля). Порядок проверок `send-text`: процесс плагина и право; частота запросов; пауза (423); строка и её
+  право; сессия в реестре, подпись Claude Code проверена сейчас, pid и время старта те же; вкладка известна терминалу и
+  записана за тем же pid и временем старта; сессия свободна; процесс на переднем плане; частота наборов; затем мост:
+  поле найдено, пусто, ход не идёт → набор → в поле ровно эта строка → Enter (не позже срока: демон ждёт ответа
+  ~20 с, после срока Enter не жмётся — `504 terminal:deadline`). Частота — `services.terminal` (`requestsPerMin` 60 на
+  плагин, `sendPerMin` 12 на плагин, `sendPerTabPerMin` 4 на вкладку; в счёт идёт каждая попытка, дошедшая до
+  терминала).
+
+  Ошибки: `400 terminal:bad-text`, `args:*`; `403 terminal:not-a-plugin | untrusted | not-declared |
+  text-not-declared`; `409 terminal:unknown-session | unverified | no-tab | pid-mismatch | session-busy |
+  not-foreground | process-unknown | prompt-not-found | prompt-not-empty | prompt-mismatch | bridge-offline`; `423
+  estop`; `429 terminal:rate-limited` (`scope: requests|plugin|tab`, `retryAfterMs`); `501 terminal:bridge-outdated`;
+  `502 terminal:cmux-failed`, `504 terminal:bridge-timeout | bridge-pickup-timeout | cmux-timeout | deadline` — сбой
+  моста или терминала; `503 terminal:disabled` — служба выключена. Что делать плагину:
+  - `prompt-not-empty` — в поле черновик человека **или** бледный текст: плейсхолдер свежей сессии (`Try "…"`) и
+    подсказка следующего запроса Claude Code на текстовом экране неотличимы от набранного (cmux отдаёт экран без
+    цветов). Хаб в такое поле не набирает; покажите «очистите поле ввода» или подождите.
+  - `prompt-mismatch` — строку набрали, но перед Enter в поле оказалось не ровно она (человек печатал одновременно).
+    **Enter не нажат, но набранное осталось в поле**, следующий Enter человека отправит смесь. Не повторяйте
+    автоматически: покажите человеку, что в поле осталась строка.
+  - `prompt-not-found` — поле ввода не найдено (диалог разрешения, другой экран); `session-busy`, `not-foreground` —
+    подождите следующего кадра; `unverified`, `pid-mismatch` — в эту сессию не набирайте.
+  - `bridge-timeout`, `cmux-timeout`, `deadline` — исход неизвестен до конца: Enter после срока мост не жмёт, а поздний
+    ответ моста ядро пишет в журнал (`bridge-op-late`). Сверьтесь с `claude-sessions.json` (`at` и `…Source: command`),
+    прежде чем повторять.
+
+  Распознавание поля ввода проверено на синтетических экранах Claude Code 2.1.3xx (линия `─` сверху и снизу, `>` или
+  `❯`, рамка `│` старого вида); на живой вкладке — ещё нет. Журнал хаба — каждая отправка (`terminal-send`: плагин,
+  сессия, вкладка, терминал, длина, `head` — объявленная slash-команда в начале строки, `sha` — первые 12 знаков sha256,
+  только вместе с `head`; у строк по праву `*` оба `null`; **строки целиком нет**; дублируется в журнал аудита) и каждый
+  отказ (`terminal-denied`). Терминал за этим — слой адаптеров ядра (`daemon/lib/terminals/`): сейчас cmux (через мост
+  в закреплённой вкладке, `bridge/README.md`); tmux, kitty, WezTerm, iTerm2 добавятся адаптером, контракт плагина не
+  изменится. Пауза: `AGENTHUB_PAUSED=1` — не зовите вовсе.
+- **Запись в места перехвата — громко.** `<agenthub.fsWrite>` в места, через которые перехватывают Claude Code или
+  систему, допустима, но окно согласия показывает такое право первым, красной строкой «Место перехвата…» с объяснением,
+  что это даёт, а линтер реестра — предупреждением ревьюеру. Места (`WRITE_RISKS` в `lib/registry/perms.mjs`):
+  `claude-code` — **весь `~/.claude`** (кроме `~/.claude/task-runs` и `~/.claude/backups`), `~/.claude.json`, каталог
+  `.claude` и `.mcp.json` любого проекта, управляемые настройки; `autostart` — LaunchAgents/LaunchDaemons, cron,
+  `~/.config/autostart`, systemd user, Hammerspoon, папка автозагрузки Windows; `shell` — `~/.zshrc` и прочие файлы
+  запуска оболочки, `/etc/paths`, sudoers, профиль PowerShell; `bin` — каталоги программ из PATH и глобальные пакеты npm;
+  `terminals` — `~/.cmuxterm` (привязка сессий к вкладкам, которой верит набор хаба), конфиги cmux, ghostty, kitty,
+  WezTerm, tmux; `ssh`; `git`; `hub` — каталог хаба, кроме своих `PluginData/<id>` и `Cache/<id>` (весь `PluginData`,
+  чужой id и файлы служб прямо в `Cache` — `claude-sessions.json`, `usage.json` — громко). Охват считается по
+  сегментам пути: путь внутри места, предок места (в том числе `/`, `/Users`, `/System/Volumes/Data/Users/<u>`) и маска,
+  которая может до него дойти (`~/Library/LaunchAgents/*.plist`, `~/Library/*/*.plist`, `/Users/*/.zshrc`), — громко; `..`
+  снимает исключения. На машине человека демон добавляет настоящие пути мест-ссылок (`~/.zshrc` → dotfiles,
+  `local-places.mjs`). Вид места — поле `risk` у права; в ключ права оно не входит (рост прав считается как раньше).
+  Пишите туда только то, что обещает «зачем», и держите белый список ключей, копию до правки и атомарную запись.
 **Язык (UI-проход 05.11).** Ядро передаёт плагину `AGENTHUB_LANG=ru|en` (действующий язык хаба; `LANG` остаётся
 `en_US.UTF-8`) и при смене языка перезапускает streamable и вне очереди запускает интервальные. Плагин без
 перевода показывается как есть. Переводы метаданных: повтор тега с `lang="xx"` — `<agenthub.title lang="en">Quota</agenthub.title>`,
@@ -298,7 +446,7 @@ export async function stop(ctx) { ... }      // снять подписки и �
 lock сама по себе уровня не даёт), `local` (`Plugins/local`). Метаданные плагина на уровень не влияют (тег `<agenthub.tier>` —
 просто неизвестный тег). `trusted` = `builtin`, `official` или `own` (`trustedPlugin` в `core.mjs`): только им ядро даёт
 `<agenthub.action>` (у `own` — как у официального: без сети и без цены — объявленный уровень, в том числе `immediate`),
-правила push, переменные служб (`AGENTHUB_USAGE_FILE`, `AGENTHUB_HUB_SOCKET`, `$ПЕРЕМЕННАЯ` в `<agenthub.watch>`), запись в
+правила push, переменные служб (`AGENTHUB_USAGE_FILE`, `AGENTHUB_HUB_SOCKET`, `AGENTHUB_CLAUDE_SESSIONS_FILE`, `$ПЕРЕМЕННАЯ` в `<agenthub.watch>` и `<agenthub.fsRead>`), запись в
 реестр сессий и вызовы MCP через хаб.
 
 **Действия плагина.** Только у `builtin`, `official` и `own`. У не встроенных — только из приложения (класс `app`, при
@@ -329,14 +477,18 @@ lock сама по себе уровня не даёт), `local` (`Plugins/local
 
 **Окружение плагина:** `HOME`, `PATH` (как у агентов под launchd: `~/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`),
 `TMPDIR`, `LANG`, `USER`, `AGENTHUB_PLUGIN_ID`, `AGENTHUB_PLUGIN_DATA_PATH`, `AGENTHUB_PLUGIN_CACHE_PATH`,
-`AGENTHUB_LANG` (`ru|en` — язык интерфейса хаба), `AGENTHUB_REFRESH_REASON` (`FirstLaunch|Schedule|FileChanged|MenuAction|Manual|LanguageChanged`), `OS_PLATFORM`,
+`AGENTHUB_LANG` (`ru|en` — язык интерфейса хаба), `AGENTHUB_REFRESH_REASON` (`FirstLaunch|Schedule|FileChanged|MenuAction|Manual|LanguageChanged|Paused|Resumed`),
+`AGENTHUB_PAUSED` (контракт 3: `1` — хаб на паузе, `0` — нет; передаётся всегда, ниже), `OS_PLATFORM`,
 `OS_VERSION_MAJOR|MINOR|PATCH`, `OS_APPEARANCE`, `OS_LAST_SLEEP_TIME`, `OS_LAST_WAKE_TIME` (ISO),
 `AGENTHUB_SECRET_*` для объявленных секретов; **только встроенным, официальным и своим** — переменные служб ядра
 (`ctx.providePluginEnv`): `AGENTHUB_USAGE_FILE` — путь к кэшу квоты хаба `<home>/Cache/usage.json` (служба `usage`;
 нет переменной — служба выключена `services.usage.enabled = false`: плагин показывает «квота недоступна» и сам файл не
 ищет; право объявляется как `<agenthub.fsRead>$AGENTHUB_USAGE_FILE — зачем</agenthub.fsRead>`); `AGENTHUB_HUB_SOCKET` —
-сокет хаба (служба `oauth`): плагин зовёт `POST /connections/<id>/mcp` и получает результат инструмента MCP без токена
-(ядро сверяет pid процесса, доверие и объявленный `<agenthub.net>` с хостом сервиса; частоту и лимит держит ядро). На Windows ещё `USERPROFILE` (= `HOME`: `os.homedir()` там читает
+сокет хаба (контракт 3: всегда; раньше — только при службе `oauth`): плагин зовёт `POST /connections/<id>/mcp` и
+получает результат инструмента MCP без токена (ядро сверяет pid процесса, доверие и объявленный `<agenthub.net>` с
+хостом сервиса; частоту и лимит держит ядро), а с правом `<agenthub.terminal>` — `POST /terminal/read-screen|send-text`;
+`AGENTHUB_CLAUDE_SESSIONS_FILE` (контракт 3) — путь к `<home>/Cache/claude-sessions.json` (служба `sessions`; нет
+переменной — хаб старше или служба выключена: плагин живёт без этих данных). На Windows ещё `USERPROFILE` (= `HOME`: `os.homedir()` там читает
 его) и системные `SystemRoot`, `windir`, `COMSPEC`, `PATHEXT`, `TEMP`, `TMP`. Больше ничего (нет `NODE_OPTIONS`).
 
 **Вывод:** шапка до первого `---`, тело после; `Заголовок | k=v k2="v 2"` (разделитель — последний `|`, справа
@@ -356,6 +508,7 @@ lock сама по себе уровня не даёт), `local` (`Plugins/local
 | `session=<sessionId> pid=<pid>` | строка о сессии Claude Code: ядро проверяет подпись pid и пишет в элемент `session: {id, pid, verified, label?}` (`verified: false` → `label` на языке хаба: «подпись не подтверждена», «подпись не проверить: Claude Code обновился»); прошедшие — в реестр, но только от builtin, official и own (community и local реестр сессий не меняют) |
 | `sessionStatus=busy\|waiting\|idle`, `waitingFor=…`, `sessionName=…`, `sessionCwd=…`, `surfaceId=…`, `workspaceId=…` | сведения о сессии для реестра |
 | `sessionEffort=low\|medium\|high\|xhigh\|max`, `sessionUltracode=true\|false` | effort последнего хода и ⚡ultracode (claude-sessions — по полям метаданных хвоста транскрипта); незнакомое значение отбрасывается; в `/state.sessions[].effort`/`ultracode` |
+| `sessionModel="…"`, `sessionModelSource=turn\|command`, `sessionEffortSource=turn\|command`, `sessionAt=<ISO 8601>` | контракт 3: модель сессии (id из записи хода или название из вывода `/model`; буквы, цифры, пробел и `._:()[]/+-`, до 64), откуда взяты модель и effort (последний ход или команда `/model`, `/effort` после него — команда важнее) и время записи транскрипта, из которой они взяты; незнакомое отбрасывается; в `/state.sessions[].model`/`modelSource`/`effortSource`/`metaAt` и в `Cache/claude-sessions.json`. Пишут в реестр только доверенные плагины |
 | `bash=`, `shell=`, `terminal=`, `paramN=` | **запрещены**: выбрасываются, предупреждение в журнал |
 | `stat="<подпись>"`, `note="…"` | карточка-цифра на странице плагина: заголовок строки — значение («04:30»), `stat` — подпись, `note` — строка под ним (`color=` — её цвет); подряд идущие — в ряд |
 | `gauge=<0…100>`, `gaugeLabel="…"` | в теле — карточка с полосой заполнения (`note` справа, дети — строки под полосой); в первой строке шапки — кольцо на странице плагина (`gaugeLabel` — подпись под числом) |
@@ -373,7 +526,8 @@ lock сама по себе уровня не даёт), `local` (`Plugins/local
 
 **watch:** путь или маска в последнем сегменте (`~/.claude/sessions/*.json`); дебаунс 300 мс. Пути нет, а каталог над
 ним есть — слежение за каталогом по имени (появление файла сразу даёт запуск); нет и каталога — повторная попытка раз в
-30 с. Запись может начинаться с переменной службы ядра: `<agenthub.watch>$AGENTHUB_USAGE_FILE — зачем</agenthub.watch>`
+30 с. Запись может начинаться с переменной службы ядра: `<agenthub.watch>$AGENTHUB_USAGE_FILE — зачем</agenthub.watch>`,
+`<agenthub.watch>$AGENTHUB_CLAUDE_SESSIONS_FILE — зачем</agenthub.watch>`
 (или `${ИМЯ}/…`) — путь подставляет ядро из тех же переменных `ctx.providePluginEnv`, что попадают в окружение
 плагина, то есть **только встроенным, официальным и своим**; у остальных и при выключенной службе запись пропускается
 (предупреждение в журнале), плагин живёт по интервалу из имени файла. Так встроенный quota (`quota.5m.mjs`) и любой
@@ -407,6 +561,17 @@ lock сама по себе уровня не даёт), `local` (`Plugins/local
 |---|---|---|
 | 1 | до 09.11 (неявно) | всё, что выше, без пунктов версии 2. Виды push: `sessions`, `runs`, `night`, `updates`, `problems`, `other`, `security`. Одно подключение и значки нескольких плагинов были зашиты в ядро и оболочку |
 | 2 | 09.11–10.11 | **Чистка ядра от названий плагинов.** `<agenthub.contract>`; `<agenthub.icon>` (значок и цвет плитки вместо словаря в оболочке); `<agenthub.connection>` (подключение объявляет плагин, а не ядро; право `connections`; вызов MCP — только своего подключения, иначе `mcp:not-owner`); `kind="plugin"` и `was=` у `<agenthub.push>` — свой переключатель плагина вместо видов `runs`/`night` (они — устаревшие синонимы с предупреждением линтера; перенос выключенных — `daemon/lib/push/README.md`); `message=` в выводе действия — текст отказа от плагина (оболочка больше не знает кодов плагинов); правила `blocker`, `session-died`, `workflow-*` ушли из таблицы ядра в метаданные плагинов; встроенные `agents` 1.2.0, `claude-sessions` 0.4.0, `quota` 0.5.0 объявляют значок, контракт и свои правила push (`quota` — `week-80`, `pace-85`, `token-lost`: правила `quota-*` ушли из таблицы ядра, переопределения `services.push.rules` по их прежним именам больше не действуют — пишите по ключу плагина). Ревью 10.11: id подключения — `<id плагина>.<имя>` (не `<id>-…`), с буквы и до 64; подключение — только у официальных и своих (линтер); адрес — имя хоста, не IP; суточный бюджет до 10000 действительно держится; «осиротевшие» подключения; отказ «нужен хаб новее» — раньше линтера и для своего плагина; версия, которой нужен хаб новее, не считается «доступным обновлением»; непонятный `contract` записи индекса — «нужен хаб новее» для неё, а не отказ каталога |
+| 3 | с 10.11 | **Сессии, пауза, громкие права** (выше — «Контракт 3»). `AGENTHUB_CLAUDE_SESSIONS_FILE` — метаданные живых сессий Claude Code доверенным плагинам (служба ядра `sessions`, `Cache/claude-sessions.json`: модель, effort, откуда они — ход или команда `/model`/`/effort`, время записи, ultracode, вкладка, `verified`; без текста переписки), допустима в `<agenthub.watch>` и `<agenthub.fsRead>`; параметры строки сессии `sessionModel=`, `sessionModelSource=`, `sessionEffortSource=`, `sessionAt=` (в `/state.sessions[]` — `model`, `modelSource`, `effortSource`, `metaAt`); встроенный `claude-sessions` 0.5.0 читает модель и команды `/model`, `/effort` из хвоста транскрипта и объявляет контракт 3. `AGENTHUB_PAUSED=0\|1` в каждом запуске плагина и перезапуск плагинов при установке и снятии паузы (`AGENTHUB_REFRESH_REASON=Paused\|Resumed`). Право `fsWrite` в место перехвата Claude Code или системы — поле `risk`, красная строка в окне согласия (приложение и терминал), предупреждение линтера реестра. Оболочка: подсказки с полным текстом у всех обрезаемых текстов плагина (сайдбар, шапка и строки страницы, карточки, ленты, поповер) — подсказкой AppKit, и в неактивном приложении. Терминал: `<agenthub.terminal>read-screen|send </команды>|*` (только `builtin`/`official`/`own`; по командам — slash-команды с ≤ 3 короткими аргументами, `*` — любая строка, кроме `!`, `#`, `&` в начале; набор — `risk: "terminal"`, красная строка окна согласия), маршруты `POST /terminal/read-screen` (признаки поля ввода, без текста экрана) и `POST /terminal/send-text` (строка ≤ 200, печатные ASCII без `\\`; только сессия Claude Code с проверенной подписью, известной вкладкой и процессом на переднем плане, поле пусто и ход не идёт, не на паузе, частота ограничена, журнал без текста) из процесса плагина — запуска, streamable или действия — через слой терминалов ядра (адаптер cmux → операции моста `read-screen`, `send-text`); `AGENTHUB_HUB_SOCKET` доверенным плагинам всегда. Места перехвата — весь `~/.claude`, `.claude` проекта, `~/.cmuxterm` и конфиги терминалов, глобальные пакеты npm, общие файлы хаба; `sessionNameSource=` (автозаголовок не попадает в файл сессий). Эффект `session.focus <sessionId>` — переход во вкладку сессии без знания о терминале (слой терминалов: операция адаптера `focus`; `/state.sessions[].terminal`/`focusable`), в безвредном потолке effects сторонних плагинов рядом с `open.*` и `cmux.focus` (`cmux.focus` — для совместимости); поле `modelId` в файле сессий (id модели и при названии из `/model`) |
+
+**Контракт 3 и хабы версии 2.** Хаб версии 2 видит `<agenthub.contract>3` и отказывает «нужен хаб новее» — так плагину,
+которому без метаданных сессий или признака паузы не жить, достаточно объявить 3. Плагин, объявивший 2, на хабе
+версии 2 не получит `AGENTHUB_CLAUDE_SESSIONS_FILE` (право `fsRead $AGENTHUB_CLAUDE_SESSIONS_FILE` в окне согласия есть,
+но переменной нет — запись `watch` по ней пропускается с предупреждением) и `AGENTHUB_PAUSED` (нет переменной — хаб
+старше: фоновую работу не делать); пауза его не перезапускает. Права с `risk` хаб версии 2 показывает обычной строкой.
+Тег `<agenthub.terminal>` хаб версии 2 не знает (метаданные его пропускают, права в окне нет), маршрутов `/terminal/*`
+у него нет (`404`) — плагину с набором во вкладки нужен `<agenthub.contract>3`.
+Ничего из контракта 2 не меняется: плагины контракта 1 и 2 работают на хабе версии 3 как раньше (лишняя переменная
+окружения и перезапуск по паузе им не мешают). Порядок выкатки: сначала хаб 3, потом плагины, объявившие контракт 3.
 
 **Что ломается у плагинов контракта 1 на хабе версии 2.** Правила таблицы ядра `blocker` (вечером, без паузы между
 повторами, вид «Ночь»), `session-died` и `workflow-*` (вид «Прогоны агентов») и `quota-*` ушли в метаданные плагинов.

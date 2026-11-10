@@ -1,6 +1,6 @@
 {
   "note": "копии модулей agent-hub/daemon и контракта плагинов (docs/contract); обновлять только scripts/sync-vendor.mjs",
-  "contract": 2,
+  "contract": 3,
   "source": {
     "meta.mjs": "daemon/lib/meta.mjs",
     "output.mjs": "daemon/lib/output.mjs",
@@ -9,11 +9,11 @@
     "perms.mjs": "daemon/lib/registry/perms.mjs"
   },
   "files": {
-    "meta.mjs": "3001e689aaa109828841c96317208e032cfe6ce3d2dfe88756379cdc5fab4df2",
+    "meta.mjs": "1eef01bba39f9cef61a9bc1c652fd4ab1b67bc73ced60305123a69aba6f61306",
     "output.mjs": "00cbbb59380db22cc8954e274e69520a07b5c2181ea74e1d4e1404410bf8d1df",
     "minisign.mjs": "9e098eb3d56e757eb0c7d83c071e5ee78c7ae389f32709fccc33a46a76580285",
     "tarball.mjs": "e74eed995e971c54a22bb07275caefefe91e4ad4fa506eb69360b4e0ec2b4161",
-    "perms.mjs": "6e3da8d2b82cac131968cc6db35510f9daa5ce566029f03165e7c2cd5cd1e034",
+    "perms.mjs": "10141a4edfca4fa278c5bfc80e16c44bb4ccffe631cfac3f03f3a39e38fe1aeb",
     "native.mjs": "7b2ccbad7806c9ed8163150063f25f32ac018f5c11177c228694333dad1597ab"
   },
   "docsSource": {
@@ -23,10 +23,10 @@
     "api.md": "docs/api.md (`POST /actions/:id`; Подключения)"
   },
   "docs": {
-    "README.md": "463c893358e042aea12c90ada76dff0fb1b48a6fbd3572c19b96d00779ab82cb",
-    "extension-points.md": "fca61b45fc92430827e1c1a781835b26c6d174aedf325c59fe47c1c4c6adb569",
-    "push.md": "27182868da5930dbb831bea9d21f7b9dbdb2c54760449b51409fabc786307acc",
-    "plugins-registry.md": "684c20082252e82257211487e2d0701e855ccb00fe27e5db1af7fa03f266d5a2",
-    "api.md": "e5fecab5024f46a9b01373601ae003914221fe3f71542a64ac712937bc1192aa"
+    "README.md": "39df865a0694a6286984ebdfa31567a302120a1d0e3eeee62c7c3e9bb6ab2d98",
+    "extension-points.md": "f6ef4dc8ce12c7b97cfeab24ed58a19c348de216d287215f8d4b73cbd955cacf",
+    "push.md": "6745d40a4352020d58e86e730cd2ccb60602ef18c744ae326035de0b1834aa9e",
+    "plugins-registry.md": "57765f027f3f689a5525089b47223a0901cc28add0634e42552fc1f52ea764bb",
+    "api.md": "8f53641155c833f7b1d6762d81c4493231e9bae0ae8be086cb76ec48f681c1ac"
   }
 }
