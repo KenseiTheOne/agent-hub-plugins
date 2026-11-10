@@ -1,0 +1,24 @@
+{
+  "theme": "dark",
+  "effortLevel": "medium",
+  "permissions": {
+    "allow": [
+      "Bash(git status)"
+    ]
+  },
+  "env": {
+    "FIXTURE_SECRET_MARKER": "fixture-secret-do-not-print"
+  },
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "medium"
+    }
+  },
+  "model": "claude-opus-5-5",
+  "outputStyle": "Explanatory",
+  "enabledPlugins": {
+    "demo-plugin@demo-market": true,
+    "off-plugin@demo-market": false
+  },
+  "ultracode": false
+}

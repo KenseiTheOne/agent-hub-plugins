@@ -1,0 +1,4 @@
+---
+name: Diagrams
+---
+Use diagrams.

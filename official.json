@@ -1,6 +1,7 @@
 {
   "note": "Плагины с меткой official (tier official в подписанном индексе). Список правит только владелец реестра (CODEOWNERS).",
   "official": [
+    "claude-code",
     "clickup",
     "hermes"
   ]

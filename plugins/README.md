@@ -16,7 +16,7 @@ plugins/<id>/
 
 ## Официальные плагины
 
-`hermes`, `clickup` — официальные (список — `official.json`, правит только владелец; в индексе —
+`hermes`, `clickup`, `claude-code` — официальные (список — `official.json`, правит только владелец; в индексе —
 `tier: "official"`). `night-runner` из реестра ушёл (09.11): раннер приватный, его плагин лежит в его же
 репозитории (`agenthub/night-runner/`) и ставится как **свой плагин** из локальной папки (`agenthub plugins install
 --from <папка>` + подтверждение в приложении; agent-hub README, «Свои плагины»). Мейнтейнер — владелец реестра. Встроенные плагины Agent Hub (claude-sessions, agents, quota)
