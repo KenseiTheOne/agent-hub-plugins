@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseFileName, parseMetaText } from "../vendor/meta.mjs";
+import { CONTRACT_VERSION, parseFileName, parseMetaText } from "../vendor/meta.mjs";
 import { diffPermissions, ID_RE, lintPlugin, permissionsFromMeta, pushWarnings, RESERVED_IDS, sourceViolations } from "../vendor/perms.mjs";
 import { LIMITS, packTarGz } from "../vendor/tarball.mjs";
 
@@ -29,6 +29,26 @@ export function readJson(path, fallback = undefined) {
 // Ключи событий ядра хаба и предупреждения о правилах push (kind="security", зарезервированные ключи) — общие с
 // проверкой своей папки в демоне: scripts/vendor/perms.mjs (daemon/lib/registry/perms.mjs).
 export { CORE_PUSH_KEYS, pushWarnings } from "../vendor/perms.mjs";
+
+// Версия контракта (<agenthub.contract>, docs/contract/extension-points.md «Версии контракта»). Плагин, который
+// пользуется возможностями контракта 2, а тега нет, — предупреждение: хаб контракта 2 и новее с тегом показал бы
+// «Нужен хаб новее» там, где контракт старше. (Хаб контракта 1 тег не знает вовсе: поставит и не поймёт — kind="plugin"
+// отбросит, подключения не будет; от него защищает только порядок выкатки, docs/contract/extension-points.md.) Контракт новее того, что
+// знает вендоринг (scripts/vendor/meta.mjs), — ошибка: проверка здесь идёт старым разборщиком.
+// → { errors, warnings }
+export function contractCheck(meta, source = "") {
+  const errors = [];
+  const warnings = [];
+  const need = Number.isInteger(meta?.contract) ? meta.contract : 1;
+  if (need > CONTRACT_VERSION) errors.push(`<agenthub.contract>${need}: вендоринг знает контракт ${CONTRACT_VERSION} — запустите node scripts/sync-vendor.mjs у хаба с этим контрактом`);
+  const v2 = [];
+  if (meta?.connections?.length) v2.push("<agenthub.connection>");
+  if (meta?.icon) v2.push("<agenthub.icon>");
+  if ((meta?.push || []).some((r) => r.kind === "plugin" && !(r.legacyKind && !r.wasDeclared))) v2.push('kind="plugin"');
+  if (/(?:^|["'`\n])message=/m.test(String(source))) v2.push("message= в выводе действия");
+  if (v2.length && need < 2) warnings.push(`пользуется контрактом 2 (${v2.join(", ")}), а <agenthub.contract>2</agenthub.contract> не объявлен: хаб с контрактом старше примет плагин молча и поймёт его не целиком`);
+  return { errors, warnings };
+}
 
 // official.json: { "official": ["night-runner", …] } — метку ставит только владелец (CODEOWNERS).
 export function readOfficial(root) {
@@ -115,6 +135,9 @@ export function inspectPlugin(root, id, { official = new Set() } = {}) {
     errors.push(...lint.errors);
     warnings.push(...lint.warnings);
     warnings.push(...pushWarnings(meta));
+    const c = contractCheck(meta, source);
+    errors.push(...c.errors);
+    warnings.push(...c.warnings);
   }
   // остальные текстовые файлы плагина тоже не должны лезть в запретные места
   const pack = files.filter((f) => !f.symlink && inPack(f.rel));

@@ -3,7 +3,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runCheck } from "../scripts/check.mjs";
@@ -12,6 +13,7 @@ import { checkVendor } from "../scripts/sync-vendor.mjs";
 import { pathViolation } from "../scripts/vendor/perms.mjs";
 import { cleanup, makeRegistry, pluginSource, README } from "./helpers.mjs";
 
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const run = (root, extra = {}) => runCheck({ root, base: null, baseDir: null, report: null, skipTests: false, only: null, ...extra });
 const errorsOf = (r, id) => r.plugins.find((p) => p.id === id)?.errors || [];
 
@@ -298,6 +300,35 @@ test("вендоринг: копии совпадают с VENDOR.json и с age
   assert.deepEqual(v.drift, []);
 });
 
+test("вендоринг: копия контракта — .DS_Store не ошибка; лишний (и с точкой в начале), правленый руками и пропавший — ошибка", () => {
+  // копия scripts/vendor и docs/contract во временном каталоге: общий docs/contract реестра не трогаем
+  const tmp = mkdtempSync(join(tmpdir(), "vendor-"));
+  try {
+    const vendorDir = join(tmp, "vendor");
+    const contractDir = join(tmp, "contract");
+    cpSync(join(ROOT, "scripts", "vendor"), vendorDir, { recursive: true });
+    cpSync(join(ROOT, "docs", "contract"), contractDir, { recursive: true });
+    const check = () => checkVendor({ from: null, vendorDir, contractDir });
+    assert.deepEqual(check().problems, []);
+    // .DS_Store кладёт Finder, .gitignore его не пускает — проверку он не роняет
+    writeFileSync(join(contractDir, ".DS_Store"), "x");
+    assert.deepEqual(check().problems, []);
+    // остальное с точкой в начале git в коммит возьмёт — это лишний файл, как и любой другой
+    writeFileSync(join(contractDir, ".notes.md"), "x");
+    assert.deepEqual(check().problems, ["docs/contract/.notes.md: лишний файл — копию пишет только scripts/sync-vendor.mjs"]);
+    rmSync(join(contractDir, ".notes.md"));
+    writeFileSync(join(contractDir, "notes.md"), "x");
+    assert.deepEqual(check().problems, ["docs/contract/notes.md: лишний файл — копию пишет только scripts/sync-vendor.mjs"]);
+    rmSync(join(contractDir, "notes.md"));
+    writeFileSync(join(contractDir, "push.md"), readFileSync(join(contractDir, "push.md"), "utf8") + "\nправка\n");
+    assert.deepEqual(check().problems, ["docs/contract/push.md не совпадает с VENDOR.json (правка руками?)"]);
+    rmSync(join(contractDir, "push.md"));
+    assert.deepEqual(check().problems, ["нет docs/contract/push.md — запустите node scripts/sync-vendor.mjs"]);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("official: effects тоже под потолком, immediate-действие — только без сети, запретные места — ошибка (исключения нет)", async () => {
   // 09.11: официальному без сети immediate можно (ядро выполнит без окна, только из приложения); с сетью — нет
   const src = pluginSource({
@@ -425,7 +456,7 @@ test("--base: файлы плагина изменились, а версия т
 test("push: kind=\"security\" и ключи ядра хаба — предупреждение ревьюеру (проверка не падает)", async () => {
   const root = makeRegistry({
     hello: {
-      "hello.5m.mjs": pluginSource({ extra: ['// <agenthub.push key="tamper" kind="security">Маркер подмены</agenthub.push>', '// <agenthub.push key="app-restart-stopped">Agent Hub падает</agenthub.push>', '// <agenthub.push key="job-failed" kind="runs">Задача упала</agenthub.push>'] }),
+      "hello.5m.mjs": pluginSource({ extra: ['// <agenthub.push key="tamper" kind="security">Маркер подмены</agenthub.push>', '// <agenthub.push key="app-restart-stopped">Agent Hub падает</agenthub.push>', '// <agenthub.push key="job-failed" kind="plugin" was="runs">Задача упала</agenthub.push>', '// <agenthub.push key="job-costly" kind="runs">Дорого</agenthub.push>'] }),
       "README.md": README,
       "fixtures/home/.config/hello/state.json": "зелёный\n",
     },
@@ -435,7 +466,9 @@ test("push: kind=\"security\" и ключи ядра хаба — предупр
     const w = r.plugins[0].warnings;
     assert.ok(w.some((x) => x.includes('key="tamper" kind="security"')), w.join("\n"));
     assert.ok(w.some((x) => x.includes('key="app-restart-stopped"') && x.includes("зарезервирован ядром")), w.join("\n"));
-    assert.ok(!w.some((x) => x.includes("job-failed")), "обычное правило — без предупреждения");
+    assert.ok(!w.some((x) => x.includes("job-failed")), "обычное правило (kind=\"plugin\" was=…) — без предупреждения");
+    // контракт 2: устаревший вид контракта 1 работает, но линтер просит kind="plugin" was="…"
+    assert.ok(w.some((x) => x.includes('key="job-costly" kind="runs"') && x.includes('kind="plugin" was="runs"')), w.join("\n"));
     assert.deepEqual(errorsOf(r, "hello"), []);
   } finally {
     cleanup(root);
@@ -459,4 +492,32 @@ test("<agenthub.requires>: зависимость с https-ссылкой и п�
   } finally {
     cleanup(root);
   }
+});
+
+test("копия контракта (docs/contract): разделы по заголовкам, заголовок внутри ``` — не раздел; шапка «не править»", async () => {
+  const { pickSections, CONTRACT_DOCS, CONTRACT_DIR } = await import("../scripts/sync-vendor.mjs");
+  const md = "# Док\n\nвступление\n\n## Раз\n\nтекст раз\n\n```\n# не заголовок\n```\n\n### Раз.1\n\nвнутри\n\n## Два\n\nтекст два\n\n## Три\n\nтри\n";
+  const r = pickSections(md, ["Три", "Раз", "Нет"]);
+  assert.deepEqual(r.missing, ["Нет"]);
+  assert.equal(r.text, "## Три\n\nтри\n\n## Раз\n\nтекст раз\n\n```\n# не заголовок\n```\n\n### Раз.1\n\nвнутри\n");
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  for (const name of ["README.md", ...CONTRACT_DOCS.map((d) => d.out)]) {
+    const text = readFileSync(join(CONTRACT_DIR, name), "utf8");
+    assert.match(text.split("\n")[0], /^<!-- Копия из agent-hub, контракт v\d+\. Не править/, name);
+  }
+});
+
+test("контракт 2: возможность контракта 2 без <agenthub.contract>2 — предупреждение; контракт новее вендоринга — ошибка", async () => {
+  const { contractCheck } = await import("../scripts/lib/registry.mjs");
+  const { CONTRACT_VERSION, parseMetaText } = await import("../scripts/vendor/meta.mjs");
+  const meta = (tags) => parseMetaText(tags.join("\n")).meta;
+  const icon = '// <agenthub.icon symbol="moon" color="#5E5CE6"></agenthub.icon>';
+  assert.match(contractCheck(meta([icon])).warnings.join("\n"), /<agenthub\.icon>.*не объявлен/);
+  assert.match(contractCheck(meta(['// <agenthub.push key="x" kind="plugin">X</agenthub.push>'])).warnings.join("\n"), /kind="plugin"/);
+  assert.match(contractCheck(meta([]), 'console.log("message=Нельзя");').warnings.join("\n"), /message=/);
+  // устаревший kind="runs" — это контракт 1 (предупреждает линтер прав), а не «пользуется контрактом 2»
+  assert.deepEqual(contractCheck(meta(['// <agenthub.push key="x" kind="runs">X</agenthub.push>'])).warnings, []);
+  assert.deepEqual(contractCheck(meta([icon, "// <agenthub.contract>2</agenthub.contract>"])), { errors: [], warnings: [] });
+  assert.match(contractCheck(meta([`// <agenthub.contract>${CONTRACT_VERSION + 1}</agenthub.contract>`])).errors.join("\n"), /вендоринг знает контракт/);
 });

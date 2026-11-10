@@ -45,12 +45,36 @@ Agent Hub с 07.11; прав не требует) — «Hermes: 1 задача �
 | `cron-pause <job>` | confirm-cost | `hermes [-p <профиль>] cron pause <job>` | `already-paused` |
 | `cron-resume <job>` | confirm-cost | `… cron resume <job>` | `not-paused` |
 | `cron-run <job>` | confirm-cost | `… cron run <job>` | — |
-| `pause` (кнопка «Поставить Hermes на паузу (ESTOP)», пока ESTOP нет) | confirm | `hermes pause` | `already-paused` (есть `~/.hermes/ESTOP`) |
+| `pause` (кнопка «Поставить Hermes на паузу (ESTOP)», пока ESTOP нет) | confirm | `hermes pause` | `hermes-paused` (есть `~/.hermes/ESTOP`; до 1.3.0 — `already-paused`) |
 
-Общие отказы: `no-hermes` (нет `~/.local/bin/hermes`), `bad-job`, `unknown-job`, `ambiguous-job` (одинаковый id в
+Общие отказы: `no-hermes` (нет `~/.local/bin/hermes`), `no-hermes-home` (программа есть, а папки `~/.hermes` с
+задачами нет; с 1.3.0, раньше — тоже `no-hermes`), `bad-job`, `unknown-job`, `ambiguous-job` (одинаковый id в
 двух профилях), `no-jobs-file`, `hermes-failed`, `timeout`. Профиль задачи плагин находит сам по `jobs.json`
 (корень — без `-p`).
 
+**Текст отказа** (с 1.3.0, контракт 2): перед `reason=<код>` плагин печатает `message=<объяснение>` на языке хаба
+(`AGENTHUB_LANG`), оболочка показывает его после названия кнопки как есть — «"Пауза": Задача уже на паузе.». Своих
+текстов для кодов плагинов в хабе больше нет; без `message=` оболочка написала бы только «плагин отказал (<код>)». Тексты —
+`REFUSALS` в `hermes.60s.mjs`, у каждого кода ru и en (тест сверяет, что ни один код не забыт).
+
 **Push** (`<agenthub.push>`): `job-failed`, `job-costly`, `ticker-silent`, `gateway-silent` (только macOS), `estop`.
+С 1.3.0 все — `kind="plugin" was="runs"`: их гасит свой переключатель «Hermes» в «Настройках → Уведомления» (строку хаб
+строит из установленного плагина: нет плагина — нет строки). `was="runs"` переносит прежний выбор: если вид «Прогоны
+агентов» (контракт 1) был выключен, переключатель «Hermes» после обновления тоже выключен.
+
+## Контракт 2 (1.3.0)
+
+Хаб с 09.11 о Hermes ничего не знает (`docs/contract/extension-points.md`, «Версии контракта»): значок, переключатель
+уведомлений и тексты отказов плагин объявляет сам.
+
+| Объявление | Зачем |
+|---|---|
+| `<agenthub.contract>2</agenthub.contract>` | плагину нужен хаб с контрактом 2 (`kind="plugin"`, `message=`). Хаб версии 2 с контрактом старше покажет «Нужен хаб новее»; хаб контракта 1 тег не знает и поставит 1.3.0, потеряв правила `kind="plugin"` и тексты `message=` — публиковать после обновления хаба |
+| `<agenthub.icon symbol="alarm" color="#30D158">` | значок плитки — тот же, что раньше был зашит в оболочку |
+| `kind="plugin" was="runs"` у правил push | свой переключатель «Hermes» вместо общего вида «Прогоны агентов» |
+| `message=` у отказов действий | объяснение отказа на языке хаба: тексты, которые раньше держала оболочка |
+
+**Права 1.3.0** не менялись: новых прав нет, значок, контракт и вид уведомлений правами не считаются — обновление без
+окна согласия.
 
 Тесты: `test/hermes.test.mjs` (`scripts/check.sh --only hermes`), синтетический HOME из `fixtures/`.

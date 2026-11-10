@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // <agenthub.title>ClickUp</agenthub.title>
-// <agenthub.version>1.2.0</agenthub.version>
+// <agenthub.version>1.3.0</agenthub.version>
+// <agenthub.contract>2</agenthub.contract>
+// <agenthub.icon symbol="checklist" color="#FF375F"></agenthub.icon>
 // <agenthub.desc>Ваши тикеты ClickUp и какие из них сейчас в работе у агентов (ночь, /ticket, сессии). Только чтение</agenthub.desc>
 // <agenthub.desc lang="en">Your ClickUp tickets and which ones agents are working on (night, /ticket, sessions). Read-only</agenthub.desc>
 // <agenthub.status value="ok" label="Тикеты загружены">Список тикетов свежий</agenthub.status>
@@ -27,17 +29,21 @@
 // <agenthub.fsRead>~/.cmuxterm/claude-hook-sessions.json — вкладка cmux сессии — для кнопки «Перейти»</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.cmuxterm/claude-hook-sessions.json — the session's cmux tab — for the Switch to tab button</agenthub.fsRead>
 // <agenthub.effects>open.url,cmux.focus</agenthub.effects>
-// <agenthub.push key="auth-failed">ClickUp: токен не принят</agenthub.push>
-// <agenthub.push key="auth-failed" lang="en">ClickUp: token rejected</agenthub.push>
+// <agenthub.connection id="clickup" type="mcp" url="https://mcp.clickup.com/mcp" scope="read" title="ClickUp" tools="clickup_filter_tasks" interval="15m" budget="100">ваши открытые тикеты ClickUp: только чтение, один инструмент — список тикетов</agenthub.connection>
+// <agenthub.connection lang="en" id="clickup" title="ClickUp">your open ClickUp tickets: read-only, one tool — the ticket list</agenthub.connection>
+// <agenthub.push key="auth-failed" kind="problems">ClickUp: токен не принят</agenthub.push>
+// <agenthub.push key="auth-failed" kind="problems" lang="en">ClickUp: token rejected</agenthub.push>
 // <agenthub.push key="login-expired" kind="problems">ClickUp: вход истёк — подключите снова</agenthub.push>
 // <agenthub.push key="login-expired" kind="problems" lang="en">ClickUp: sign-in expired — reconnect</agenthub.push>
 //
 // Два пути к данным (с 1.2.0). Основной — вход в ClickUp через хаб: кнопка «Подключить ClickUp» (страница плагина,
 // «Настройки → Подключения»), официальный MCP-сервер mcp.clickup.com, OAuth делает ядро (служба oauth). Плагин зовёт
 // инструмент clickup_filter_tasks через сокет хаба (POST /connections/clickup/mcp, переменная AGENTHUB_HUB_SOCKET —
-// её ядро даёт только доверенным плагинам); токен остаётся в ядре. Частоту держит ядро: один вызов не чаще раза в
-// 15 мин (ClickUp Free — ~100 вызовов MCP в сутки), бэкофф по лимиту; плагин показывает, когда следующее обновление
-// и почему реже. Запасной путь — личный токен (REST v2), как раньше: если входа нет.
+// её ядро даёт только доверенным плагинам); токен остаётся в ядре. С 1.3.0 (контракт 2) подключение объявляет сам
+// плагин — тег <agenthub.connection> выше: адрес, scope, белый список из одного инструмента, интервал 15 мин и бюджет
+// 100 вызовов в сутки (ClickUp Free даёт около 100 вызовов MCP в сутки); ядро о ClickUp больше ничего не знает, а
+// частоту держит по объявлению (бэкофф по лимиту — тоже ядро); плагин показывает, когда следующее обновление и почему
+// реже. Запасной путь — личный токен (REST v2), как раньше: если входа нет.
 //
 // Только GET и только пути из белого списка (ALLOWED_PATHS); записей в ClickUp нет и быть не может.
 // Токен — из секрета clickup.token (ядро кладёт его в AGENTHUB_SECRET_CLICKUP_TOKEN); в вывод, кэш и журнал

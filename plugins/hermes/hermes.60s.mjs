@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // <agenthub.title>Hermes</agenthub.title>
-// <agenthub.version>1.2.2</agenthub.version>
+// <agenthub.version>1.3.0</agenthub.version>
+// <agenthub.contract>2</agenthub.contract>
+// <agenthub.icon symbol="alarm" color="#30D158"></agenthub.icon>
 // <agenthub.desc>Задачи Hermes по расписанию: что упало, что подорожало, отвечает ли служба Hermes и не на паузе ли он</agenthub.desc>
 // <agenthub.desc lang="en">Hermes scheduled jobs: what failed, what got costly, whether the Hermes service responds and whether it is paused</agenthub.desc>
 // <agenthub.status value="ok" label="Задачи по расписанию">Hermes работает, задачи идут по расписанию</agenthub.status>
@@ -37,11 +39,11 @@
 // <agenthub.action id="cron-resume" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: возобновить задачу" title-en="Hermes: resume job" cost="задача снова будет запускаться по расписанию (расход квоты)" cost-en="the job runs on schedule again (uses quota)">hermes.60s.mjs --action cron-resume {job}</agenthub.action>
 // <agenthub.action id="cron-run" level="confirm-cost" arg="job:^[A-Za-z0-9_-]{1,64}$" title="Hermes: запустить вне расписания задачу" title-en="Hermes: run job now" cost="внеочередной запуск задачи — расход квоты" cost-en="an extra run of the job — uses quota">hermes.60s.mjs --action cron-run {job}</agenthub.action>
 // <agenthub.action id="pause" level="confirm" title="Поставить Hermes на паузу" title-en="Pause Hermes">hermes.60s.mjs --action pause</agenthub.action>
-// <agenthub.push key="job-failed" kind="runs">Hermes: задача упала</agenthub.push>
-// <agenthub.push key="job-costly" kind="runs">Hermes: задача потратила вдвое больше обычного</agenthub.push>
-// <agenthub.push key="ticker-silent" kind="runs">Hermes: расписание остановилось</agenthub.push>
-// <agenthub.push key="gateway-silent" macOnly="true" kind="runs">Hermes: служба молчит</agenthub.push>
-// <agenthub.push key="estop" kind="runs">Hermes на паузе</agenthub.push>
+// <agenthub.push key="job-failed" kind="plugin" was="runs">Hermes: задача упала</agenthub.push>
+// <agenthub.push key="job-costly" kind="plugin" was="runs">Hermes: задача потратила вдвое больше обычного</agenthub.push>
+// <agenthub.push key="ticker-silent" kind="plugin" was="runs">Hermes: расписание остановилось</agenthub.push>
+// <agenthub.push key="gateway-silent" macOnly="true" kind="plugin" was="runs">Hermes: служба молчит</agenthub.push>
+// <agenthub.push key="estop" kind="plugin" was="runs">Hermes на паузе</agenthub.push>
 // <agenthub.push key="job-failed" lang="en">Hermes: job failed</agenthub.push>
 // <agenthub.push key="job-costly" lang="en">Hermes: job used twice the usual</agenthub.push>
 // <agenthub.push key="ticker-silent" lang="en">Hermes: schedule stopped</agenthub.push>
@@ -52,7 +54,8 @@
 // запуск задач — объявленные действия: подтверждение и его текст — от ядра, аргумент (id задачи) ядро сверяет
 // с шаблоном и передаёт отдельным argv. Факты (задача есть в jobs.json своего профиля, cron pause — только не
 // на паузе, cron resume — только на паузе, pause всего Hermes — только без ESTOP в ~/.hermes) проверяет сам
-// плагин в режиме `--action`; отказ — код 3 и `reason=<код>`. Кнопка «Поставить Hermes на паузу» есть в кадре,
+// плагин в режиме `--action`; отказ — код 3, строка `message=<объяснение на языке хаба>` и последней `reason=<код>`
+// (контракт 2: объяснение пишет плагин, оболочка показывает его как есть — REFUSALS ниже). Кнопка «Поставить Hermes на паузу» есть в кадре,
 // пока нет ~/.hermes/ESTOP; снять паузу — `hermes resume` в терминале (действия для этого нет).
 //
 // ESTOP (agent/estop.py Hermes): `hermes pause` пишет $HERMES_HOME/ESTOP. Процесс профиля проверяет свой
@@ -646,7 +649,7 @@ export const JOB_ID = /^[A-Za-z0-9_-]{1,64}$/;
 export function findJob(jobId, { home = homedir() } = {}) {
   if (!JOB_ID.test(String(jobId || "")) || String(jobId).startsWith("-")) return { reason: "bad-job" };
   const root = join(home, ".hermes");
-  if (!existsSync(root)) return { reason: "no-hermes" };
+  if (!existsSync(root)) return { reason: "no-hermes-home" };
   const hits = [];
   for (const h of hermesHomes(root)) {
     const path = join(h.home, "cron", "jobs.json");
@@ -677,13 +680,36 @@ function cleanEnv(home) {
   return env;
 }
 
+// Объяснение отказа действия для человека (контракт 2, строка message=): оболочка показывает его после названия
+// кнопки — «"Пауза": Задача уже на паузе.», поэтому название кнопки в тексте не повторяется. До 120 графем.
+export const REFUSALS = {
+  "no-hermes": ["Hermes не найден: нет ~/.local/bin/hermes.", "Hermes isn't installed: no ~/.local/bin/hermes."],
+  "no-hermes-home": ["Нет папки ~/.hermes — данных Hermes нет.", "No ~/.hermes folder — no Hermes data."],
+  "bad-job": ["Такой задачи нет.", "No such task."],
+  "unknown-job": ["Задачи с таким id нет ни в одном профиле Hermes.", "No Hermes profile has a job with this id."],
+  "ambiguous-job": ["Задача с таким id есть в нескольких профилях — сделайте это в терминале.", "Several profiles have a job with this id — do it in the terminal."],
+  "no-jobs-file": ["Не получается прочитать список задач Hermes.", "Can't read the Hermes job list."],
+  "already-paused": ["Задача уже на паузе.", "The job is already paused."],
+  "not-paused": ["Задача не на паузе.", "The job isn't paused."],
+  "hermes-paused": ["Hermes уже на паузе.", "Hermes is already paused."],
+  "unknown-action": ["Плагин не знает такого действия.", "The plugin doesn't know this action."],
+  timeout: ["Hermes не ответил за 25 с.", "Hermes didn't respond within 25 s."],
+  "hermes-failed": ["Команда hermes завершилась с ошибкой.", "The hermes command failed."],
+};
+export function refusalMessage(reason, lang = envLang(), code = null) {
+  const t = REFUSALS[reason];
+  if (!t) return null;
+  const text = t[lang === "en" ? 1 : 0];
+  return reason === "hermes-failed" && Number.isInteger(code) ? text.replace(/\.$/, lang === "en" ? ` (exit code ${code}).` : ` (код ${code}).`) : text;
+}
+
 // → { ok, reason?, code? }
 export function runAction([id, arg], { home = homedir() } = {}) {
   const bin = hermesBin(home);
   if (!existsSync(bin)) return { ok: false, reason: "no-hermes" };
   let args;
   if (id === "pause") {
-    if (existsSync(join(home, ".hermes", "ESTOP"))) return { ok: false, reason: "already-paused" };
+    if (existsSync(join(home, ".hermes", "ESTOP"))) return { ok: false, reason: "hermes-paused" };
     args = ["pause"];
   }
   else {
@@ -707,7 +733,8 @@ function main() {
   const ai = process.argv.indexOf("--action");
   if (ai >= 2) {
     const r = runAction(process.argv.slice(ai + 1));
-    process.stdout.write(r.ok ? "ok\n" : `reason=${r.reason}\n`);
+    const msg = r.ok ? null : refusalMessage(r.reason, envLang(), r.code);
+    process.stdout.write(r.ok ? "ok\n" : `${msg ? `message=${msg}\n` : ""}reason=${r.reason}\n`);
     process.exitCode = r.ok ? 0 : 3;
     return;
   }

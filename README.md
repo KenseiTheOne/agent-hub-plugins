@@ -52,12 +52,15 @@ node scripts/build-index.mjs --out /tmp/idx  # посмотреть, что по
 Нужен Node ≥ 22. Подробности — [CONTRIBUTING.md](CONTRIBUTING.md). Язык вывода — из `AGENTHUB_LANG=ru|en`
 (хаб передаёт его плагину; без перевода плагин показывается как есть), переводы метаданных — теги с `lang="en"`.
 
-## Вендоринг разборщиков ядра
+## Вендоринг ядра и копия контракта
 
 CI не видит репу `agent-hub`, поэтому модули демона лежат побайтной копией в `scripts/vendor/`
 (`meta.mjs`, `output.mjs`, `registry/minisign.mjs`, `registry/tarball.mjs`, `registry/perms.mjs` +
-заглушка `native.mjs`). Обновление — только `node scripts/sync-vendor.mjs [--from ../agent-hub]`;
-`check.sh` сверяет копии с `scripts/vendor/VENDOR.json`, а если рядом лежит `agent-hub` — ещё и с исходником.
+заглушка `native.mjs`), а контракт плагинов — копией документации в [`docs/contract/`](docs/contract/README.md)
+(`extension-points.md` целиком и нужные автору плагина разделы `push/README.md`, `plugins-registry.md`, `api.md`, с
+шапкой «копия, контракт vN, не править»). Обновление — только `node scripts/sync-vendor.mjs [--from ../agent-hub]`;
+`check.sh` (и CI) сверяет копии с `scripts/vendor/VENDOR.json`, а если рядом лежит `agent-hub` — ещё и с исходником
+(`node scripts/sync-vendor.mjs --check`).
 
 ## Тесты самой репы
 

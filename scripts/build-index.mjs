@@ -67,6 +67,11 @@ export function buildIndex({ root = ROOT, out = join(ROOT, "dist"), generatedAt 
       permissions: indexPermissions(info.meta),
       // зависимости (<agenthub.requires>): менеджер хаба показывает «Нужен Hermes» со ссылкой и проверяет путь check
       ...(info.meta.requires?.length ? { requires: info.meta.requires.map((r) => ({ name: r.name, url: r.url, check: r.check, note: r.note })) } : {}),
+      // контракт 2: минимальная версия контракта (<agenthub.contract>; нет тега — поля нет, хаб считает 1) — хаб версии 2
+      // и новее с контрактом старше покажет «Нужен хаб новее» и не поставит; хабы контракта 1 поля не знают и поставят
+      // (публиковать — после обновления хаба: docs/contract/extension-points.md «Версии контракта»); значок плитки (<agenthub.icon>) — каталог рисует его до установки
+      ...(Number.isInteger(info.meta.contract) ? { contract: info.meta.contract } : {}),
+      ...(info.meta.icon?.symbol ? { icon: { symbol: info.meta.icon.symbol, ...(info.meta.icon.color ? { color: info.meta.icon.color } : {}) } } : {}),
     });
   }
   // опубликованная версия не меняет содержимое: правка без новой версии — ошибка, а не тихая перезапись архива

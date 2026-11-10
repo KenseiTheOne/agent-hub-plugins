@@ -292,33 +292,38 @@ test("executions.db открывается только на чтение (immut
 });
 
 // Режим действия — как его запускает ядро: тот же файл с `--action <id> [<job>]`; hermes — двойник.
-function act(home, args) {
+// out — последняя строка (ok или reason=<код>), message — объяснение отказа (строка message=, контракт 2).
+function act(home, args, { lang = null } = {}) {
   const bin = join(home, "bin");
   mkdirSync(bin, { recursive: true });
   const log = join(home, "hermes.log");
   writeFileSync(join(bin, "hermes"), `#!/bin/sh\necho "$@" >> '${log}'\n`, { mode: 0o755 });
-  const r = spawnSync(process.execPath, [PLUGIN, "--action", ...args], { env: { HOME: home, PATH: "/usr/bin:/bin", AGENTHUB_TEST_BIN_DIR: bin }, encoding: "utf8", timeout: 10_000 });
+  const r = spawnSync(process.execPath, [PLUGIN, "--action", ...args], { env: { HOME: home, PATH: "/usr/bin:/bin", AGENTHUB_TEST_BIN_DIR: bin, ...(lang ? { AGENTHUB_LANG: lang } : {}) }, encoding: "utf8", timeout: 10_000 });
   let calls = [];
   try {
     calls = readFileSync(log, "utf8").trim().split("\n").filter(Boolean);
   } catch {}
   rmSync(log, { force: true });
-  return { out: r.stdout.trim(), code: r.status, calls };
+  const lines = r.stdout.trim().split("\n");
+  const message = lines.find((l) => l.startsWith("message="))?.slice(8) ?? null;
+  return { out: lines.at(-1), code: r.status, calls, ...(message ? { message } : {}) };
 }
+// двойник hermes — shell-скрипт: на Windows его не запустить (плагин и так только для macOS)
+const POSIX = { skip: process.platform === "win32" ? "двойник hermes — /bin/sh" : false };
 
-test("действия: профиль задачи из jobs.json, pause/resume по состоянию, argv hermes -p профиль cron …", () => {
+test("действия: профиль задачи из jobs.json, pause/resume по состоянию, argv hermes -p профиль cron …", POSIX, () => {
   const home = makeHome();
   try {
     assert.deepEqual(act(home, ["cron-pause", "aaaa11112222"]), { out: "ok", code: 0, calls: ["-p demo-bot cron pause aaaa11112222"] });
     assert.deepEqual(act(home, ["cron-resume", "cccc55556666"]), { out: "ok", code: 0, calls: ["-p demo-bot cron resume cccc55556666"] });
     assert.deepEqual(act(home, ["cron-run", "bbbb33334444"]).calls, ["-p demo-bot cron run bbbb33334444"]);
-    assert.deepEqual(act(home, ["cron-pause", "cccc55556666"]), { out: "reason=already-paused", code: 3, calls: [] });
-    assert.deepEqual(act(home, ["cron-resume", "aaaa11112222"]), { out: "reason=not-paused", code: 3, calls: [] });
-    assert.deepEqual(act(home, ["cron-run", "ffff00000000"]), { out: "reason=unknown-job", code: 3, calls: [] });
-    assert.deepEqual(act(home, ["cron-run", "--help"]), { out: "reason=bad-job", code: 3, calls: [] });
+    assert.deepEqual(act(home, ["cron-pause", "cccc55556666"]), { out: "reason=already-paused", code: 3, calls: [], message: "Задача уже на паузе." });
+    assert.deepEqual(act(home, ["cron-resume", "aaaa11112222"]), { out: "reason=not-paused", code: 3, calls: [], message: "Задача не на паузе." });
+    assert.deepEqual(act(home, ["cron-run", "ffff00000000"]), { out: "reason=unknown-job", code: 3, calls: [], message: "Задачи с таким id нет ни в одном профиле Hermes." });
+    assert.deepEqual(act(home, ["cron-run", "--help"]), { out: "reason=bad-job", code: 3, calls: [], message: "Такой задачи нет." });
     assert.deepEqual(act(home, ["pause"]), { out: "ok", code: 0, calls: ["pause"] });
     writeFileSync(join(home, ".hermes", "ESTOP"), "");
-    assert.deepEqual(act(home, ["pause"]), { out: "reason=already-paused", code: 3, calls: [] });
+    assert.deepEqual(act(home, ["pause"]), { out: "reason=hermes-paused", code: 3, calls: [], message: "Hermes уже на паузе." });
     assert.equal(act(home, ["bogus"]).out, "reason=unknown-action");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -344,4 +349,52 @@ test("1.2.2: activity= для вердикта хаба «можно ли вык
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("1.3.0 (контракт 2): текст отказа действия пишет плагин — message= перед reason=, на языке хаба (ru и en)", POSIX, () => {
+  const home = makeHome();
+  try {
+    const en = act(home, ["cron-pause", "cccc55556666"], { lang: "en" });
+    assert.deepEqual(en, { out: "reason=already-paused", code: 3, calls: [], message: "The job is already paused." });
+    assert.equal(act(home, ["cron-resume", "aaaa11112222"], { lang: "en" }).message, "The job isn't paused.");
+    assert.equal(act(home, ["cron-run", "--help"], { lang: "en" }).message, "No such task.");
+    // программа есть, а ~/.hermes нет — свой код: «нет ~/.local/bin/hermes» указал бы не на тот файл
+    rmSync(join(home, ".hermes"), { recursive: true, force: true });
+    assert.deepEqual(act(home, ["cron-run", "aaaa11112222"]), { out: "reason=no-hermes-home", code: 3, calls: [], message: "Нет папки ~/.hermes — данных Hermes нет." });
+    assert.equal(act(home, ["cron-run", "aaaa11112222"], { lang: "en" }).message, "No ~/.hermes folder — no Hermes data.");
+    // строка message= — до reason= (ядро берёт reason= из последней строки, message= — из последних пяти)
+    const r = spawnSync(process.execPath, [PLUGIN, "--action", "bogus"], { env: { HOME: home, PATH: "/usr/bin:/bin", AGENTHUB_TEST_BIN_DIR: join(home, "bin") }, encoding: "utf8", timeout: 10_000 });
+    assert.deepEqual(r.stdout.trim().split("\n"), ["message=Плагин не знает такого действия.", "reason=unknown-action"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("1.3.0: у каждого кода отказа — текст на ru и en, до 120 знаков, без перевода строки и без «|»", async () => {
+  const mod = await import(pathToFileURL(PLUGIN).href);
+  const src = readFileSync(PLUGIN, "utf8");
+  const codes = new Set([...src.matchAll(/reason: "([a-z0-9-]+)"/g)].map((m) => m[1]));
+  codes.add("hermes-failed");
+  codes.add("timeout");
+  for (const c of codes) {
+    for (const lang of ["ru", "en"]) {
+      const t = mod.refusalMessage(c, lang);
+      assert.ok(t, `${c} (${lang})`);
+      assert.ok([...t].length <= 120 && !/[\n|]/.test(t), `${c} (${lang}): ${t}`);
+    }
+  }
+  assert.equal(mod.refusalMessage("hermes-failed", "ru", 2), "Команда hermes завершилась с ошибкой (код 2).");
+  assert.equal(mod.refusalMessage("hermes-failed", "en", 2), "The hermes command failed (exit code 2).");
+  assert.equal(mod.refusalMessage("nope", "ru"), null);
+});
+
+test("1.3.0: метаданные контракта 2 — значок, контракт, свой переключатель уведомлений с переносом «Прогоны агентов»", () => {
+  const pm = readPluginMeta(PLUGIN);
+  assert.deepEqual(pm.warnings, []);
+  assert.equal(pm.meta.version, "1.3.0");
+  assert.equal(pm.meta.contract, 2);
+  assert.deepEqual(pm.meta.icon, { symbol: "alarm", color: "#30D158" });
+  assert.deepEqual(pm.meta.push.map((r) => [r.key, r.kind, r.legacyKind]), ["job-failed", "job-costly", "ticker-silent", "gateway-silent", "estop"].map((k) => [k, "plugin", "runs"]));
+  assert.ok(pm.meta.push.every((r) => r.labels?.en), "у каждого правила — английский ярлык");
+  assert.equal(readFileSync(PLUGIN, "utf8").includes('kind="runs"'), false, "устаревшего вида нет");
 });

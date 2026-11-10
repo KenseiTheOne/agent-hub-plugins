@@ -71,13 +71,25 @@ export function parseActionArg(text) {
   return { name: m[1], pattern };
 }
 
+// Версия контракта плагинов, которую понимает это ядро (docs/extension-points.md, «Версии контракта»): 1 — до 09.11
+// (неявно), 2 — чистка ядра от названий плагинов: свои переключатели уведомлений (kind="plugin"), значок
+// (<agenthub.icon>), подключения (<agenthub.connection>), текст отказа действия (message=), сам тег
+// <agenthub.contract>. Плагин объявляет минимальную нужную ему версию; новее этой — установка и обновление
+// отказывают «нужен хаб новее» (а не ошибкой линтера).
+export const CONTRACT_VERSION = 2;
+
 // Правило push для ключа события плагина:
-//   <agenthub.push key="unity-open" hold="evening" quiet="true" macOnly="true" cooldown="7d" away="5m" kind="night">Ярлык</agenthub.push>
+//   <agenthub.push key="build-blocked" hold="evening" quiet="true" macOnly="true" cooldown="7d" away="5m" kind="plugin">Ярлык</agenthub.push>
 // Ядро и служба push берут такие правила только у встроенных, официальных и своих плагинов (tier из политики
-// менеджера: подписанный индекс или согласие на свой); у остальных они игнорируются. kind — вид уведомления для выключателей в «Настройках» (PUSH_KINDS;
-// "security" — исключение безопасности, не выключается). → { key, label, hold?, quietException?, macOnly?,
-// cooldownMs?, awayDelayMs?, kind? } | текст ошибки
-export const PUSH_KINDS = ["sessions", "runs", "night", "updates", "problems", "other", "security"];
+// менеджера: подписанный индекс или согласие на свой); у остальных они игнорируются. kind — вид уведомления для
+// выключателей в «Настройках» (PUSH_KINDS): общий вид ядра, "plugin" — свой переключатель плагина (строка с
+// названием плагина в «Настройках → Уведомления»), "security" — исключение безопасности, не выключается.
+// Устаревшие виды контракта 1 ("runs", "night") принимаются как "plugin" (линтер предупреждает) и запоминаются в
+// legacyKind: выключенный пользователем прежний вид гасит свой переключатель плагина (lib/push/prefs.mjs). Тот же
+// перенос для правила с новым видом — атрибут was="runs|night". → { key, label, hold?, quietException?, macOnly?,
+// cooldownMs?, awayDelayMs?, kind?, legacyKind? } | текст ошибки
+export const PUSH_KINDS = ["sessions", "updates", "problems", "other", "security", "plugin"];
+export const LEGACY_PUSH_KINDS = ["runs", "night"];
 export function parsePushRule(attrs, label) {
   const key = attrs.key;
   if (!key || !/^[\w.-]{1,64}$/.test(key)) return "нет корректного key";
@@ -90,8 +102,17 @@ export function parsePushRule(attrs, label) {
   if (attrs.quiet !== undefined) out.quietException = bool(attrs.quiet) ?? false;
   if (attrs.macOnly !== undefined) out.macOnly = bool(attrs.macOnly) ?? false;
   if (attrs.kind !== undefined) {
-    if (!PUSH_KINDS.includes(attrs.kind)) return `${key}: kind ждём ${PUSH_KINDS.join("|")}`;
-    out.kind = attrs.kind;
+    if (LEGACY_PUSH_KINDS.includes(attrs.kind)) {
+      out.kind = "plugin";
+      out.legacyKind = attrs.kind;
+    } else if (!PUSH_KINDS.includes(attrs.kind)) return `${key}: kind ждём ${PUSH_KINDS.join("|")}`;
+    else out.kind = attrs.kind;
+  }
+  if (attrs.was !== undefined) {
+    if (!LEGACY_PUSH_KINDS.includes(attrs.was)) return `${key}: was ждём ${LEGACY_PUSH_KINDS.join("|")}`;
+    if (out.kind !== "plugin") return `${key}: was — только у kind="plugin"`;
+    out.legacyKind = attrs.was;
+    out.wasDeclared = true;
   }
   for (const [a, k] of [["cooldown", "cooldownMs"], ["away", "awayDelayMs"]]) {
     if (attrs[a] === undefined) continue;
@@ -100,6 +121,86 @@ export function parsePushRule(attrs, label) {
     out[k] = ms;
   }
   return out;
+}
+
+// Значок плагина: <agenthub.icon symbol="star" color="#FF9F0A"></agenthub.icon>. symbol — имя SF Symbol (строчные
+// латинские буквы и цифры через точку), color — #RRGGBB; оболочка рисует плитку градиентом от этого цвета. Нет тега
+// или он неверный — нейтральный значок по умолчанию. → { symbol, color } | текст ошибки
+export const ICON_SYMBOL_RE = /^[a-z0-9]+(?:\.[a-z0-9]+){0,7}$/;
+export const ICON_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
+export function parseIcon(attrs) {
+  const symbol = String(attrs.symbol || "").trim();
+  if (!symbol || symbol.length > 64 || !ICON_SYMBOL_RE.test(symbol)) return "icon: symbol — имя SF Symbol (a-z, 0-9 через точку, до 64)";
+  const out = { symbol };
+  if (attrs.color !== undefined) {
+    const color = String(attrs.color).trim();
+    if (!ICON_COLOR_RE.test(color)) return "icon: color — #RRGGBB";
+    out.color = color.toUpperCase();
+  }
+  return out;
+}
+
+// Подключение к внешнему сервису по OAuth, которое ведёт хаб за плагин (служба oauth, docs/api.md «Подключения»):
+//   <agenthub.connection id="example.tasks" type="mcp" url="https://mcp.example.com/mcp" scope="read" title="Example"
+//     tools="get_user,filter_tasks" interval="15m" budget="100">зачем</agenthub.connection>
+// id — имя подключения: по умолчанию — id плагина, иначе «<id плагина>.<имя>» (имя — a-z, 0-9, «-», с буквы, до 32);
+// целиком — с буквы и до 64 символов (плагин с id на цифру или длиннее 64 объявляет подключение с коротким <имя>
+// не может — объявление отвергается, а не ломается потом на связке). Точки в id плагина не бывает, так что по id
+// подключения всегда видно, чей он: плагин foo не может объявить подключение плагина foo-bar. Это же имя записи в
+// связке (agent-hub.oauth / <id>.client|token, lib/services/secrets.mjs — то же правило). type — только mcp, url — https на имени хоста (не IP-адрес), его хост обязан быть в <agenthub.net>
+// плагина (проверяют линтер и ядро), hosts — ещё хосты сервера авторизации (тоже из net), scope — что просить при
+// входе, tools — белый список инструментов MCP (1–32), interval — не чаще одного одинакового вызова за столько (ядро
+// держит пределы 5 мин … 24 ч), budget — вызовов за скользящие сутки (1…10000). Берётся только у доверенных
+// плагинов (builtin, official, own; линтер реестра не пускает его сторонним); в окне согласия — правом вида
+// connections. → { … } | текст ошибки
+export const CONNECTION_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
+export const CONNECTION_ID_RE = /^(?=.{1,64}$)[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]{0,31})?$/;
+// id подключения принадлежит плагину pluginId: равен ему или «<pluginId>.<имя>».
+export function connectionIdOf(pluginId, id) {
+  const cid = id || pluginId;
+  if (!CONNECTION_ID_RE.test(String(cid || ""))) return false;
+  return cid === pluginId || (cid.startsWith(`${pluginId}.`) && CONNECTION_NAME_RE.test(cid.slice(pluginId.length + 1)));
+}
+const HOST_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+// Имя хоста, а не IP-адрес: последняя метка (домен верхнего уровня) — с буквой (127.0.0.1, 169.254.169.254 — нет).
+export function hostNameOk(h) {
+  const s = String(h || "");
+  return HOST_RE.test(s) && /[a-z]/.test(s.slice(s.lastIndexOf(".") + 1));
+}
+export function parseConnection(attrs, note) {
+  const id = attrs.id === undefined ? null : String(attrs.id).trim();
+  if (id !== null && !CONNECTION_ID_RE.test(id)) return "connection: id — id плагина или «<id плагина>.<имя>» (имя: a-z, 0-9, «-», с буквы, до 32; целиком — с буквы, до 64)";
+  const type = attrs.type === undefined ? "mcp" : String(attrs.type).trim();
+  if (type !== "mcp") return `connection ${id || "?"}: type — только mcp`;
+  let url;
+  try {
+    url = new URL(String(attrs.url || ""));
+  } catch {
+    return `connection ${id || "?"}: url — адрес https://`;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443") || !hostNameOk(url.hostname) || url.hash) return `connection ${id || "?"}: url — https:// на имени хоста (не IP-адрес), без порта, учётных данных и #`;
+  const hosts = [];
+  for (const h of String(attrs.hosts || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) {
+    if (!hostNameOk(h)) return `connection ${id || "?"}: hosts — имена хостов (не IP-адреса) через запятую`;
+    if (!hosts.includes(h)) hosts.push(h);
+  }
+  const scope = attrs.scope === undefined ? null : String(attrs.scope).trim();
+  if (scope !== null && !/^[\w:./-]+(?: [\w:./-]+){0,15}$/.test(scope)) return `connection ${id || "?"}: scope — слова через пробел`;
+  const tools = String(attrs.tools || "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (!tools.length || tools.length > 32 || tools.some((x) => !/^[A-Za-z0-9_.-]{1,64}$/.test(x))) return `connection ${id || "?"}: tools — 1–32 имени инструментов через запятую`;
+  let intervalMs = 15 * 60_000;
+  if (attrs.interval !== undefined) {
+    intervalMs = parseInterval(attrs.interval);
+    if (intervalMs === null) return `connection ${id || "?"}: interval — число и ms|s|m|h|d`;
+  }
+  let budget = 100;
+  if (attrs.budget !== undefined) {
+    budget = Number(attrs.budget);
+    if (!Number.isInteger(budget) || budget < 1 || budget > 10_000) return `connection ${id || "?"}: budget — целое 1…10000`;
+  }
+  const title = attrs.title === undefined ? null : String(attrs.title).trim();
+  if (title !== null && (!title || title.length > 64 || /[\p{Cc}\p{Cf}]/u.test(title))) return `connection ${id || "?"}: title — до 64 символов`;
+  return { id, type, url: url.href, host: url.hostname, hosts, scope, tools: [...new Set(tools)], intervalMs, budget, title, note: note ? note.slice(0, 300) : null };
 }
 
 // Зависимость плагина: <agenthub.requires name="Tool" url="https://…" check="~/.tool">зачем</agenthub.requires>.
@@ -150,6 +251,13 @@ export function parseMetaText(text) {
     // <agenthub.requires name="Tool" url="https://…" check="~/.tool">зачем</agenthub.requires>
     // → [{ name, url, check, note }]. Это не право: ядро только проверяет, есть ли путь check.
     requires: [],
+    // Минимальная версия контракта (<agenthub.contract>2</agenthub.contract>); null — не объявлена (контракт 1).
+    contract: null,
+    // Значок (<agenthub.icon symbol="…" color="#RRGGBB">) → { symbol, color? } | null.
+    icon: null,
+    // Подключения к внешним сервисам (<agenthub.connection …>) → [{ id, type, url, host, hosts, scope, tools,
+    // intervalMs, budget, title, note }]; id null — по id плагина.
+    connections: [],
     extra: {},
     // Переводы (AGENTHUB_LANG): { en: { title, desc, why: { <что>: <зачем> } } }. Теги с lang="xx" — вариант
     // на языке xx; без lang — язык плагина по умолчанию. Действия — атрибуты title-xx / cost-xx (action.i18n).
@@ -186,6 +294,12 @@ export function parseMetaText(text) {
         const r = meta.requires.find((x) => x.name === attrs.name);
         if (!r) warnings.push(`requires ${attrs.name || "?"} lang=${lang}: сначала тег без lang с тем же name`);
         else ((loc(lang).requires ||= {})[r.name] = { ...(value ? { note: value.slice(0, 300) } : {}), ...(attrs.title ? { name: attrs.title.slice(0, 64) } : {}) });
+      } else if (tag === "connection") {
+        // перевод названия (title=) и пояснения подключения — по id (без id — первое подключение без id)
+        const id = attrs.id === undefined ? null : String(attrs.id);
+        const c = meta.connections.find((x) => x.id === id);
+        if (!c) warnings.push(`connection ${id || "?"} lang=${lang}: сначала тег без lang с тем же id`);
+        else ((loc(lang).connections ||= {})[id || ""] = { ...(value ? { note: value.slice(0, 300) } : {}), ...(attrs.title ? { title: String(attrs.title).slice(0, 64) } : {}) });
       } else warnings.push(`${tag}: lang у этого тега не поддерживается`);
       continue;
     }
@@ -238,6 +352,21 @@ export function parseMetaText(text) {
       else if (meta.requires.some((x) => x.name === r.name)) warnings.push(`requires ${r.name}: повтор name`);
       else if (meta.requires.length >= 8) warnings.push("requires: больше 8 зависимостей");
       else meta.requires.push(r);
+    } else if (tag === "icon") {
+      const ic = parseIcon(attrs);
+      if (typeof ic === "string") warnings.push(ic);
+      else if (meta.icon) warnings.push("icon: повтор тега");
+      else meta.icon = ic;
+    } else if (tag === "contract") {
+      const n = /^\d{1,4}$/.test(value) ? Number(value) : NaN;
+      if (!Number.isInteger(n) || n < 1) warnings.push(`contract: ждём целое число ≥ 1, а не «${value.slice(0, 10)}»`);
+      else meta.contract = n;
+    } else if (tag === "connection") {
+      const c = parseConnection(attrs, value);
+      if (typeof c === "string") warnings.push(c);
+      else if (meta.connections.some((x) => x.id === c.id)) warnings.push(`connection ${c.id || "?"}: повтор id`);
+      else if (meta.connections.length >= 4) warnings.push("connection: больше 4 подключений");
+      else meta.connections.push(c);
     } else if (tag.startsWith("author.")) {
       meta.author[tag.slice(7)] = value;
     } else if (tag === "type") {

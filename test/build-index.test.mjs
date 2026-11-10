@@ -248,3 +248,37 @@ test("--published: версия, уже опубликованная с друг
     cleanup(b);
   }
 });
+
+test("контракт 2: в индексе — contract и icon из метаданных; без тегов полей нет; у официальных — контракт 2 и значок, у clickup — подключение в правах", () => {
+  const root = makeRegistry({
+    v2: { "v2.5m.mjs": pluginSource({ title: "V2", extra: ["// <agenthub.contract>2</agenthub.contract>", '// <agenthub.icon symbol="moon.stars" color="#5e5ce6"></agenthub.icon>'] }), "README.md": README },
+    old: { "old.5m.mjs": pluginSource({ title: "Old" }), "README.md": README },
+  });
+  const out = tempDir("ahp-out-");
+  const out2 = tempDir("ahp-out-");
+  try {
+    const { index } = buildIndex({ root, out, generatedAt: "2026-11-04T10:00:00.000Z" });
+    const v2 = index.plugins.find((p) => p.id === "v2");
+    assert.equal(v2.contract, 2);
+    assert.deepEqual(v2.icon, { symbol: "moon.stars", color: "#5E5CE6" });
+    const old = index.plugins.find((p) => p.id === "old");
+    assert.equal("contract" in old, false);
+    assert.equal("icon" in old, false);
+    // официальные плагины этой репы
+    const real = buildIndex({ out: out2, generatedAt: "2026-11-04T10:00:00.000Z" }).index;
+    for (const id of ["clickup", "hermes"]) {
+      const p = real.plugins.find((x) => x.id === id);
+      assert.equal(p.contract, 2, id);
+      assert.match(p.icon?.symbol || "", /^[a-z0-9.]+$/, id);
+      assert.match(p.icon?.color || "", /^#[0-9A-F]{6}$/, id);
+    }
+    const cu = real.plugins.find((x) => x.id === "clickup");
+    assert.equal(cu.permissions.connections.length, 1);
+    assert.match(cu.permissions.connections[0].what, /^clickup: https:\/\/mcp\.clickup\.com\/mcp scope=read tools=clickup_filter_tasks$/);
+    assert.equal("connections" in real.plugins.find((x) => x.id === "hermes").permissions, false);
+  } finally {
+    cleanup(root);
+    cleanup(out);
+    cleanup(out2);
+  }
+});

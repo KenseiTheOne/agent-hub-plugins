@@ -1,4 +1,4 @@
-// clickup 1.2.0: тикеты через вход в ClickUp (MCP) — запросы делает хаб, плагин зовёт его по сокету
+// clickup 1.2.0+: тикеты через вход в ClickUp (MCP) — запросы делает хаб, плагин зовёт его по сокету
 // (POST /connections/clickup/mcp). Хаб здесь — двойник на Unix-сокете во временном каталоге; в сеть не ходим.
 // Запуск: cd agent-hub-plugins && env -u NODE_OPTIONS node --test plugins/clickup/test/*.test.mjs
 
@@ -85,15 +85,30 @@ function run(env) {
 
 const titles = (p) => [...p.header, ...p.body].map((i) => i.title);
 
-test("метаданные 1.2.0: net mcp.clickup.com и api.clickup.com, push login-expired (вид problems)", () => {
+test("метаданные 1.3.0 (контракт 2): net mcp.clickup.com и api.clickup.com, подключение объявляет сам плагин, значок, сбои входа — общий вид problems (своего переключателя нет)", () => {
   const pm = readPluginMeta(PLUGIN);
-  assert.equal(pm.meta.version, "1.2.0");
+  assert.deepEqual(pm.warnings, []);
+  assert.equal(pm.meta.version, "1.3.0");
+  assert.equal(pm.meta.contract, 2);
+  assert.deepEqual(pm.meta.icon, { symbol: "checklist", color: "#FF375F" });
   const nets = pm.meta.net.map((x) => x.split(" — ")[0]);
   assert.deepEqual(nets.sort(), ["api.clickup.com", "mcp.clickup.com"]);
   assert.ok(pm.meta.secrets.some((s) => s.startsWith("clickup.token")), "личный токен — запасной путь");
+  // всё, что ядро до контракта 2 знало про ClickUp, — теперь в объявлении плагина; инструмент — только тот, что зовёт плагин
+  assert.equal(pm.meta.connections.length, 1);
+  const c = pm.meta.connections[0];
+  assert.deepEqual(
+    { id: c.id, type: c.type, url: c.url, scope: c.scope, tools: c.tools, intervalMs: c.intervalMs, budget: c.budget, title: c.title },
+    { id: "clickup", type: "mcp", url: "https://mcp.clickup.com/mcp", scope: "read", tools: ["clickup_filter_tasks"], intervalMs: 900_000, budget: 100, title: "ClickUp" },
+  );
+  assert.ok(nets.includes(c.host), "хост подключения объявлен в <agenthub.net>");
+  assert.ok(c.note && pm.meta.i18n.en.connections.clickup.note, "«зачем» на двух языках");
   const src = readFileSync(PLUGIN, "utf8");
-  assert.match(src, /<agenthub\.push key="login-expired" kind="problems">/);
-  assert.match(src, /<agenthub\.push key="login-expired" kind="problems" lang="en">/);
+  assert.equal((src.match(/tool: "([a-z_]+)"/g) || []).every((m) => c.tools.includes(m.slice(7, -1))), true, "плагин зовёт только инструменты из белого списка");
+  // сбой входа — общий вид ядра «Сбои и предупреждения» (kind="problems"), как до 1.3.0: выключенные человеком «Сбои»
+  // гасят и эти события; своего переключателя у ClickUp нет, устаревших видов нет
+  assert.deepEqual(pm.meta.push.map((r) => [r.key, r.kind, r.legacyKind ?? null]), [["auth-failed", "problems", null], ["login-expired", "problems", null]]);
+  assert.deepEqual(pm.meta.push.map((r) => Boolean(r.labels?.en)), [true, true]);
 });
 
 test("вход через хаб: один вызов clickup_filter_tasks (assignees me), токен ClickUp плагину не нужен; REST не трогается", HUB, async () => {
@@ -114,7 +129,7 @@ test("вход через хаб: один вызов clickup_filter_tasks (assi
     assert.equal(parsed.status, "ok");
     assert.match(parsed.header[0].title, /^ClickUp: 4 тикета/);
     const all = titles(parsed).join("\n");
-    assert.match(all, /обновлено \d\d:\d\d · следующее в \d\d:\d\d/);
+    assert.match(all, /обновлено (?:\d\d\.\d\d )?\d\d:\d\d · следующее в (?:\d\d\.\d\d )?\d\d:\d\d/);
     assert.match(all, /Через вход в ClickUp: раз в 15 мин — на тарифе Free ClickUp даёт около 100 запросов в сутки/);
     assert.ok(parsed.body.some((i) => /Синтетика: починить экран загрузки/.test(i.title) && i.offer?.primitive === "open.url") || /href=/.test(text));
   } finally {
@@ -126,7 +141,7 @@ test("вход через хаб: один вызов clickup_filter_tasks (assi
 
 test("почему реже: лимит ClickUp, бюджет суток, загрузка — в шапке и пояснениях (ru и en)", HUB, async () => {
   const cases = [
-    { body: ok({ why: "rate-limit", fresh: false, error: "mcp:rate-limited" }).body, ru: /ClickUp сообщил, что лимит запросов исчерпан — следующее обновление в \d\d:\d\d/, en: /ClickUp says the request limit is used up — next refresh at \d\d:\d\d/ },
+    { body: ok({ why: "rate-limit", fresh: false, error: "mcp:rate-limited" }).body, ru: /ClickUp сообщил, что лимит запросов исчерпан — следующее обновление в (?:\d\d\.\d\d )?\d\d:\d\d/, en: /ClickUp says the request limit is used up — next refresh at (?:[A-Z][a-z]{2} \d{1,2} )?\d\d:\d\d/ },
     { body: ok({ why: "budget", calls24h: 96, fresh: false }).body, ru: /Бережём суточный лимит ClickUp: 96 из 100 запросов за 24 ч/, en: /Saving the ClickUp daily limit: 96 of 100 requests in 24 h/ },
     { body: { ok: false, pending: true, result: null, fetchedAt: null, nextAt: null, why: "interval", intervalMs: 900_000 }, ru: /Загружаю тикеты из ClickUp…/, en: /Loading tickets from ClickUp…/, status: "unknown" },
   ];

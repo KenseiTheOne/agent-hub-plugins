@@ -13,7 +13,7 @@
 export const THIRD_PARTY_EFFECTS = ["open.*", "cmux.focus"];
 export const LOCAL_EFFECTS = ["open.*"];
 
-export const KINDS = ["fsRead", "fsWrite", "watch", "exec", "secrets", "net", "effects", "actions"];
+export const KINDS = ["fsRead", "fsWrite", "watch", "exec", "secrets", "net", "effects", "actions", "connections"];
 // Виды, у которых автор обязан объяснить «зачем».
 const NEED_WHY = new Set(["fsRead", "fsWrite", "exec", "secrets", "net"]);
 
@@ -54,7 +54,28 @@ export function permissionsFromMeta(meta) {
   }
   out.effects = [...new Set((meta.effects || []).map(norm))].sort();
   out.actions = (meta.actions || []).map((a) => ({ id: a.id, level: a.level, command: norm(a.command), title: a.title || null, ...(a.arg ? { arg: `${a.arg.name}:${a.arg.pattern}` } : {}) }));
+  // Подключения (<agenthub.connection>, контракт 2): вход в сервис ведёт хаб, плагин зовёт инструменты MCP через
+  // него. Пустой список в права не пишется — записи индекса и lock до контракта 2 сверяются как прежде.
+  const conns = (meta.connections || []).map((c) => ({ what: connectionWhat(c), why: c.note || null }));
+  if (conns.length) out.connections = conns;
   return out;
+}
+
+// id подключения принадлежит плагину pluginId: равен ему или «<pluginId>.<имя>» (та же грамматика, что
+// lib/meta.mjs connectionIdOf; модуль самодостаточен — копию берёт реестр).
+const CONNECTION_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
+const CONNECTION_ID_RE = /^(?=.{1,64}$)[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]{0,31})?$/;
+export function connectionIdOk(pluginId, id) {
+  const cid = id || pluginId;
+  if (!ID_RE.test(pluginId || "") || !CONNECTION_ID_RE.test(String(cid))) return false;
+  return cid === pluginId || (String(cid).startsWith(`${pluginId}.`) && CONNECTION_NAME_RE.test(String(cid).slice(pluginId.length + 1)));
+}
+
+// Строка права подключения: адрес, scope и белый список — то, на что человек соглашается. Интервал и бюджет — не
+// доступ, в ключ не входят.
+export function connectionWhat(c) {
+  const hosts = Array.isArray(c?.hosts) && c.hosts.length ? ` +${c.hosts.join(",")}` : "";
+  return norm(`${c?.id ? `${c.id}: ` : ""}${c?.url || "?"}${hosts} scope=${c?.scope || "-"} tools=${(c?.tools || []).join(",")}`);
 }
 
 // Права для записи каталога (index.json): как permissionsFromMeta, но watch — в прежнем виде (what — вся строка
@@ -69,7 +90,7 @@ export function indexPermissions(meta) {
 export function permissionList(perms) {
   const list = [];
   if (!perms || typeof perms !== "object") return list;
-  for (const k of ["fsRead", "fsWrite", "watch", "exec", "secrets", "net"]) {
+  for (const k of ["fsRead", "fsWrite", "watch", "exec", "secrets", "net", "connections"]) {
     for (const e of perms[k] || []) {
       if (!e || typeof e.what !== "string") continue;
       let what = e.what;
@@ -292,6 +313,26 @@ export function lintPlugin({ id, meta, source = "", official = false, local = fa
       else warnings.push(L(lang, `<agenthub.action id="${a.id}">: immediate — запуск одним щелчком, без окна: ревьюер проверяет, что действие ничего не тратит (квота, деньги, запуск агентов) сверх сказанного в title`, `<agenthub.action id="${a.id}">: immediate — runs in one click, no window: the reviewer checks it spends nothing (quota, money, starting agents) beyond what the title says`));
     }
   }
+  // Подключения: только у официальных и своих (ядро берёт их только у builtin/official/own — стороннему плагину
+  // право в окне согласия обещало бы то, чего не будет); хост адреса (и hosts сервера авторизации) — только из
+  // объявленной сети плагина; id — свой: id плагина или «<id плагина>.<имя>» (точки в id плагина не бывает).
+  const netHosts = new Set(perms.net.map((e) => e.what.toLowerCase()));
+  if (!official && (meta.connections || []).length) errors.push(L(lang, "<agenthub.connection>: подключения есть только у официальных и своих плагинов", "<agenthub.connection>: only official and your own plugins have connections"));
+  for (const c of meta.connections || []) {
+    const name = c.id || id;
+    for (const h of [c.host, ...(c.hosts || [])]) {
+      if (h && !netHosts.has(String(h).toLowerCase())) errors.push(L(lang, `<agenthub.connection id="${name}">: хост ${h} не объявлен в <agenthub.net>`, `<agenthub.connection id="${name}">: host ${h} isn't declared in <agenthub.net>`));
+    }
+    if (id && !connectionIdOk(id, c.id)) errors.push(L(lang, `<agenthub.connection id="${name}">: id подключения — id плагина или «${id}.<имя>» (имя: a-z, 0-9, «-», с буквы, до 32; целиком — с буквы, до 64)`, `<agenthub.connection id="${name}">: the connection id must be the plugin id or "${id}.<name>" (name: a-z, 0-9, "-", starting with a letter, up to 32; the whole id starts with a letter, up to 64)`));
+  }
+  // Устаревшие виды push контракта 1: работают как свой переключатель плагина, но пора перейти на kind="plugin".
+  for (const r of meta.push || []) {
+    if (r?.legacyKind && r.kind === "plugin" && !r.wasDeclared) {
+      // was= объявлен явно — это не устаревшая запись, а перенос выключателя (parsePushRule помечает wasDeclared)
+      warnings.push(L(lang, `<agenthub.push key="${r.key}" kind="${r.legacyKind}">: вид устарел (контракт 1) — пишите kind="plugin" was="${r.legacyKind}"`, `<agenthub.push key="${r.key}" kind="${r.legacyKind}">: the kind is deprecated (contract 1) — write kind="plugin" was="${r.legacyKind}"`));
+    }
+  }
+  // Значок: имя символа и цвет проверяет разбор метаданных; неверный тег — предупреждение разбора (не здесь).
   // Запретные места — ошибка для всех: исключений по метке official нет.
   for (const what of sourceViolations(source)) errors.push(L(lang, `исходник упоминает запретное место: ${what}`, `the source mentions a forbidden location: ${what}`));
   return { errors, warnings, permissions: perms };
