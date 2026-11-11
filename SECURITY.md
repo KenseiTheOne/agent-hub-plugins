@@ -23,7 +23,7 @@ in this repo. Describe the class of the problem and the affected plugin/version;
   `perms-label.yml` (the `permissions` label, token `pull-requests: write`): scripts and node come from `main`, PR
   files are read as data and not executed;
   signing — a separate job only on push to `main`, from the `registry-signing` environment.
-- Even with a signature, a third-party plugin gets nothing beyond statuses, `open.*`, `session.focus` and
-  `cmux.focus` (deprecated): the ceiling is enforced by the daemon core. A plugin is a separate process with a cleared
+- Even with a signature, a third-party plugin gets nothing beyond statuses, `open.*`, `session.focus`,
+  `terminal.focus` and `cmux.focus` (a deprecated alias of `terminal.focus`): the ceiling is enforced by the daemon core. A plugin is a separate process with a cleared
   environment, but runs as the same user: the permissions in the metadata are the author's promise, checked by review
   and the linter, not a sandbox.

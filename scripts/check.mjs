@@ -12,8 +12,8 @@
 // 1. Vendoring: the copies of the core parsers (scripts/vendor/) match VENDOR.json (and agent-hub, if it's next door).
 // 2. blocklist.json, official.json — shape.
 // 3. Each plugins/<id>/: structure, metadata via the same parser the daemon uses, the permission linter (forbidden
-//    paths; third-party plugins get only open.*, session.focus and cmux.focus — deprecated in favour of
-//    session.focus <sessionId> since contract 3 — and no <agenthub.action>).
+//    paths; third-party plugins get only open.*, session.focus, terminal.focus and cmux.focus — a deprecated alias of
+//    terminal.focus; new plugins use session.focus <sessionId> — and no <agenthub.action>).
 // 4. The permission diff against the base revision (--base / --base-dir): printed, $GITHUB_STEP_SUMMARY, --report.
 // 5. Tests on a synthetic HOME: a smoke run of the plugin (HOME = a copy of fixtures/home or an empty directory,
 //    environment cleaned like the daemon does, 5 s timeout) + plugins/<id>/test/*.test.mjs via node --test.
@@ -149,8 +149,8 @@ export function smokeRun(info) {
   });
 }
 
-// Output: format; effects only from the declared ones and under the ceiling (THIRD_PARTY_EFFECTS: open.*, session.focus
-// and the deprecated cmux.focus — for all registry plugins); action= — official only, declared only, with arg= matching
+// Output: format; effects only from the declared ones and under the ceiling (THIRD_PARTY_EFFECTS: open.*, session.focus,
+// terminal.focus and its deprecated alias cmux.focus — for all registry plugins); action= — official only, declared only, with arg= matching
 // the pattern from the metadata.
 export function outputErrors(info, text) {
   const errors = [];
@@ -163,7 +163,7 @@ export function outputErrors(info, text) {
     if (item.effect) {
       const spec = parseEffectSpec(item.effect);
       if (!spec) errors.push(`output: effect "${String(item.effect).slice(0, 40)}" could not be parsed`);
-      else if (!effectUnderCeiling(spec.primitive, THIRD_PARTY_EFFECTS)) errors.push(`output: effect ${spec.primitive} is not available to a registry plugin (only ${THIRD_PARTY_EFFECTS.join(", ")}; cmux.focus is deprecated — use session.focus <sessionId>)`);
+      else if (!effectUnderCeiling(spec.primitive, THIRD_PARTY_EFFECTS)) errors.push(`output: effect ${spec.primitive} is not available to a registry plugin (only ${THIRD_PARTY_EFFECTS.join(", ")}; cmux.focus is a deprecated alias of terminal.focus — use session.focus <sessionId>)`);
       else if (!effectUnderCeiling(spec.primitive, declared)) errors.push(`output: effect ${spec.primitive} is not declared in <agenthub.effects>`);
     }
     if (item.href && !/^https?:\/\//i.test(item.href)) errors.push(`output: href must be http(s)`);

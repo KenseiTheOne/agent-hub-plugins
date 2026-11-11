@@ -60,7 +60,7 @@ The hub no longer keeps its own texts for plugin codes; without `message=` the s
 refused (<code>)". The texts are `REFUSALS` in `hermes.60s.mjs`, each code in ru and en (a test checks that no code is
 missed).
 
-**Push** (`<agenthub.push>`): `job-failed`, `job-costly`, `ticker-silent`, `gateway-silent` (macOS only), `estop`.
+**Push** (`<agenthub.push>`): `job-failed`, `job-costly`, `ticker-silent`, `gateway-silent`, `estop`. (1.3.2: `macOnly` is dropped from `gateway-silent` — the hub no longer sends to Telegram, so the attribute means nothing.)
 Since 1.3.0 all are `kind="plugin" was="runs"`: they are muted by their own "Hermes" toggle in "Settings →
 Notifications" (the hub builds the row from the installed plugin: no plugin — no row). `was="runs"` carries over the
 previous choice: if the "Agent runs" kind (contract 1) was off, the "Hermes" toggle is off after the update too.

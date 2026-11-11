@@ -27,9 +27,8 @@ maintainer is the registry owner. Agent Hub's built-in plugins (claude-sessions,
 The `official` label grants four things in CI and in the daemon, and the reviewer treats all four as a privilege:
 - declared actions `<agenthub.action>` (level no lower than `confirm`; the confirmation and its text come from the
   core);
-- own push rules `<agenthub.push …>`: event label, `hold`, `macOnly`, `cooldown`, `away` and `quiet="true"` —
-  delivery to Telegram **during quiet hours** (for community plugins the tags are ignored: macOS only, without the
-  plugin's text);
+- own push rules `<agenthub.push …>`: event label, `hold`, `cooldown`, `away` and `quiet="true"` — a notification
+  **during quiet hours** (for community plugins the tags are ignored: no plugin text in the notification);
 - trusted status (`trusted`): the text of a line with `event=` goes into the notification (not for community);
 - connections `<agenthub.connection>` (contract 2): the hub handles signing in to the service and calls to its MCP.
   For community — a linter error; `id` — the plugin id or `<id>.<name>`, `url` — https on a host name (not an IP),
@@ -37,8 +36,9 @@ The `official` label grants four things in CI and in the daemon, and the reviewe
 
 The daemon treats a plugin as official only while the signed index calls it `official` and the files on disk are
 exactly the archive with the sha256 from the index: remove the id from `official.json` and the installed copy loses
-these four things after the next `POST /registry/fetch`. The effects ceiling (`open.*`, `session.focus`, and the
-deprecated `cmux.focus`; `Plugins/local` — only `open.*`) and the ban on mentioning forbidden locations are the same
+these four things after the next `POST /registry/fetch`; a plugin that drops out of the signed index altogether becomes
+community the same way (hub 0.1.2, logged once). The effects ceiling (`open.*`, `session.focus`, `terminal.focus` and
+its deprecated alias `cmux.focus`; `Plugins/local` — only `open.*`) and the ban on mentioning forbidden locations are the same
 as for everyone. A parameterised action:
 
 ```

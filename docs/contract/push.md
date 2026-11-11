@@ -19,12 +19,14 @@ must contain metadata only**: a task name, a tab, a reason; no conversation text
 ```
 # <agenthub.push key="build-blocked" hold="evening" cooldown="0s" kind="plugin">Сборка не запустится</agenthub.push>
 # <agenthub.push key="crashed" quiet="true" kind="plugin">Упало</agenthub.push>
-# <agenthub.push key="service-silent" macOnly="true" away="5m" kind="plugin" was="runs">Молчит</agenthub.push>
+# <agenthub.push key="service-silent" away="5m" kind="plugin" was="runs">Молчит</agenthub.push>
 # <agenthub.push key="service-silent" lang="en">Silent</agenthub.push>
 ```
 
-`hold="evening"`, `quiet="true"` (goes through during quiet hours), `macOnly="true"`, `cooldown=<interval>`,
-`away=<interval>` (Telegram if the human is away and the event stays raised longer), `kind=<kind>` (the switch in
+`hold="evening"`, `quiet="true"` (urgent: shown right away during quiet hours too, not held for the digest),
+`cooldown=<interval>`, `away=<interval>` (at the Mac — right away; away — the banner waits until the human is back or the
+event stays raised that long), `macOnly="true"` (accepted from older plugins and ignored: banners are the only channel),
+`kind=<kind>` (the switch in
 "Settings": a shared core kind `sessions`, `updates`, `problems`, `other`; `plugin` — **the plugin's own toggle** (a
 line with the plugin name in "Settings → Notifications"); `security` — a security exception, cannot be turned off; an
 unknown value is a parse warning and the rule is dropped), `was=runs|night` (only with `kind="plugin"`: the former
@@ -46,18 +48,20 @@ week, `token-lost` — immediately; all of them "failures and warnings")):
 
 | Key | When it is sent |
 |---|---|
-| `session-waiting` (`waiting:<sessionId>` in claude-sessions) | at the Mac — macOS immediately; away and waiting > 5 min — Telegram once; no flap window |
+| `session-waiting` (`waiting:<sessionId>` in claude-sessions) | at the Mac — a banner immediately; away — once the human is back or after 5 min, whichever comes first (during quiet hours — the digest); no flap window |
 | `auth-failed` | immediately |
 | `source-broken`, `plugin-error` | once until recovery |
 | `approvals-paused` (source `@hub`) | immediately |
 | `app-pin-changed` (source `@hub`) | immediately and during quiet hours, on every change of `requirements.app` (no flap window); at the Mac — always `osascript`, without `push.notify` and `/push/ack` (`bannerAlways`); the text says where the pin came from (`из Claude Code` — capitalized at the start) |
 | `app-pin-path-changed` (source `@hub`) | immediately and during quiet hours, on every change of `appPin.path` with the same requirement (the bundle the daemon launches); at the Mac — always `osascript` (`bannerAlways`); "The path of the pinned Agent Hub build changed — the daemon now launches <path>. If it wasn't you, open the journal" |
+| `plugin-update:<id>:<version>` (source `@hub`) | a new version of an installed plugin in the signed catalog, once per version ("Update available: Mail 0.4.0") |
+| `plugin-own-updated:<id>:<version>` (source `@hub`) | an own plugin was updated from its folder automatically (same permissions, no consent window): "Plugin updated — "Mail" updated to 0.4.0" (or "updated from its folder (version …)" when the version stayed); every such update, no flap window; kind `updates` |
 | `app-restart-stopped` (source `@hub`) | immediately, once per episode of the supervisor stopping (app service: the app crashed 3 times in 10 min or 3 checks in a row could not launch it — `why`); again only after the app has opened the event stream and the stop is cleared; at the Mac — always `osascript` (`bannerAlways`: there is no app to acknowledge); "Agent Hub keeps crashing — restarts stopped: 3 restarts in 10 min. Open Agent Hub yourself; details — agenthub logs" (with `why` — "Cannot launch Agent Hub (<why>)…") |
 | anything else | immediately, labeled "Event "key"" |
 
 In general: while a key is raised there is one message; cleared and raised again within 10 min after sending — it is
-suppressed (flapping). Events of **third-party** plugins (`trusted: false`) go to macOS only, without their text and
-without their rules.
+suppressed (flapping). Events of **third-party** plugins (`trusted: false`) arrive without their text and without their
+rules.
 
 Limits (protecting the daemon from an event flood): at most `maxPerPluginPerMin` (20) new notifications per minute from
 one trusted plugin and `maxPerUntrustedPerMin` (5) from a third-party one; the first one over the limit produces a
@@ -78,7 +82,7 @@ written only by the app class (the pinned build) via `PUT /settings/notification
 | Kind | Core rules | Plugins (`kind=` in the tag) |
 |---|---|---|
 | `sessions` — waiting for an answer / session questions | `session-waiting`, `approvals-paused` | — |
-| `updates` — hub and plugin updates | `plugin-update`, `hub-update`, `hub-update-ready`, `hub-update-installed`, `hub-update-failed` | — |
+| `updates` — hub and plugin updates | `plugin-update`, `plugin-own-updated`, `hub-update`, `hub-update-ready`, `hub-update-installed`, `hub-update-failed` | — |
 | `problems` — plugin failures and warnings | `source-broken`, `plugin-error`, `auth-failed` (and plugin rules with `kind="problems"`, for example quota) | a rule with `kind="problems"` or a key from the table (`auth-failed`) |
 | `other` — everything else from plugins | a key without a rule; **all** events of third-party plugins | a rule without `kind` and without a match in the table |
 | `plugin:<id>` — **the plugin's own toggle** | — | rules with `kind="plugin"` (and the deprecated `kind="runs"`/`"night"`): a line in "Settings" with the plugin name, only while the plugin is installed |
@@ -130,8 +134,7 @@ registry linter warns about such a tag and about core keys).
 hijacks a core key. The only way to silence them is to turn off the whole service (`services.push.enabled = false`),
 and "Settings → Notifications" warns about that.
 
-- **A turned-off kind goes nowhere**: no `push.notify` to the shell, no fallback `osascript`, no Telegram, no digest
-  item; the journal gets `push-muted {key, rule, kind, reason: "kind"|"all"}` without text. The event stays in the
+- **A turned-off kind goes nowhere**: no `push.notify` to the shell, no fallback `osascript`, no digest item; the journal gets `push-muted {key, rule, kind, reason: "kind"|"all"}` without text. The event stays in the
   plugin state (popover, plugin page) and in the journal. Raising it does not consume the plugin rate limit and does not
   produce "notifications muted".
 - The decision is made when the event is raised and before every deferred send: the evening blocker waited for 21:00, a
@@ -148,7 +151,7 @@ and "Settings → Notifications" warns about that.
 - **Quiet hours** — `quiet` in settings; until it is set, `services.push.quietStart/quietEnd` from `config.json` apply
   (as before 2026-11-09), and without them 23:00–08:00 (`/state.notifications.quiet.from`: `settings` | `config` |
   `default`). The first edit in "Settings" starts from the effective values. `quiet.enabled: false` — at night everything
-  takes the normal route (Telegram immediately, no digest); the evening blocker and the "night day" are computed from the
+  takes the normal route (a banner immediately, no digest); the evening blocker and the "night day" are computed from the
   same bounds. `quietStart == quietEnd` in `config.json` (formerly "no quiet hours") is shown as quiet hours turned off
   with bounds 23:00–08:00. The blocker's evening window runs from `eveningAt` to the start of quiet hours, only if that
   is in the evening (no longer than 12 h): quiet hours from 20:00 with `eveningAt` 21:00 give no window, and the blocker

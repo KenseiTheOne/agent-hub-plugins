@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // <agenthub.title>Hermes</agenthub.title>
-// <agenthub.version>1.3.1</agenthub.version>
+// <agenthub.version>1.3.2</agenthub.version>
 // <agenthub.contract>2</agenthub.contract>
 // <agenthub.icon symbol="alarm" color="#30D158"></agenthub.icon>
 // <agenthub.desc>Задачи Hermes по расписанию: что упало, что подорожало, отвечает ли служба Hermes и не на паузе ли он</agenthub.desc>
@@ -42,7 +42,7 @@
 // <agenthub.push key="job-failed" kind="plugin" was="runs">Hermes: задача упала</agenthub.push>
 // <agenthub.push key="job-costly" kind="plugin" was="runs">Hermes: задача потратила вдвое больше обычного</agenthub.push>
 // <agenthub.push key="ticker-silent" kind="plugin" was="runs">Hermes: расписание остановилось</agenthub.push>
-// <agenthub.push key="gateway-silent" macOnly="true" kind="plugin" was="runs">Hermes: служба молчит</agenthub.push>
+// <agenthub.push key="gateway-silent" kind="plugin" was="runs">Hermes: служба молчит</agenthub.push>
 // <agenthub.push key="estop" kind="plugin" was="runs">Hermes на паузе</agenthub.push>
 // <agenthub.push key="job-failed" lang="en">Hermes: job failed</agenthub.push>
 // <agenthub.push key="job-costly" lang="en">Hermes: job used twice the usual</agenthub.push>

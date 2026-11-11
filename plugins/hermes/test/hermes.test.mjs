@@ -60,7 +60,7 @@ test("metadata: standard 60 s, effects only open.file, control via declared acti
     ["cron-run", "confirm-cost", "job"],
     ["pause", "confirm", null],
   ]);
-  assert.ok(pm.meta.push.some((r) => r.key === "gateway-silent" && r.macOnly === true));
+  assert.ok(pm.meta.push.some((r) => r.key === "gateway-silent" && !r.macOnly), "macOnly is gone: the hub has no Telegram since 2026-11-11");
 });
 
 test("a failed job and a twice-as-costly one → events; prompts and errors are not shown", () => {
@@ -391,7 +391,7 @@ test("1.3.0: every refusal code has ru and en text, up to 120 characters, no lin
 test("1.3.x: contract 2 metadata — icon, contract, its own notification toggle carrying over \"Agent runs\"", () => {
   const pm = readPluginMeta(PLUGIN);
   assert.deepEqual(pm.warnings, []);
-  assert.equal(pm.meta.version, "1.3.1");
+  assert.equal(pm.meta.version, "1.3.2");
   assert.equal(pm.meta.contract, 2);
   assert.deepEqual(pm.meta.icon, { symbol: "alarm", color: "#30D158" });
   assert.deepEqual(pm.meta.push.map((r) => [r.key, r.kind, r.legacyKind]), ["job-failed", "job-costly", "ticker-silent", "gateway-silent", "estop"].map((k) => [k, "plugin", "runs"]));

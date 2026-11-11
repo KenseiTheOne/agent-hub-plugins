@@ -10,11 +10,11 @@
     "messages/parse.mjs": "daemon/lib/messages/parse.mjs"
   },
   "files": {
-    "meta.mjs": "b49022686edafb4802957f3bd030daab739f1a9f5275f117ea4f8070fff25f5a",
+    "meta.mjs": "cb4538e729319c41149fa85aeef00b98a5d42150ada2b368919700ced5bd96fe",
     "output.mjs": "afb454503200685bd73bfc69bf9ec47dfcad79ed43dd567d18fbcb9dbbd8bfdc",
     "minisign.mjs": "9970eb608a1d5d0ea2d3198b4fd189548d1b792109ffaa70d3042d651a0d95f5",
     "tarball.mjs": "9a5e79a43c970263870707581526d89795f11045c9ed9f4fdcae11517ec63d41",
-    "perms.mjs": "173740b2d8e5efd2af18ab89cd6b18cc074571444044dd87bfee39de169fdea5",
+    "perms.mjs": "a4a6d9d8d103f49d660575cae6d8bb5ff3b63df7832a6752668ac948c75e5736",
     "messages/parse.mjs": "b506962576830f28e48c5899a39d37f3674472b6117a622fa213ea8f082ed5b1",
     "native.mjs": "7c6e6450148d63dc77542453820ae8dcdd0bec12073dd8becd3116a1c21f3491"
   },
@@ -27,10 +27,10 @@
   },
   "docs": {
     "README.md": "857f0b19092e9ae21408832bf0d7bb7992ffaf750a83c55cdda7a5f8f81333a8",
-    "writing-plugins.md": "a2d9a19cbaff17da472fb3a5d6ced19a2264504fa069275d9c10062d78aa6a1a",
-    "extension-points.md": "fbbdf6b4c1ea1afa18b9b6a104484d8dab4dba2c25af002d89695923fcf1e9b6",
-    "push.md": "08d5ddf442590fbf57758b0fdccaa571f081d3eb97f97ec1c04e192cd3c80ec9",
-    "plugins-registry.md": "ae9460aef16a6dcccb46ea513f744fbc3bddaee4eeab2a9eb9a8939fb335d296",
-    "api.md": "2a94f52c5d3dd400f27fd32db2a735dc9254fdff3fdff9bf140c788c09b01933"
+    "writing-plugins.md": "3dc979d49af57a29b8f95d5f5e6157ac07b7d70183a833afbaba34a1cfe26bac",
+    "extension-points.md": "8df710b24e8bba5e99a452651aa1c9fea51bc217d5eee284e99612b06826dec7",
+    "push.md": "acd95d45ea710a1b3326dabbd86e62dd488cb98d447b84d697094b23be821b03",
+    "plugins-registry.md": "8e194716724f1571a58c3e9bcd72c9aed899037f914412b27016aa056ef6f985",
+    "api.md": "aab4ee7231c1f345b10b45da13b3ffe95e6b9a3160edb81fdb09e15a5e9fbf3e"
   }
 }

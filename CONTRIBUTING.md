@@ -12,8 +12,8 @@ point to this copy.
 - Show statuses: output in SwiftBar format (`Title | key=value`, header up to `---`).
 - Offer only safe core primitives: `open.*` (open a link/file) and `session.focus` (switch to a session's tab) — for
   all registry plugins, official ones included. Use `session.focus <sessionId>` (contract 3): the hub finds the tab
-  itself. `cmux.focus <surfaceId>` is still allowed but deprecated, kept for compatibility with already installed
-  plugins. Replies to sessions, stopping and launching sessions are core primitives only for the app's built-in
+  itself. `terminal.focus` is the terminal-neutral form of the old `cmux.focus <surfaceId>`; `cmux.focus` is still
+  allowed as its deprecated alias, kept for compatibility with already installed plugins. Replies to sessions, stopping and launching sessions are core primitives only for the app's built-in
   plugins. Declared actions `<agenthub.action>` — only for plugins labelled `official` (`official.json`, edited by
   the owner), level no lower than `confirm`. Also only for `official`: push rules `<agenthub.push>` (for a third-party
   plugin the hub ignores them; events go as kind "Other", macOS only and without the plugin's text) and connections

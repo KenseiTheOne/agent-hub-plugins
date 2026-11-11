@@ -10,7 +10,7 @@
 // lock and the index stored them before 2026-11-05) are parsed by permissionList the same way: keys of old and new entries match.
 
 // Effects ceiling for third-party plugins — the same as in the core (core.mjs: THIRD_PARTY_EFFECTS, LOCAL_EFFECTS).
-export const THIRD_PARTY_EFFECTS = ["open.*", "cmux.focus", "session.focus"];
+export const THIRD_PARTY_EFFECTS = ["open.*", "terminal.focus", "cmux.focus", "session.focus"];
 export const LOCAL_EFFECTS = ["open.*"];
 
 export const KINDS = ["fsRead", "fsWrite", "watch", "exec", "secrets", "net", "effects", "actions", "connections", "terminal"];
@@ -445,6 +445,8 @@ export const WRITE_RISK_TEXT = Object.freeze({
   hub: ["каталог самого Agent Hub: настройки хаба, установленные плагины и закрепление приложения — так обходят проверки хаба", "Agent Hub's own folder: hub settings, installed plugins and the app pin — a way around the hub's checks"],
   // not a place on disk but the <agenthub.terminal>send permission (contract 3): the same loud display
   terminal: ["набор во вкладки Claude Code: плагин сможет вводить строки в ваши сессии от вашего имени — команды и запросы, которые Claude Code исполнит с вашими правами", "typing into Claude Code tabs: the plugin can enter lines into your sessions on your behalf — commands and prompts Claude Code will run with your permissions"],
+  // not a permission but the own plugin's source folder (decision 2026-11-11): writable by the group, not only by you
+  "group-writable": ["папку плагина могут менять не только вы, но и ваша группа (umask 002; на Mac это обычно группа staff — все учётные записи этого компьютера). Правки с тем же набором прав хаб ставит сам, без окна согласия, — чужая правка получит доверие вашего плагина. Уберите запись для группы: chmod -R g-w <папка>", "the plugin folder can be changed not only by you but by your group too (umask 002; on a Mac that is usually the staff group — every account on this computer). The hub installs edits with the same permissions by itself, without a consent window — someone else's edit would get your plugin's trust. Remove group write: chmod -R g-w <folder>"],
   "terminal-mode": ["режимы Claude Code во вкладках: строка с «!» — команда оболочки, которую Claude Code выполнит сразу, без своих разрешений; с «#» — запись в память, которую Claude Code будет читать в каждой сессии; с «&» — фоновая задача", "Claude Code modes in tabs: a line starting with \"!\" is a shell command Claude Code runs at once, without its own permissions; \"#\" writes to memory Claude Code reads in every session; \"&\" starts a background task"],
 });
 export function writeRiskText(kind, lang = "ru") {
@@ -520,6 +522,8 @@ export function lintPlugin({ id, meta, source = "", official = false, local = fa
   // effects are under the ceiling for all registry plugins (official ones too: control only via their own actions)
   const ceiling = local ? LOCAL_EFFECTS : THIRD_PARTY_EFFECTS;
   for (const e of perms.effects) if (!effectUnderCeiling(e, ceiling)) errors.push(L(lang, `effects «${e}»: плагину реестра доступны только ${ceiling.join(", ")}`, `effects "${e}": a registry plugin may use only ${ceiling.join(", ")}`));
+  // cmux.focus is an alias of terminal.focus until the next contract
+  if (perms.effects.includes("cmux.focus")) warnings.push(L(lang, `effects «cmux.focus»: устарело — пишите terminal.focus (то же, для любого терминала) или session.focus <sessionId>`, `effects "cmux.focus": deprecated — write terminal.focus (the same, for any terminal) or session.focus <sessionId>`));
   if (!official) {
     if (perms.actions.length) errors.push(L(lang, `<agenthub.action>: действия есть только у официальных плагинов`, `<agenthub.action>: only official plugins have actions`));
   } else {

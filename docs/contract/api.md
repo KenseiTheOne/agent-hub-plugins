@@ -178,8 +178,9 @@ variable — the hub socket path.
 ### Terminal — `POST /terminal/read-screen`, `POST /terminal/send-text` (a trusted plugin process, contract 3)
 
 "Read the tab screen" and "type a line into the tab" of a Claude Code session (the `terminal` service,
-`daemon/lib/services/terminal.mjs`; routes — `lib/routes/terminal.mjs`; the terminal layer — `lib/terminals/`, the cmux
-adapter runs operations through the bridge, [`bridge/README.md`](../bridge/README.md)). Class `cli`, but only the
+`daemon/lib/services/terminal.mjs`; routes — `lib/routes/terminal.mjs`; the terminal layer — `lib/terminals/`: the cmux
+adapter runs operations through the bridge, [`bridge/README.md`](../bridge/README.md), the tmux adapter through the tmux
+CLI; iTerm2 and Terminal.app do not support these routes — `409 terminal:unsupported {terminal, capability}`). Class `cli`, but only the
 plugin's own process is admitted — a running run, a streamable process or a running action (the fact
 `pluginByPid(pid, {actions: true})`: the peer pid from the kernel) — of a trusted plugin (builtin/official/own) that
 declared `<agenthub.terminal>`: `read-screen` for the first route, `send </commands>|*` for the second (by command — a
@@ -198,16 +199,17 @@ request rate (`429`, `scope: requests`), the pause (`423 estop`), the body (`400
 `args:<field>:unknown`, `args:text:too-long`, `terminal:bad-text` — not printable ASCII, `\`, leading/trailing spaces),
 the line against the permission (`403 terminal:text-not-declared`), the session in the registry
 (`409 terminal:unknown-session`), the Claude Code signature now and the same start time (`409 terminal:unverified`), the
-terminal knows the tab and it belongs to the same pid and start time (`409 terminal:no-tab|pid-mismatch`), for typing —
+terminal knows the tab and it belongs to the same pid and start time (`409 terminal:no-tab|pid-mismatch`), the terminal
+supports the operation (`409 terminal:unsupported`, with `terminal` and `capability`), for typing —
 the session is free (`409 terminal:session-busy`: the registry status, without it — the terminal's), the process is not
 stopped and is in the foreground of its terminal (`409 terminal:not-foreground|process-unknown`) and the typing rate per
 plugin and per tab (`429`, `scope: plugin|tab`). Then the terminal:
-`409 terminal:bridge-offline|prompt-not-found|prompt-not-empty|session-busy|prompt-mismatch`,
-`501 terminal:bridge-outdated` (a bridge without these operations), `502 terminal:cmux-failed`,
-`504 terminal:bridge-timeout|bridge-pickup-timeout|cmux-timeout|deadline` (Enter only before the `enterBy` deadline the
+`409 terminal:bridge-offline|no-tab|prompt-not-found|prompt-not-empty|session-busy|prompt-mismatch|terminal-test-mode`,
+`501 terminal:bridge-outdated` (a bridge without these operations), `502 terminal:cmux-failed|tmux-failed`,
+`504 terminal:bridge-timeout|bridge-pickup-timeout|cmux-timeout|tmux-timeout|deadline` (Enter only before the `enterBy` deadline the
 daemon puts into the operation; a late bridge answer is `bridge-op-late` in the journal). No service —
-`503 terminal:disabled`. Journal: `terminal-send {plugin, sessionId, surfaceId, workspaceId, terminal, len, sha, head,
-ok, error}` (head — the declared slash command at the start of the line, sha — 12 characters of the line's sha256, only
+`503 terminal:disabled`. Journal: `terminal-send {plugin, sessionId, surfaceId, workspaceId, terminal, tab, len, sha, head,
+ok, error}` (`surfaceId`/`workspaceId` — cmux only, `tab` — the adapter's tab key) (head — the declared slash command at the start of the line, sha — 12 characters of the line's sha256, only
 together with head; for a line under the `*` permission both are `null`; duplicated in the audit log),
 `bridge-op-late {op, opId, sessionId, surfaceId, ok, error, lateMs}` (also in the audit log) and
 `terminal-denied {plugin, op, sessionId, error}` (a refusal by the overall rate — at most once a minute per plugin); bus —

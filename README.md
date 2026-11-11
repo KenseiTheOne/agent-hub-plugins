@@ -18,7 +18,8 @@ blocklist.json  official.json  CODEOWNERS  CONTRIBUTING.md  SECURITY.md  LICENSE
    - metadata is parsed **by the same parser as the daemon's** (`scripts/vendor/meta.mjs`);
    - permissions linter: `~/.claude/projects`, `*.key`, `.env`, `auth.json`, `~/.cmuxterm/workstream.jsonl`
      (and masks that cover them) are forbidden — for everyone, no exceptions by label; effects — only `open.*`,
-     `session.focus` and `cmux.focus` (`cmux.focus` is deprecated: new plugins use `session.focus <sessionId>`);
+     `session.focus`, `terminal.focus` and `cmux.focus` (`cmux.focus` is a deprecated alias of `terminal.focus`: new
+     plugins use `session.focus <sessionId>`);
      `<agenthub.action>` — only for `official` (level no lower than `confirm`, `arg="name:^pattern$"`);
      every permission has a "— why" explanation;
    - a trial run on a synthetic HOME (`fixtures/home`), environment as in the daemon, 5 s timeout; the output
