@@ -700,7 +700,7 @@ test("design v2: model and effort are segments, Default (Opus 5.5) removes the m
     assert.deepEqual(act(home, ["set-model", "default"]), { out: "ok", code: 0 });
     assert.equal(settings(home).model, undefined);
     ({ text } = run(home, WITH_HUB));
-    assert.match(text, /^Базовые: по умолчанию \(Opus 5\.5\) · medium \| status=ok tile="Opus 5\.5 · medium"$/m);
+    assert.match(text, /^Базовые: по умолчанию \(Opus 5\.5\) · medium \| status=ok tile="Opus 5\.5 · medium" tileLabel="Настройки"$/m);
     assert.match(text, /^--По умолчанию \(Opus 5\.5\) \| selected=true$/m);
     assert.equal(act(home, ["set-model", "claude-nope-1"]).out, "reason=bad-arg");
   } finally {

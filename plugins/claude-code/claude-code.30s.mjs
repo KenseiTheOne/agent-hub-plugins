@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// <agenthub.title>Claude Code</agenthub.title>
-// <agenthub.version>1.2.0</agenthub.version>
+// <agenthub.title>Claude Code Настройки</agenthub.title>
+// <agenthub.title lang="en">Claude Code Settings</agenthub.title>
+// <agenthub.version>1.2.1</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="text.alignleft" color="#D97757"></agenthub.icon>
 // <agenthub.desc>Настройки Claude Code для новых сессий (модель, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
@@ -104,6 +105,8 @@ export function envLang() {
 }
 let LANG = envLang();
 const tr = (ru, en) => (LANG === "en" ? en : ru);
+// The popover tile caption: "Claude Code Settings" does not fit the tile (~110 pt, one line)
+const TILE_LABEL = () => tr("Настройки", "Settings");
 function ruPlural(n, one, few, many) {
   const m10 = n % 10;
   const m100 = n % 100;
@@ -999,13 +1002,13 @@ export function render(r, { lang = envLang() } = {}) {
   LANG = lang === "en" ? "en" : "ru";
   const out = [];
   if (!r.installed) {
-    out.push(line(tr("Claude Code не установлен", "Claude Code isn't installed"), { status: "unknown", tile: tr("нет", "none") }));
+    out.push(line(tr("Claude Code не установлен", "Claude Code isn't installed"), { status: "unknown", tile: tr("нет", "none"), tileLabel: TILE_LABEL() }));
     out.push("---");
     out.push(line(tr("Плагин показывает настройки Claude Code, когда он установлен", "The plugin shows Claude Code settings once it is installed")));
     return `${out.join("\n")}\n`;
   }
   if (r.broken) {
-    out.push(line(tr("Настройки Claude не читаются", "Claude settings unreadable"), { status: "error", tile: tr("сбой", "error") }));
+    out.push(line(tr("Настройки Claude не читаются", "Claude settings unreadable"), { status: "error", tile: tr("сбой", "error"), tileLabel: TILE_LABEL() }));
     out.push("---");
     out.push(line(tr("~/.claude/settings.json — не JSON. Плагин его не меняет, пока файл не исправят", "~/.claude/settings.json isn't valid JSON. The plugin won't change it until it's fixed")));
     return `${out.join("\n")}\n`;
@@ -1028,7 +1031,7 @@ export function render(r, { lang = envLang() } = {}) {
   else differText = tr("как базовые", "as base");
 
   // header: the base on one line and the differences (the "Apply" button lives in the sessions table)
-  out.push(line(tr(`Базовые: ${baseLong}`, `Base: ${baseLong}`), { status: jobActive ? "wait" : "ok", tile: baseText }));
+  out.push(line(tr(`Базовые: ${baseLong}`, `Base: ${baseLong}`), { status: jobActive ? "wait" : "ok", tile: baseText, tileLabel: TILE_LABEL() }));
   out.push(line(differText));
   out.push("---");
 

@@ -58,11 +58,15 @@ test("output with an effect above the ceiling or not declared is a smoke-run err
   }
 });
 
-test("<agenthub.action> is an error for a third-party plugin and allowed for an official one", async () => {
+// Contract 3 (G3): a community plugin may declare actions — the core runs them only from the app and never below confirm.
+// The linter allows them with a warning for the reviewer, and the index entry gets the community-actions feature.
+test("<agenthub.action> is allowed for a third-party plugin with a reviewer warning, and for an official one", async () => {
   const src = pluginSource({ extra: ['// <agenthub.action id="go" level="confirm">/bin/echo go</agenthub.action>'] });
   const root = makeRegistry({ act: { "act.1m.mjs": src, "README.md": README } });
   try {
-    assert.ok(errorsOf(await run(root, { skipTests: true }), "act").some((e) => e.includes("<agenthub.action>")));
+    const p = (await run(root, { skipTests: true })).plugins.find((x) => x.id === "act");
+    assert.deepEqual(p.errors, []);
+    assert.ok((p.warnings || []).some((w) => w.includes("<agenthub.action>") && /только из приложения|only from the app/.test(w)), JSON.stringify(p.warnings));
   } finally {
     cleanup(root);
   }

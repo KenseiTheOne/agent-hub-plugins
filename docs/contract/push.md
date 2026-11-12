@@ -25,7 +25,8 @@ must contain metadata only**: a task name, a tab, a reason; no conversation text
 
 `hold="evening"`, `quiet="true"` (urgent: shown right away during quiet hours too, not held for the digest),
 `cooldown=<interval>`, `away=<interval>` (at the Mac — right away; away — the banner waits until the human is back or the
-event stays raised that long), `macOnly="true"` (accepted from older plugins and ignored: banners are the only channel),
+event stays raised that long), `macOnly="true"` (the Mac banner only, never the extra channels below — keep sensitive
+text such as a mail subject on this Mac; quiet hours and the digest work as usual; hub 0.1.3+, community plugins too),
 `kind=<kind>` (the switch in
 "Settings": a shared core kind `sessions`, `updates`, `problems`, `other`; `plugin` — **the plugin's own toggle** (a
 line with the plugin name in "Settings → Notifications"); `security` — a security exception, cannot be turned off; an
@@ -35,7 +36,9 @@ contract 1 kind — if the user turned it off, it turns this toggle off, see "Mi
 `kind="plugin" was="<kind>"`, and the linter warns. The service takes such rules **only from built-in, official and
 own** plugins (`trusted`: the tier comes from the signed registry index or from the human's consent to an own plugin
 from a folder — [`docs/plugins-registry.md`](../../../docs/plugins-registry.md), "Own sources"); they go ahead of the
-shared table. Other plugins' tags are ignored. This way the core knows no plugin's keys: official plugins' rules live in
+shared table. A **community** plugin's `kind="plugin"` rules are taken with their key and label only (hub 0.1.3+; `quiet`,
+`away`, `hold`, `cooldown` and other kinds are ignored): such a key notifies under the plugin's own toggle with the
+reviewed label and the row text, within the third-party limits below. `local` plugins' tags are ignored. This way the core knows no plugin's keys: official plugins' rules live in
 their metadata (registry `agent-hub-plugins`), own plugins' rules in their metadata in the tool's repository; built-in
 plugins (`agents`, `claude-sessions`) declare theirs the same way. For an own plugin, rules with `kind="security"` and
 `quiet="true"` are `push` permissions: they are shown in the consent window, and their appearance is a permission
@@ -44,7 +47,8 @@ increase (not a silent update from the folder).
 The shared table (`rules.mjs`) contains only the core's shared keys (since contract 2 it no longer has `blocker`,
 `session-died`, `workflow-failed`, `workflow-orphaned` or the quota keys: the plugins that need them declare them —
 `claude-sessions` (`died`), `agents` (`wf-failed`, `wf-orphaned`), `quota` (`week-80` and `pace-85` — at most once a
-week, `token-lost` — immediately; all of them "failures and warnings")):
+week, `token-lost` — immediately; all of them "failures and warnings"), `spend` (`daily-over` — today's cost passed the
+threshold picked on its page, once a day, its own switch)):
 
 | Key | When it is sent |
 |---|---|
@@ -61,7 +65,7 @@ week, `token-lost` — immediately; all of them "failures and warnings")):
 
 In general: while a key is raised there is one message; cleared and raised again within 10 min after sending — it is
 suppressed (flapping). Events of **third-party** plugins (`trusted: false`) arrive without their text and without their
-rules.
+rules, labeled "Event "key"" — except community keys described by a `kind="plugin"` rule (above).
 
 Limits (protecting the daemon from an event flood): at most `maxPerPluginPerMin` (20) new notifications per minute from
 one trusted plugin and `maxPerUntrustedPerMin` (5) from a third-party one; the first one over the limit produces a
@@ -84,13 +88,13 @@ written only by the app class (the pinned build) via `PUT /settings/notification
 | `sessions` — waiting for an answer / session questions | `session-waiting`, `approvals-paused` | — |
 | `updates` — hub and plugin updates | `plugin-update`, `plugin-own-updated`, `hub-update`, `hub-update-ready`, `hub-update-installed`, `hub-update-failed` | — |
 | `problems` — plugin failures and warnings | `source-broken`, `plugin-error`, `auth-failed` (and plugin rules with `kind="problems"`, for example quota) | a rule with `kind="problems"` or a key from the table (`auth-failed`) |
-| `other` — everything else from plugins | a key without a rule; **all** events of third-party plugins | a rule without `kind` and without a match in the table |
-| `plugin:<id>` — **the plugin's own toggle** | — | rules with `kind="plugin"` (and the deprecated `kind="runs"`/`"night"`): a line in "Settings" with the plugin name, only while the plugin is installed |
+| `other` — everything else from plugins | a key without a rule; events of third-party plugins (except community keys with a `kind="plugin"` rule) | a rule without `kind` and without a match in the table |
+| `plugin:<id>` — **the plugin's own toggle** | — | rules with `kind="plugin"` (and the deprecated `kind="runs"`/`"night"`; a community plugin's `kind="plugin"` labels too): a line in "Settings" with the plugin name, only while the plugin is installed |
 | `security` — **cannot be turned off** | `app-pin-changed`, `app-pin-path-changed`, `app-restart-stopped`, `hub-update-tag-moved`, `hub-update-suspect` | rules with `kind="security"` (tampering signals) |
 
 **The plugin's own toggle** (contract 2). `settings.json → pluginNotifications.plugins` holds `{<id>: bool}`;
-`/state.notifications.plugins` has lines `{id, title, on, labels, legacy?}` for installed trusted plugins that have a
-`kind="plugin"` rule. The title is in the hub language (from `<agenthub.title lang=…>`), `labels` are the labels of its
+`/state.notifications.plugins` has lines `{id, title, on, labels, legacy?}` for installed trusted and community plugins
+that have a `kind="plugin"` rule. The title is in the hub language (from `<agenthub.title lang=…>`), `labels` are the labels of its
 rules. No plugin — no line; the value in `settings.json` stays (if the plugin comes back, the same choice applies).
 The master switch also silences plugin toggles; they do not affect `security`.
 
@@ -123,7 +127,7 @@ inferred from it (`migrated`), while explicit choices stay.
 
 The kind of a plugin rule without `kind` is the kind of the shared-table rule with the same key (`auth-failed` →
 `problems`), otherwise `other`. Only the core and a trusted plugin set kinds; `services.push.rules` in `config.json`
-does not change the kind, and a third-party plugin cannot declare `security` (its rules are not taken at all). The
+does not change the kind, and a third-party plugin cannot declare `security` (a community plugin's rules are taken only as `kind="plugin"` labels, a local plugin's not at all). The
 `security` kind from the core table applies only to the hub's own events (`@hub`): a plugin that raises a core key
 (`app-restart-stopped` and the like) gets a rule without a kind, without `bannerAlways`, `quietException` and the hub
 label — a trusted plugin declares a security exception only with its own `<agenthub.push kind="security">` tag (the

@@ -10,12 +10,12 @@
     "messages/parse.mjs": "daemon/lib/messages/parse.mjs"
   },
   "files": {
-    "meta.mjs": "cb4538e729319c41149fa85aeef00b98a5d42150ada2b368919700ced5bd96fe",
-    "output.mjs": "afb454503200685bd73bfc69bf9ec47dfcad79ed43dd567d18fbcb9dbbd8bfdc",
+    "meta.mjs": "040b5a683e81592a32e02e2c20df756cad82ab939f3d66179012c8e99beb26ee",
+    "output.mjs": "a7d38e13ca8c5876fef4a481ca0d6261db17e8e14158f8d94907158693b4b07e",
     "minisign.mjs": "9970eb608a1d5d0ea2d3198b4fd189548d1b792109ffaa70d3042d651a0d95f5",
     "tarball.mjs": "9a5e79a43c970263870707581526d89795f11045c9ed9f4fdcae11517ec63d41",
-    "perms.mjs": "a4a6d9d8d103f49d660575cae6d8bb5ff3b63df7832a6752668ac948c75e5736",
-    "messages/parse.mjs": "b506962576830f28e48c5899a39d37f3674472b6117a622fa213ea8f082ed5b1",
+    "perms.mjs": "82e29f0aeb68a93f75887b82ee7f4f4e23b0cf72271dcc4cdd03cc5c9aaf33e5",
+    "messages/parse.mjs": "2e653d5440dec67416697b200987b9e6c32aa8746eff0e576ad619062499687f",
     "native.mjs": "7c6e6450148d63dc77542453820ae8dcdd0bec12073dd8becd3116a1c21f3491"
   },
   "docsSource": {
@@ -27,10 +27,10 @@
   },
   "docs": {
     "README.md": "857f0b19092e9ae21408832bf0d7bb7992ffaf750a83c55cdda7a5f8f81333a8",
-    "writing-plugins.md": "3dc979d49af57a29b8f95d5f5e6157ac07b7d70183a833afbaba34a1cfe26bac",
-    "extension-points.md": "8df710b24e8bba5e99a452651aa1c9fea51bc217d5eee284e99612b06826dec7",
-    "push.md": "acd95d45ea710a1b3326dabbd86e62dd488cb98d447b84d697094b23be821b03",
-    "plugins-registry.md": "8e194716724f1571a58c3e9bcd72c9aed899037f914412b27016aa056ef6f985",
-    "api.md": "aab4ee7231c1f345b10b45da13b3ffe95e6b9a3160edb81fdb09e15a5e9fbf3e"
+    "writing-plugins.md": "c117d63a461fa16afe111fb0e5f5202d26810b0b859ca69e73b7a42150c1ca64",
+    "extension-points.md": "7b17886c798e59aecabf670b12a6a4a379218f83723bbceebf7974713f21ac29",
+    "push.md": "0b5baf69b580af4af24ece7e22c2c60df1ec94eb54e01ba27e719e6b88e10d61",
+    "plugins-registry.md": "4037676d05ecc8db1868577340976af44de7ed1121d3436620022ee55673ee80",
+    "api.md": "91bc9b442a5b22c48c758870a98de8be1489fd4d1adb7138b5fffa2a97b50bf9"
   }
 }

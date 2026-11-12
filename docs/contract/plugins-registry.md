@@ -38,11 +38,25 @@ runs.
   the last verified catalog (`registry-rejected`), and a catalog pair on disk that does not verify (another process is
   halfway through writing it, or a damaged file) does not replace the verified one already in memory
   (`registry-cache-rejected`). A daemon that starts without any verified catalog treats registry plugins as community
-  and journals nothing until it has one. The core allows `<agenthub.action>` only for `official` (and
-  built-in) plugins; for an official plugin without declared network access and without a declared price the action is
-  as declared, including `immediate` (no window, from the app only; 2026-11-09); with network access or `cost=` (in any
-  language, `cost-en=` too) — at least `confirm-cost` (linter: `immediate` with network or `cost=` is an error). Plugin
-  metadata does not affect the tier.
+  and journals nothing until it has one. The core allows `<agenthub.action>` for `builtin`, `official`, `own` and
+  (hub 0.1.3+) `community` plugins; for an official plugin without declared network access and without a declared price
+  the action is as declared, including `immediate` (no window, from the app only; 2026-11-09); with network access
+  (unless the action declares `net="none"`) or `cost=` (in any language, `cost-en=` too) — at least `confirm-cost`
+  (linter: `immediate` with network and without `net="none"`, or with `cost=`, is an error). A community action is never below `confirm` (the linter warns about
+  `immediate`), always from the app, always journaled. Plugin metadata does not affect the tier.
+  **Community actions and push rules (hub 0.1.3+).** The linter accepts them with warnings for the reviewer
+  (`check.sh`: "! <agenthub.action>: community plugin actions…"): **the reviewer checks every command does exactly what
+  its `title` says**, nothing irreversible hides behind a vague title, and the row that carries the button names the
+  thing acted on (the core quotes that row in the confirmation window). Community `<agenthub.push>` rules count only with
+  `kind="plugin"` and only their label: the banner shows the reviewed label and the row text — **the reviewer reads every
+  label and checks the rows with `event=` carry no foreign or secret text** (foreign text escaped, see below). `quiet`, `away`,
+  `hold`, `cooldown` and other kinds are ignored (a linter warning).
+  **`net="none"`, `background="true"`, `input=` (hub 0.1.3+)** — each is a warning for the reviewer: `net="none"` lifts
+  the network floor for one action, so **the reviewer checks the command reaches no host** (itself or through programs
+  it starts; the hub's own connection proxy is refused to such an action with `403 net:none`); `background="true"` runs without a timeout, so **the reviewer checks the job ends by itself and on SIGTERM
+  and spends no more than its title says**; `input=` hands the human's text to the command on stdin, so **the reviewer
+  checks it is treated as data** — no `eval`, no shell, no splicing into commands or URLs without encoding. `net=none`,
+  `background` and `input` are part of the action's permission key (adding one in an update asks for consent again).
   **The registry reviewer checks every `immediate` action for a price.** "No network and no `cost=`" does not mean
   "free": an action may start a runner, agents or turn on daily quota spending (for example, a runner plugin's mode
   switch), and the core will run it on a single click. The linter flags every such action with a warning (`check.sh`:
@@ -74,6 +88,23 @@ runs.
   never types those), so look more strictly: where does the line come from, and can foreign text inject it. In the
   permissions it is the `terminal` kind (`permissions.terminal: [{what, why}]` in the index; an empty list is not
   written), and `send` has `risk: "terminal"`: the consent window shows a red line "Typing into Claude Code sessions".
+- **Event subscriptions (2026-11-12).** `<agenthub.subscribe>plugin-id:key-prefix — why</agenthub.subscribe>` — another
+  plugin's events (key and row text) on the plugin's stdin; the core delivers them only to trusted (builtin, official, own) streamable
+  plugins (for community ones, and for `standard` ones, the linter warns that the tag is ignored), a malformed entry or
+  more than 16 is an error, "why" is required. `*:` (every plugin) is a warning: **the reviewer checks the plugin needs
+  them and treats the row text as data** — it never sends it anywhere or runs it. In the permissions it is the
+  `subscribe` kind (`permissions.subscribe: [{what, why}]`; an empty list is not written): adding one is permission growth.
+- **Foreign text in output (2026-11-12).** A plugin that prints text it doesn't control (log lines, PR or task titles,
+  tab, file and folder names, model names, error messages) last on a line lets that text add parameters after its own
+  `|` — `href=`, `event=`, the plugin's own `action=`/`arg=`. **The reviewer checks every place where such text reaches
+  a line**: titles go through an `escapeTitle` helper (`\|`, a guarded leading `-`/`~`, no line breaks; or `|` → `¦`
+  and the leading `-`/`~` stripped for hubs before 0.1.3), values are always double-quoted with `"`, `\` and `|`
+  escaped, and no foreign text is printed unquoted into a value or as a line of its own (`---`, `~~~`). Helpers and the
+  escape rules: [`writing-plugins.md` 4.1](writing-plugins.md#41-lines). A plugin that prints raw foreign text is sent
+  back, whatever its tier.
+- **Hub socket (2026-11-12).** Processes of community and local plugins — the plugin process, its action and their
+  children — get only `GET /health` and `GET /peer` on `hub.sock` (`403 peer:untrusted-plugin`, journaled; see
+  [`api.md`](api.md)). A community plugin whose README or code talks to the hub socket won't work and is sent back.
 
 ## Own sources (2026-11-09)
 
@@ -102,7 +133,7 @@ installation gives 423 (declining is still possible).
 
 **Folder checks** — the same as in registry CI: no symbolic links (neither outward nor inward), `README.md`, exactly one
 main file with a known interpreter (not binary), metadata without warnings, `lintPlugin` as for an official plugin
-(actions are allowed, `immediate` with network or a price is an error), forbidden places in all files of the copy,
+(actions are allowed, `immediate` with network — without `net="none"` — or a price is an error), forbidden places in all files of the copy,
 archive size limits. The walk is complete: more than 200 files (excluding dot files, including `test/` and `fixtures/`,
 as in CI) or more than 1000 entries is an error, not a truncated list; an unreadable main file is an error. Reading has
 no "checked — then read" race: `O_NOFOLLOW|O_NONBLOCK`, `fstat` of the descriptor — a regular file with the same inode as
@@ -136,8 +167,8 @@ fingerprint (sha256 of a list of "path — file sha256"), `archive: null`. Polic
 remembers the fingerprint of every own entry it wrote (path, content fingerprint, files, permissions) in daemon memory
 and in `Registry/own-approvals.json`. While the daemon runs, an entry in the consent file that it did not write gives no
 trust — only revocations are taken from the file (`agenthub plugins remove` from another process); at startup consents
-are read from the file. On a mismatch the plugin runs as **community** (no actions, own push rules or service
-variables), the blocklist applies to it, journal `plugin-own-unexpected`, event `plugins.own-unexpected` → the push
+are read from the file. On a mismatch the plugin runs as **community** (actions only at `confirm` and up, push rules
+only `kind="plugin"` labels, no service variables), the blocklist applies to it, journal `plugin-own-unexpected`, event `plugins.own-unexpected` → the push
 service: the security exception `@hub:plugin-own-unexpected:<id>` (like a pin change: immediately, during quiet hours,
 banner bypassing the shell), an orange `unverified` line in the manager, and the hub itself creates a request to
 re-confirm from the entry's folder (`reason: "unexpected"`; all permissions in the window are "new"). The limit is the
