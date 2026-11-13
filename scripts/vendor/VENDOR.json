@@ -14,7 +14,7 @@
     "output.mjs": "a7d38e13ca8c5876fef4a481ca0d6261db17e8e14158f8d94907158693b4b07e",
     "minisign.mjs": "9970eb608a1d5d0ea2d3198b4fd189548d1b792109ffaa70d3042d651a0d95f5",
     "tarball.mjs": "9a5e79a43c970263870707581526d89795f11045c9ed9f4fdcae11517ec63d41",
-    "perms.mjs": "82e29f0aeb68a93f75887b82ee7f4f4e23b0cf72271dcc4cdd03cc5c9aaf33e5",
+    "perms.mjs": "daafd93f0020d8c209253d8df84bc8e25f13ce4941efdac483998c3cf9e4386f",
     "messages/parse.mjs": "2e653d5440dec67416697b200987b9e6c32aa8746eff0e576ad619062499687f",
     "native.mjs": "7c6e6450148d63dc77542453820ae8dcdd0bec12073dd8becd3116a1c21f3491"
   },
@@ -27,10 +27,10 @@
   },
   "docs": {
     "README.md": "857f0b19092e9ae21408832bf0d7bb7992ffaf750a83c55cdda7a5f8f81333a8",
-    "writing-plugins.md": "c117d63a461fa16afe111fb0e5f5202d26810b0b859ca69e73b7a42150c1ca64",
-    "extension-points.md": "7b17886c798e59aecabf670b12a6a4a379218f83723bbceebf7974713f21ac29",
-    "push.md": "0b5baf69b580af4af24ece7e22c2c60df1ec94eb54e01ba27e719e6b88e10d61",
-    "plugins-registry.md": "4037676d05ecc8db1868577340976af44de7ed1121d3436620022ee55673ee80",
-    "api.md": "91bc9b442a5b22c48c758870a98de8be1489fd4d1adb7138b5fffa2a97b50bf9"
+    "writing-plugins.md": "99c091707bacaa0e3e2181dcb2ab62f9753cfc05a7b4352cc276b6019ec9f8f1",
+    "extension-points.md": "cc14bd6f69b339091c40e3efb3d77cdcc6c7f63c2969a1735204286f23a8bffd",
+    "push.md": "db0e323a56a06872c9577b634461fb72bbf4e45d3fc4aa017bafd00ce82fadd1",
+    "plugins-registry.md": "94d1598467c9e07144e26d7b077798ee0fda95b82b521c62bb5b3c8d4cdbde74",
+    "api.md": "d11977d15581f37eb036d12a577f371306fcbb5b8ae3c332066e02a0dd06a871"
   }
 }
