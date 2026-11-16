@@ -151,7 +151,7 @@ export function smokeRun(info) {
 
 // Output: format; effects only from the declared ones and under the ceiling (THIRD_PARTY_EFFECTS: open.*, session.focus,
 // terminal.focus and its deprecated alias cmux.focus — for all registry plugins); action= — official only, declared only, with arg= matching
-// the pattern from the metadata.
+// the pattern from the metadata (an input action — without arg=: its text is typed in the app).
 export function outputErrors(info, text) {
   const errors = [];
   const parsed = parseOutput(text);
@@ -171,7 +171,12 @@ export function outputErrors(info, text) {
     else if (item.action) {
       const a = (info.meta?.actions || []).find((x) => x.id === item.action);
       const arg = item.params?.arg;
+      // an input action without inputPattern= gets its text from the human in the app: arg= is the text's pattern, and
+      // the core refuses a line that carries a value (extension-points.md, "Input actions")
+      const typed = Boolean(a?.input) && !a.input.pattern;
       if (!a) errors.push(`output: action=${item.action} is not declared in <agenthub.action>`);
+      else if (typed && arg !== undefined) errors.push(`output: action=${item.action}: the text of an input action is typed by the human — the line can't carry arg=`);
+      else if (typed) continue;
       else if (a.arg && (typeof arg !== "string" || arg.startsWith("-") || !new RegExp(`^(?:${a.arg.pattern})$`, "u").test(arg))) errors.push(`output: action=${item.action} arg=${String(arg).slice(0, 40)} doesn't match the pattern ${a.arg.pattern}`);
       else if (!a.arg && arg !== undefined) errors.push(`output: action=${item.action}: arg is not declared`);
     }

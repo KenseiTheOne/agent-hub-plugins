@@ -398,6 +398,27 @@ test("official: action= in output — declared ones only, with arg matching the 
   }
 });
 
+test("output: an input action's line carries no arg= (the text is typed in the app); a value on it is an error", async () => {
+  const body = [
+    'console.log("X | status=ok");',
+    'console.log("---");',
+    'console.log("Type | action=name");',
+    'console.log("Printed | action=name arg=abc");',
+  ].join("\n") + "\n";
+  const src = pluginSource({
+    body,
+    extra: ['// <agenthub.action id="name" level="confirm" arg="text:^[a-z]{1,16}$" input="A name">act.1m.mjs --action name</agenthub.action>'],
+  });
+  const root = makeRegistry({ act: { "act.1m.mjs": src, "README.md": README } }, { official: ["act"] });
+  try {
+    const errs = errorsOf(await run(root), "act").filter((e) => e.includes("action=name"));
+    assert.deepEqual(errs.length, 1, errs.join("\n"));
+    assert.ok(errs[0].includes("the line can't carry arg="), errs[0]);
+  } finally {
+    cleanup(root);
+  }
+});
+
 test("registry scripts run via a symlinked path (/tmp → /private/tmp) — they work instead of silently exiting 0", async () => {
   const { mkdtempSync, rmSync, symlinkSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");

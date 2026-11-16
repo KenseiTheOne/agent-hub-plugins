@@ -2,7 +2,8 @@
 // ps is a double script in AGENTHUB_TEST_BIN_DIR; the hub's terminal is a hub socket double (a separate process on a
 // unix socket in the test's HOME): real tabs, processes and the hub are never touched. The double logs every
 // POST /terminal/send-text to hub.log and, by flag files in HOME, answers with hub refusals: typed (prompt-not-empty),
-// mixed (prompt-mismatch), unsigned (unverified), notab (no-tab), off (503 disabled), late (504 deadline), busy-once
+// mixed (prompt-mismatch), unsigned (unverified), notab (no-tab), off (503 disabled), bridge-off (503 bridge-offline),
+// late (504 deadline), busy-once
 // (session-busy once), slow (wait N s).
 // Run: cd agent-hub-plugins && env -u NODE_OPTIONS node --test plugins/claude-code/test/*.test.mjs
 import { test } from "node:test";
@@ -18,6 +19,7 @@ const DIR = pluginDir(import.meta.url);
 const PLUGIN = join(DIR, "claude-code.30s.mjs");
 const FIX = join(DIR, "fixtures");
 const HUB = join(FIX, "hub-sessions.json");
+const HUB_MODELS = join(FIX, "hub-models.json");
 const mod = await import(pathToFileURL(PLUGIN).href);
 const POSIX = { skip: process.platform === "win32" ? "the ps double is /bin/sh, the hub double is a unix socket" : false };
 const S1 = "11111111-1111-4111-8111-111111111111";
@@ -42,6 +44,7 @@ createServer((req, res) => {
     const log = (ok) => appendFileSync(join(home, "hub.log"), JSON.stringify({ path: req.url, sessionId: b.sessionId, text: b.text, ok }) + "\\n");
     if (req.url !== "/terminal/send-text") return reply(404, { error: "not-found" });
     if (has("off")) return reply(503, { error: "terminal:disabled" });
+    if (has("bridge-off")) return (log(false), reply(503, { error: "terminal:bridge-offline" }));
     if (has("notab")) return (log(false), reply(409, { error: "terminal:no-tab" }));
     if (has("unsigned")) return (log(false), reply(409, { error: "terminal:unverified" }));
     if (has("typed")) return (log(false), reply(409, { error: "terminal:prompt-not-empty" }));
@@ -96,8 +99,9 @@ function run(home, extra = {}) {
   for (const m of MARKERS) assert.ok(!r.stdout.includes(m), `marker ${m} in the output`);
   return { text: r.stdout, parsed };
 }
-function act(home, args, extra = {}) {
-  const r = spawnSync(process.execPath, [PLUGIN, "--action", ...args], { env: env(home, extra), encoding: "utf8", timeout: 10_000 });
+// input — the text of an input action, as the hub writes it to stdin
+function act(home, args, extra = {}, input = "") {
+  const r = spawnSync(process.execPath, [PLUGIN, "--action", ...args], { env: env(home, extra), encoding: "utf8", timeout: 10_000, input });
   for (const m of MARKERS) assert.ok(!r.stdout.includes(m));
   const lines = r.stdout.trim().split("\n");
   const message = lines.find((l) => l.startsWith("message="))?.slice(8) ?? null;
@@ -131,10 +135,15 @@ test("metadata: contract 3, typing only through the hub terminal (send /model /e
   assert.deepEqual(pm.meta.exec.map((e) => e.split(" ")[0]), ["/bin/ps"], "neither cmux nor codesign: typing and the signature belong to the hub");
   assert.ok(!pm.meta.fsRead.some((e) => /cmux/i.test(e)));
   assert.ok(pm.meta.watch.some((e) => e.startsWith("$AGENTHUB_CLAUDE_SESSIONS_FILE")));
+  for (const k of ["fsRead", "watch"]) assert.ok(pm.meta[k].some((e) => e.startsWith("$AGENTHUB_CLAUDE_MODELS_FILE")), k);
+  assert.ok(!pm.meta.fsRead.some((e) => e.includes(".claude.json")), "the account file isn't read");
+  // the only typed-text action: the id of a model the list doesn't have; the hub checks the text against the pattern
+  assert.deepEqual(pm.meta.actions.filter((a) => a.input).map((a) => [a.id, a.input.maxLength, a.arg.pattern]), [["set-model-id", 40, "^claude-[a-z]+-[0-9]{1,2}(?:-[0-9]{1,2})?$"]]);
   assert.deepEqual(
     pm.meta.actions.map((a) => [a.id, a.level, a.arg?.name ?? null]),
     [
       ["set-model", "immediate", "model"],
+      ["set-model-id", "immediate", "model"],
       ["set-effort", "immediate", "level"],
       ["effort-max", "confirm-cost", null],
       ["set-style", "immediate", "style"],
@@ -706,4 +715,164 @@ test("design v2: model and effort are segments, Default (Opus 5.5) removes the m
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("model list: the newest known version of each family; the base model is an extra item and never hides the newest; labels and effort by rule", () => {
+  const ids = (o) => mod.knownModels(o).page.map((m) => m.id);
+  assert.deepEqual(mod.knownModels().page, [
+    { id: "claude-opus-5-5", label: "Opus 5.5" },
+    { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
+    { id: "claude-haiku-5-5", label: "Haiku 5.5" },
+    { id: "claude-fable-5-1", label: "Fable 5.1" },
+  ]);
+  // a newer version that a session ran on replaces the older one of its family; older ones don't come back
+  assert.deepEqual(ids({ seen: ["claude-fable-5-2", "claude-opus-5", "claude-fable-5"] }), ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2"]);
+  assert.deepEqual(mod.knownModels({ seen: ["claude-fable-5-2"] }).remember, ["claude-fable-5-2"]);
+  assert.deepEqual(mod.knownModels({ seen: ["claude-opus-5-5"] }).remember, [], "what SEED already has isn't stored");
+  // remembered from an earlier run — the same as seen now
+  assert.deepEqual(ids({ remembered: ["claude-fable-5-2"] }).at(-1), "claude-fable-5-2");
+  // the base model is shown even when it is older — next to the newest, in version order
+  assert.deepEqual(ids({ seen: ["claude-fable-5-2"], base: "claude-fable-5-1" }).slice(-2), ["claude-fable-5-1", "claude-fable-5-2"]);
+  // a base the plugin has never met is one more item: it neither replaces the newest nor is remembered
+  const typo = mod.knownModels({ seen: ["claude-fable-5-2"], base: "claude-fable-9-9" });
+  assert.deepEqual(typo.page.map((m) => m.id).slice(-2), ["claude-fable-5-2", "claude-fable-9-9"]);
+  assert.deepEqual(typo.remember, ["claude-fable-5-2"]);
+  // a new family goes after the known ones, by name; a date suffix isn't a version, junk is skipped
+  assert.deepEqual(ids({ seen: ["claude-zeta-1", "claude-mythos-5-2", "claude-opus-5-20261001", "gpt-9", null, "claude-opus-5-5-20261001"] }), ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1", "claude-mythos-5-2", "claude-zeta-1"]);
+  // the hub's model list, when there is one, is the whole list: the newest of each family in it, whatever was met
+  // before; the base model is still one more item; a list with nothing usable — as without it
+  const listed = ["claude-fable-5-2", "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-opus-5", "claude-opus-4-5-20251101"];
+  assert.deepEqual(ids({ listed }), ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2"]);
+  assert.deepEqual(ids({ listed: ["claude-opus-6", "claude-fable-5-3"], seen: ["claude-mythos-5-2"], remembered: ["claude-fable-5-9"] }), ["claude-opus-6", "claude-fable-5-3"]);
+  assert.deepEqual(ids({ listed, base: "claude-fable-5-1" }).slice(-2), ["claude-fable-5-1", "claude-fable-5-2"]);
+  assert.deepEqual(ids({ listed: ["claude-opus-4-5-20251101", "gpt-9"], seen: ["claude-fable-5-2"] }).at(-1), "claude-fable-5-2");
+  assert.deepEqual(mod.knownModels({ listed, seen: ["claude-mythos-5-2"] }).remember, ["claude-mythos-5-2"], "what was met is still kept for a run without the list");
+  assert.deepEqual(["claude-fable-5-2", "claude-opus-5", "claude-zeta-10-3", "claude-opus-5-20261001"].map(mod.modelLabel), ["Fable 5.2", "Opus 5", "Zeta 10.3", "claude-opus-5-20261001"]);
+  // effort: the generations before Opus 5.5 / Fable 5.2 follow effortLevel and start at high; these and everything
+  // newer (a family the table doesn't know included) take only modelSettings and start at medium
+  assert.deepEqual(["claude-fable-5-1", "claude-opus-5", "claude-haiku-5", "claude-sonnet-4-6"].map(mod.newEffort), [false, false, false, false]);
+  assert.deepEqual(["claude-fable-5-2", "claude-fable-5-3", "claude-opus-6", "claude-mythos-5-2", "claude-zeta-1"].map(mod.newEffort), [true, true, true, true, true]);
+  assert.equal(mod.readBase({ effortLevel: "xhigh", model: "claude-fable-5-3" }).effort, "medium");
+  assert.equal(mod.readBase({ model: "claude-fable-5-1" }).effort, "high");
+  assert.equal(mod.readBase({ effortLevel: "low", model: "claude-zeta-1", modelSettings: { "claude-zeta-1": { effortLevel: "xhigh" } } }).effort, "xhigh");
+});
+
+test("model list on the page, from the hub: the buttons are the newest model of each family in the hub's list and set its full id; a new model shows up by itself; no usable file — the fallback", POSIX, () => {
+  const home = makeHome();
+  try {
+    const models = (text) => text.match(/^Модель \| segment=true\n((?:--[^\n]*\n)+)/m)[1].trim().split("\n").map((l) => l.slice(2).split(" | ")[0]);
+    const WITH_MODELS = { ...WITH_HUB, AGENTHUB_CLAUDE_MODELS_FILE: HUB_MODELS };
+    let { text } = run(home, WITH_MODELS);
+    assert.deepEqual(models(text), ["По умолчанию (Opus 5.5)", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5", "Fable 5.2"]);
+    assert.match(text, /^--Fable 5\.2 \| action=set-model arg=claude-fable-5-2$/m);
+    // the button writes the full id; without the hub's list the same model isn't offered yet
+    assert.equal(act(home, ["set-model", "claude-fable-5-2"], WITH_HUB).out, "reason=bad-arg");
+    assert.deepEqual(act(home, ["set-model", "claude-fable-5-2"], WITH_MODELS), { out: "ok", code: 0 });
+    assert.equal(settings(home).model, "claude-fable-5-2");
+    // an older model of the list isn't a button, so it isn't accepted either
+    assert.equal(act(home, ["set-model", "claude-fable-5-1"], WITH_MODELS).out, "reason=bad-arg");
+    // the hub fetched a list with a new model and a new family: the page follows, nothing is hard-coded
+    const p = join(home, "models.json");
+    const j = JSON.parse(readFileSync(HUB_MODELS, "utf8"));
+    writeFileSync(p, JSON.stringify({ ...j, error: "http-429", models: [{ id: "claude-fable-5-3" }, { id: "claude-mythos-6" }, { id: 7 }, null, ...j.models] }));
+    const newer = { ...WITH_HUB, AGENTHUB_CLAUDE_MODELS_FILE: p };
+    ({ text } = run(home, newer));
+    assert.deepEqual(models(text), ["По умолчанию (Opus 5.5)", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5", "Fable 5.2", "Fable 5.3", "Mythos 6"], "the base (5.2) stays as one more item next to the newest");
+    assert.match(text, /^--Fable 5\.2 \| selected=true$/m);
+    assert.deepEqual(act(home, ["set-model", "claude-mythos-6"], newer), { out: "ok", code: 0 });
+    assert.deepEqual(models(run(home, newer).text).slice(-2), ["Fable 5.3", "Mythos 6"]);
+    // no file yet, garbage, an empty list (signed out) — the list of met models, as on a hub without the service
+    writeSettingsFile(home, { ...settings(home), model: "claude-opus-5-5" });
+    for (const junk of [null, "not json", "[]", JSON.stringify({ models: "x" }), JSON.stringify({ error: "no-token", models: [] })]) {
+      if (junk === null) rmSync(p);
+      else writeFileSync(p, junk);
+      assert.deepEqual(models(run(home, newer).text), ["По умолчанию (Opus 5.5)", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5", "Fable 5.1"], String(junk));
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("model list on the page without the hub's list: a model a tab runs on appears by itself and stays after the tab is gone", POSIX, () => {
+  const home = makeHome();
+  try {
+    const models = (text) => text.match(/^Модель \| segment=true\n((?:--[^\n]*\n)+)/m)[1].trim().split("\n").map((l) => l.slice(2).split(" | ")[0]);
+    // the fixture: nobody runs anything newer — the floor
+    assert.deepEqual(models(run(home, WITH_HUB).text), ["По умолчанию (Opus 5.5)", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5", "Fable 5.1"]);
+    assert.equal(act(home, ["set-model", "claude-fable-5-2"], WITH_HUB).out, "reason=bad-arg", "not in the list yet");
+    // a tab switched to Fable 5.2 (the hub saw the turn): the segment offers it instead of 5.1
+    const fable = hubWith(home, { [S2]: { model: "Fable 5.2 (1M context)", modelId: "claude-fable-5-2", modelSource: "command" } });
+    let { text } = run(home, fable);
+    assert.deepEqual(models(text), ["По умолчанию (Opus 5.5)", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5", "Fable 5.2"]);
+    assert.match(text, /^--Fable 5\.2 \| action=set-model arg=claude-fable-5-2$/m);
+    assert.deepEqual(state(home).models, ["claude-fable-5-2"]);
+    // … and it can be chosen; effort moves to its modelSettings entry
+    assert.deepEqual(act(home, ["set-model", "claude-fable-5-2"], fable), { out: "ok", code: 0 });
+    assert.equal(settings(home).model, "claude-fable-5-2");
+    assert.equal(settings(home).modelSettings["claude-fable-5-2"].effortLevel, "medium");
+    // the tab is gone, the hub's file too: the model is remembered — still listed, selected and still accepted
+    ({ text } = run(home));
+    assert.match(text, /^--Fable 5\.2 \| selected=true$/m);
+    assert.match(text, /^Базовые: Fable 5\.2 · medium \|/m);
+    assert.deepEqual(act(home, ["set-model", "claude-opus-5-5"]), { out: "ok", code: 0 });
+    assert.deepEqual(models(run(home).text).slice(-1), ["Fable 5.2"]);
+    assert.deepEqual(act(home, ["set-model", "claude-fable-5-2"]), { out: "ok", code: 0 });
+    // an older base is shown next to the newest one, never instead of it
+    writeSettingsFile(home, { ...settings(home), model: "claude-fable-5-1" });
+    ({ text } = run(home));
+    assert.deepEqual(models(text).slice(-2), ["Fable 5.1", "Fable 5.2"]);
+    assert.match(text, /^--Fable 5\.1 \| selected=true$/m);
+    // a damaged state file doesn't break the list
+    writeFileSync(join(home, "data", "state.json"), JSON.stringify({ models: ["claude-fable-5-2", "rm -rf", 5, "claude-opus-5-20261001"] }));
+    assert.deepEqual(models(run(home).text).slice(-2), ["Fable 5.1", "Fable 5.2"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Fix with the hub's terminal bridge down: the refusal says to start the bridge and where the command is, nothing is typed", POSIX, () => {
+  const home = makeHome();
+  try {
+    writeFileSync(join(home, "bridge-off"), "");
+    assert.deepEqual(act(home, ["apply", S1], WITH_HUB), { out: "reason=terminal-offline", code: 3, message: "Мост терминала хаба не запущен или устарел — запустите его заново: команда в настройках хаба, «Терминал»." });
+    assert.equal(act(home, ["apply", S1], { ...WITH_HUB, AGENTHUB_LANG: "en" }).message, "The hub's terminal bridge is down or outdated — start it again: the command is in the hub's Settings, Terminal.");
+    assert.deepEqual(sent(home), []);
+    assert.equal(mod.termOutcome({ status: 503, body: { error: "terminal:bridge-outdated" } }).reason, "terminal-offline");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Another model: the id typed in the hub becomes the base as a full id, even for a model the list doesn't have; anything that isn't an id is refused", POSIX, () => {
+  const home = makeHome();
+  try {
+    // the page offers the field without an argument (the text is typed in the hub) and with a live example
+    let { text } = run(home, WITH_HUB);
+    assert.match(text, /^Другая модель… \| action=set-model-id note="идентификатор, например claude-fable-5-1"$/m);
+    const before = readFileSync(join(home, ".claude", "settings.json"), "utf8");
+    for (const junk of ["", "\n", "fable\n", "default\n", "claude-fable-5-3[1m]\n", "claude-opus-5-20261001\n", "claude-fable-5-3 --dangerously-skip-permissions\n", "Claude-Fable-5-3\n"]) {
+      assert.deepEqual(act(home, ["set-model-id"], WITH_HUB, junk), { out: "reason=bad-arg", code: 3, message: "Такого значения нет." }, JSON.stringify(junk));
+    }
+    assert.equal(readFileSync(join(home, ".claude", "settings.json"), "utf8"), before, "a refused id writes nothing");
+    // an argument on the command line is not the text: only stdin counts
+    assert.equal(act(home, ["set-model-id", "claude-fable-5-3"], WITH_HUB).out, "reason=bad-arg");
+    // a model newer than anything known here
+    assert.deepEqual(act(home, ["set-model-id"], WITH_HUB, "claude-fable-5-3\n"), { out: "ok", code: 0 });
+    assert.equal(settings(home).model, "claude-fable-5-3");
+    ({ text } = run(home, WITH_HUB));
+    assert.match(text, /^--Fable 5\.3 \| selected=true$/m, "the typed model is the selected item");
+    assert.match(text, /^--Fable 5\.1 \| action=set-model arg=claude-fable-5-1$/m, "the newest model known to exist stays");
+    // it isn't remembered as existing until a session runs on it: after switching away it leaves the list
+    assert.equal(act(home, ["set-model", "claude-opus-5-5"], WITH_HUB).out, "ok");
+    ({ text } = run(home, WITH_HUB));
+    assert.doesNotMatch(text, /Fable 5\.3/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("aliases in a settings.json written by hand: fable is what Claude Code resolves it to, and /model gets the value as written", () => {
+  assert.equal(mod.readBase({ model: "fable" }).model, "claude-fable-5-1");
+  assert.equal(mod.readBase({ model: "fable" }).modelArg, "fable");
+  assert.equal(mod.readBase({ model: "claude-fable-5-2" }).modelArg, "claude-fable-5-2");
 });

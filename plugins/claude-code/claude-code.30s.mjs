@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // <agenthub.title>Claude Code Настройки</agenthub.title>
 // <agenthub.title lang="en">Claude Code Settings</agenthub.title>
-// <agenthub.version>1.2.1</agenthub.version>
+// <agenthub.version>1.3.0</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="text.alignleft" color="#D97757"></agenthub.icon>
 // <agenthub.desc>Настройки Claude Code для новых сессий (модель, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
@@ -40,13 +40,18 @@
 // <agenthub.terminal>send /model /effort — набрать во вкладку открытой сессии только /model и /effort с базовыми значениями — по вашей кнопке «Привести» или «Проставить всем»; хаб сам проверяет, что сессия свободна, поле ввода пустое и это подписанный Claude Code, и жмёт Enter</agenthub.terminal>
 // <agenthub.terminal lang="en">send /model /effort — type only /model and /effort with the base values into an open session's tab — on your Fix or Apply to all click; the hub checks the session is free, the input line is empty and it's signed Claude Code, and presses Enter</agenthub.terminal>
 // <agenthub.effects>session.focus</agenthub.effects>
+// <agenthub.fsRead>$AGENTHUB_CLAUDE_MODELS_FILE — список моделей Claude, доступных вашему входу, от хаба: из него строятся кнопки «Модель», новая модель появляется сама</agenthub.fsRead>
+// <agenthub.fsRead lang="en">$AGENTHUB_CLAUDE_MODELS_FILE — the Claude models your sign-in can use, from the hub: the Model buttons are built from it, a new model shows up by itself</agenthub.fsRead>
 // <agenthub.watch>~/.claude/settings.json — настройки поменяли (вы, /model, /effort или другой плагин)</agenthub.watch>
 // <agenthub.watch lang="en">~/.claude/settings.json — the settings changed (by you, /model, /effort or another plugin)</agenthub.watch>
 // <agenthub.watch>~/.claude/sessions/*.json — сессия освободилась: можно набрать отложенное</agenthub.watch>
 // <agenthub.watch lang="en">~/.claude/sessions/*.json — a session became free: a deferred command can be typed</agenthub.watch>
 // <agenthub.watch>$AGENTHUB_CLAUDE_SESSIONS_FILE — у вкладки сменились модель или effort</agenthub.watch>
 // <agenthub.watch lang="en">$AGENTHUB_CLAUDE_SESSIONS_FILE — a tab's model or effort changed</agenthub.watch>
-// <agenthub.action id="set-model" level="immediate" arg="model:^(?:default|claude-[a-z]+-[0-9]+(?:-[0-9]+)?)$" title="Модель для новых сессий (Opus тратит лимит быстрее остальных; default — модель Claude Code по умолчанию)" title-en="Model for new sessions (Opus uses the limit faster than the others; default — Claude Code's default model)">claude-code.30s.mjs --action set-model {model}</agenthub.action>
+// <agenthub.watch>$AGENTHUB_CLAUDE_MODELS_FILE — хаб обновил список моделей</agenthub.watch>
+// <agenthub.watch lang="en">$AGENTHUB_CLAUDE_MODELS_FILE — the hub refreshed the model list</agenthub.watch>
+// <agenthub.action id="set-model" level="immediate" arg="model:^(?:default|claude-[a-z]+-[0-9]+(?:-[0-9]+)?)$" title="Модель для новых сессий — из списка на странице (Opus тратит лимит быстрее остальных; default — модель Claude Code по умолчанию)" title-en="Model for new sessions — one from the page's list (Opus uses the limit faster than the others; default — Claude Code's default model)">claude-code.30s.mjs --action set-model {model}</agenthub.action>
+// <agenthub.action id="set-model-id" level="immediate" arg="model:^claude-[a-z]+-[0-9]{1,2}(?:-[0-9]{1,2})?$" input="claude-fable-5-2" maxLength="40" title="Другая модель для новых сессий — по идентификатору, который вы вводите сами (как в /model; для модели, которой ещё нет в списке; существует ли такая модель, плагин проверить не может)" title-en="Another model for new sessions — by the id you type yourself (as in /model; for a model the list doesn't have yet; the plugin can't check that such a model exists)">claude-code.30s.mjs --action set-model-id</agenthub.action>
 // <agenthub.action id="set-effort" level="immediate" arg="level:^(?:low|medium|high|xhigh)$" title="Effort для новых сессий (чем выше, тем быстрее уходит лимит)" title-en="Effort for new sessions (the higher, the faster the limit goes)">claude-code.30s.mjs --action set-effort {level}</agenthub.action>
 // <agenthub.action id="effort-max" level="confirm-cost" title="Поставить effort max" title-en="Set effort to max" cost="лимит подписки уходит в разы быстрее; действует сразу во всех вкладках, включая открытые, и перебивает /effort в них" cost-en="the subscription limit runs out several times faster; it applies at once in every tab, open ones included, and overrides /effort there">claude-code.30s.mjs --action effort-max</agenthub.action>
 // <agenthub.action id="set-style" level="immediate" arg="style:^[A-Za-z0-9][A-Za-z0-9 _.:()-]{0,79}$" title="Стиль ответов" title-en="Output style">claude-code.30s.mjs --action set-style {style}</agenthub.action>
@@ -72,6 +77,8 @@
 // hub provides this data in the file $AGENTHUB_CLAUDE_SESSIONS_FILE (modelId — the model id, at — when it was written).
 // The plugin remembers what it set together with the time typing started: a newer hub record is already the session's
 // answer, and that is what is shown.
+// The model list isn't a table in the code: the hub asks Anthropic which models the sign-in can use and gives the list
+// in the file $AGENTHUB_CLAUDE_MODELS_FILE (hub 0.1.5+); the buttons are built from it — see knownModels below.
 // Deferred typing ("after the turn", "after your answer") is done by the plugin itself from a regular run, only when the
 // hub isn't paused (AGENTHUB_PAUSED=0); otherwise deferred typing waits for the Continue button (an action the hub's
 // pause blocks).
@@ -120,42 +127,67 @@ export function tabsN(n, lang = LANG) {
 }
 
 // ---------- models and effort ----------
-// Models on the page (approved design of 10.11). Labels of the others are for showing what a session has.
-export const MODELS = [
-  { id: "claude-opus-5-5", label: "Opus 5.5" },
-  { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
-  { id: "claude-haiku-5-5", label: "Haiku 5.5" },
-  { id: "claude-fable-5-1", label: "Fable 5.1" },
-];
-const LABELS = {
-  "claude-opus-5": "Opus 5",
-  "claude-sonnet-5": "Sonnet 5",
-  "claude-fable-5": "Fable 5",
-  "claude-fable-5-2": "Fable 5.2",
-  "claude-mythos-5": "Mythos 5",
-  "claude-mythos-5-1": "Mythos 5.1",
-  "claude-mythos-5-2": "Mythos 5.2",
-  ...Object.fromEntries(MODELS.map((m) => [m.id, m.label])),
+// The "Model" segment isn't a fixed table: it is built on every run from the hub's model list, and without it — from
+// the models this machine has met (knownModels below). SEED is only the floor for that second case.
+const SEED = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"];
+const FAMILY_ORDER = ["opus", "sonnet", "haiku", "fable"];
+// A model id the list can compare: claude-<family>-<major>[-<minor>], one or two digits each. A longer number is a date
+// (claude-opus-5-20261001), not a version — it must not become "the newest Opus".
+const MODEL_PARTS_RE = /^claude-([a-z]+)-([0-9]{1,2})(?:-([0-9]{1,2}))?$/;
+export function parseModel(id) {
+  const m = typeof id === "string" ? MODEL_PARTS_RE.exec(id) : null;
+  return m ? { id, family: m[1], major: Number(m[2]), minor: m[3] === undefined ? -1 : Number(m[3]) } : null;
+}
+const cmpVersion = (a, b) => a.major - b.major || a.minor - b.minor;
+const familyRank = (f) => (FAMILY_ORDER.includes(f) ? FAMILY_ORDER.indexOf(f) : FAMILY_ORDER.length);
+const newestPerFamily = (ids) => {
+  const newest = new Map();
+  for (const id of ids) {
+    const p = parseModel(id);
+    if (!p) continue;
+    const cur = newest.get(p.family);
+    if (!cur || cmpVersion(p, cur) > 0) newest.set(p.family, p);
+  }
+  return [...newest.values()];
 };
-// /model aliases → id (Claude Code 2.1.321, Anthropic API). opusplan/default have no single id.
-const ALIASES = { opus: "claude-opus-5-5", best: "claude-opus-5-5", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5", fable: "claude-fable-5-2" };
+// The models of the "Model" segment → { page: [{ id, label }], remember: [id] }.
+//   listed     — the hub's model list (hubModels): what Anthropic offers this sign-in right now; null — no such data;
+//   seen       — ids known to exist without it: an open session runs on it;
+//   remembered — the same from earlier runs (state.json): a model doesn't vanish when its last tab closes;
+//   base       — the model from settings.json.
+// With the hub's list the page is the newest version of each family in it, and nothing else: a model the account no
+// longer has isn't offered. Without it (an older hub, the service is off, never fetched) — the newest of each family
+// among SEED, seen and remembered. The base model is added as it is — older, or never met — but only as one more item:
+// a value typed into settings.json by hand never hides the newest model that is known to exist. remember — what to keep
+// in state.json for the case without the hub's list (the newest met ones that aren't in SEED).
+export function knownModels({ listed = null, seen = [], remembered = [], base = null } = {}) {
+  const met = newestPerFamily([...SEED, ...remembered, ...seen]);
+  const remember = met.map((p) => p.id).filter((id) => !SEED.includes(id)).sort();
+  const offered = listed ? newestPerFamily(listed) : [];
+  const list = offered.length ? offered : met;
+  const b = parseModel(base);
+  if (b && !list.some((p) => p.id === b.id)) list.push(b);
+  list.sort((x, y) => familyRank(x.family) - familyRank(y.family) || (x.family < y.family ? -1 : x.family > y.family ? 1 : 0) || cmpVersion(x, y));
+  return { page: list.map((p) => ({ id: p.id, label: modelLabel(p.id) })), remember };
+}
+// /model aliases → id, as Claude Code resolves them (2.1.323: /model fable gives Fable 5.1, not the newest Fable).
+// Only for a settings.json written by hand: the plugin itself always writes and types full ids. opusplan/default have
+// no single id.
+const ALIASES = { opus: "claude-opus-5-5", best: "claude-opus-5-5", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5", fable: "claude-fable-5-1" };
 // The model when there's no model key (the Anthropic API default) — for effort: which modelSettings entry it follows
 export const DEFAULT_MODEL = "claude-opus-5-5";
-// The model's default effort (without modelSettings and without the legacy effortLevel)
-const DEFAULT_EFFORT = {
-  "claude-opus-5-5": "medium",
-  "claude-sonnet-5-5": "medium",
-  "claude-haiku-5-5": "medium",
-  "claude-fable-5-2": "medium",
-  "claude-mythos-5-2": "medium",
-  "claude-opus-5": "high",
-  "claude-sonnet-5": "high",
-  "claude-fable-5": "high",
-  "claude-fable-5-1": "high",
-  "claude-mythos-5-1": "high",
-};
-// Models that ignore effortLevel from ~/.claude/settings.json (Opus 5.5 and newer). It still works for the others.
-const NEW_EFFORT = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2", "claude-mythos-5-2"]);
+// Effort by model generation. From these versions on a model ignores effortLevel in ~/.claude/settings.json (only its
+// modelSettings entry works) and starts at medium; older ones follow effortLevel and start at high. A family that isn't
+// listed appeared after this table was written — the new scheme.
+const NEW_EFFORT_FROM = { opus: [5, 5], sonnet: [5, 5], haiku: [5, 5], fable: [5, 2], mythos: [5, 2] };
+export function newEffort(id) {
+  const p = parseModel(id);
+  if (!p) return false;
+  const from = NEW_EFFORT_FROM[p.family];
+  return !from || p.major > from[0] || (p.major === from[0] && p.minor >= from[1]);
+}
+// The model's default effort (without modelSettings and without the legacy effortLevel); null — not a model id
+const defaultEffort = (id) => (parseModel(id) ? (newEffort(id) ? "medium" : "high") : null);
 export const LEVELS = ["low", "medium", "high", "xhigh"];
 const ALL_LEVELS = [...LEVELS, "max"];
 const MODEL_ID_RE = /^claude-[a-z]+-[0-9]+(?:-[0-9]+)?$/;
@@ -170,8 +202,11 @@ export function canonModel(v) {
   if (ALIASES[s]) return ALIASES[s];
   return MODEL_ID_RE.test(s) ? s : null;
 }
+// "claude-fable-5-2" → "Fable 5.2"; not an id the list understands — as is
 export function modelLabel(id) {
-  return id ? LABELS[id] || id : tr("по умолчанию", "default");
+  if (!id) return tr("по умолчанию", "default");
+  const p = parseModel(id);
+  return p ? `${p.family[0].toUpperCase()}${p.family.slice(1)} ${p.major}${p.minor < 0 ? "" : `.${p.minor}`}` : id;
 }
 const isLevel = (v) => typeof v === "string" && LEVELS.includes(v);
 // env.CLAUDE_CODE_EFFORT_LEVEL as Claude Code understands it (Hw): case doesn't matter, spaces aren't trimmed,
@@ -204,8 +239,8 @@ export function readBase(s) {
   if (ev.kind === "level" || ev.kind === "number") [effort, effortFrom] = [ev.value, "env"];
   else if (ev.kind === "auto") [effort, effortFrom] = ["auto", "env"];
   else if (isLevel(ms[em]?.effortLevel)) [effort, effortFrom] = [ms[em].effortLevel, "modelSettings"];
-  else if (!NEW_EFFORT.has(em) && isLevel(s?.effortLevel)) [effort, effortFrom] = [s.effortLevel, "effortLevel"];
-  else if (DEFAULT_EFFORT[em]) [effort, effortFrom] = [DEFAULT_EFFORT[em], "default"];
+  else if (!newEffort(em) && isLevel(s?.effortLevel)) [effort, effortFrom] = [s.effortLevel, "effortLevel"];
+  else if (defaultEffort(em)) [effort, effortFrom] = [defaultEffort(em), "default"];
   const modelRaw = typeof s?.model === "string" ? s.model.trim().toLowerCase() : null;
   return {
     model,
@@ -267,7 +302,8 @@ export function opsFor(kind, value, s) {
   const ms = s && typeof s.modelSettings === "object" && s.modelSettings ? s.modelSettings : {};
   const ops = [];
   if (kind === "model") {
-    if (value !== "default" && !MODELS.some((m) => m.id === value)) throw new Error("bad-arg");
+    // only the shape is checked here; that the model is one from the page's list — in runAction (set-model)
+    if (value !== "default" && !parseModel(value)) throw new Error("bad-arg");
     // "default": no model key — Claude Code takes its own default model (DEFAULT_MODEL)
     if (value === "default") {
       if (s?.model !== undefined) ops.push({ path: ["model"], delete: true });
@@ -605,6 +641,25 @@ export function hubSessions() {
   }
   return out;
 }
+// The hub's model list (hub 0.1.5+): $AGENTHUB_CLAUDE_MODELS_FILE — { error, models: [{ id, name?, created_at? }] },
+// what Anthropic offers the Claude Code sign-in, refreshed by the hub. Only the ids the list can compare are taken (a
+// dated id isn't a version). On an error the hub keeps the previous list, so `error` isn't looked at. null — no
+// variable (an older hub or the service is off), no file yet, another shape or nothing usable: the plugin falls back
+// to the models it has met.
+export function hubModels() {
+  const p = process.env.AGENTHUB_CLAUDE_MODELS_FILE;
+  if (!p) return null;
+  const j = readJson(p);
+  const out = [];
+  for (const m of Array.isArray(j?.models) ? j.models.slice(0, 200) : []) {
+    if (parseModel(m?.id)) out.push(m.id);
+  }
+  return out.length ? out : null;
+}
+// Models known to exist without the hub's list: the ones open sessions run on (the hub's sessions file)
+export function seenModels(hub = hubSessions()) {
+  return [...(hub?.values() ?? [])].map((x) => x.model).filter(Boolean);
+}
 
 // Live Claude Code sessions: a session file + the process is alive, the same one (start time) and it is Claude Code.
 // null — couldn't check (ps failed).
@@ -698,8 +753,10 @@ export async function withLockAsync(fn, { waitMs = 0 } = {}) {
 export function loadState() {
   const d = dataDir();
   const j = d ? readJson(join(d, "state.json")) : null;
-  const st = { applied: {}, job: null, maxClearedAt: null, ...(j && typeof j === "object" && !Array.isArray(j) ? j : {}) };
+  const st = { applied: {}, job: null, maxClearedAt: null, models: [], ...(j && typeof j === "object" && !Array.isArray(j) ? j : {}) };
   if (!st.applied || typeof st.applied !== "object" || Array.isArray(st.applied)) st.applied = {};
+  // models met in earlier runs (knownModels.remember)
+  st.models = Array.isArray(st.models) ? st.models.filter((id) => parseModel(id)).slice(0, 16) : [];
   if (st.job && (typeof st.job !== "object" || !Array.isArray(st.job.items))) st.job = null;
   if (st.job) {
     st.job.items = st.job.items.filter((i) => i && typeof i === "object" && SESSION_RE.test(String(i.sessionId || "")) && PHASES.includes(i.phase) && typeof i.label === "string");
@@ -726,7 +783,7 @@ export function sessionNow(sess, base, hub, st) {
   const ownOk = own && (!sess.startedAt || own.at >= sess.startedAt) && (!h || own.at > h.at);
   const model = (ownOk ? own.model : null) ?? h?.model ?? null;
   let effort = (ownOk ? own.effort : null) ?? h?.effort ?? null;
-  if (base.envAuto) effort = model ? DEFAULT_EFFORT[model] || null : null;
+  if (base.envAuto) effort = model ? defaultEffort(model) : null;
   else if (base.envOverride && base.effort) effort = base.effort;
   return { model: model || null, effort: effort || null, known: Boolean(h) || Boolean(ownOk), verified: h ? h.verified : null };
 }
@@ -907,6 +964,7 @@ export async function collect({ home = homedir() } = {}) {
   // deferred typing is done from a regular run only if the hub reports it isn't paused
   const allowType = process.env.AGENTHUB_PAUSED === "0";
   let st = loadState();
+  const seen = seenModels();
   if (!broken) {
     const r = await withLockAsync(async () => {
       const s2 = loadState();
@@ -927,6 +985,12 @@ export async function collect({ home = homedir() } = {}) {
           }
         }
       }
+      // a model met now stays in the list after its last tab closes
+      const remember = knownModels({ seen, remembered: s2.models }).remember;
+      if (remember.join() !== s2.models.join()) {
+        s2.models = remember;
+        ch = true;
+      }
       if (ch) saveState(s2);
       return s2;
     });
@@ -938,6 +1002,7 @@ export async function collect({ home = homedir() } = {}) {
     installed: true,
     broken,
     base: broken ? null : base,
+    models: knownModels({ listed: hubModels(), seen, remembered: st.models, base: broken ? null : base.model }).page,
     styles: broken ? [] : listStyles(home, settings),
     rows: (sessions || []).map((s) => rowFor(s, base, hub, st)),
     sessionsUnknown: !sessions,
@@ -973,7 +1038,7 @@ const REASONS = {
   gone: ["сессия закрылась", "the session closed"],
   "no-tab": ["хаб не нашёл вкладку сессии", "the hub didn't find the session's tab"],
   "no-terminal": ["набирать во вкладки не через что", "no way to type into tabs"],
-  "terminal-offline": ["терминал хаба не на связи", "the hub's terminal is offline"],
+  "terminal-offline": ["мост терминала хаба не запущен", "the hub's terminal bridge isn't running"],
   "terminal-failed": ["терминал не набрал команду", "the terminal didn't type the command"],
   "input-mixed": ["в поле ввода осталась набранная строка — проверьте вкладку", "the typed line was left in the input — check the tab"],
   "unknown-outcome": ["терминал не ответил вовремя — проверьте вкладку", "the terminal didn't answer in time — check the tab"],
@@ -1041,7 +1106,7 @@ export function render(r, { lang = envLang() } = {}) {
   out.push(line(tr("Модель", "Model"), { segment: "true" }));
   const defLabel = tr(`По умолчанию (${modelLabel(DEFAULT_MODEL)})`, `Default (${modelLabel(DEFAULT_MODEL)})`);
   out.push(`--${line(defLabel, !b.model ? { selected: "true" } : { action: "set-model", arg: "default" })}`);
-  for (const m of MODELS) out.push(`--${line(m.label, b.model === m.id ? { selected: "true" } : { action: "set-model", arg: m.id })}`);
+  for (const m of r.models) out.push(`--${line(m.label, b.model === m.id ? { selected: "true" } : { action: "set-model", arg: m.id })}`);
   out.push(line("Effort", { segment: "true" }));
   for (const l of LEVELS) out.push(`--${line(l, b.effort === l && !b.envOverride ? { selected: "true" } : { action: "set-effort", arg: l })}`);
   // max is the segment's last option, orange (a separate line would split the settings into separate cards)
@@ -1053,6 +1118,9 @@ export function render(r, { lang = envLang() } = {}) {
     const note = st.source === "user" ? tr("ваш", "yours") : st.source === "plugin" ? tr("из плагина", "from a plugin") : undefined;
     out.push(`--${line(st.name, b.outputStyle === st.name ? { selected: "true", note } : { action: "set-style", arg: st.name, note })}`);
   }
+  // the spare way: a model the list doesn't have (a hub without the model list, or an id the list can't compare) —
+  // the human types its id
+  out.push(line(tr("Другая модель…", "Another model…"), { action: "set-model-id", note: tr(`идентификатор, например ${r.models.at(-1)?.id ?? DEFAULT_MODEL}`, `an id, e.g. ${r.models.at(-1)?.id ?? DEFAULT_MODEL}`) }));
   out.push(line("Ultracode", { toggle: b.ultracode ? "on" : "off", action: b.ultracode ? "ultracode-off" : "ultracode-on", note: tr("многоагентные воркфлоу на каждую задачу", "multi-agent workflows on every task") }));
   out.push(
     line(
@@ -1144,7 +1212,7 @@ export const REFUSALS = {
   "not-allowed": ["Этот ключ настроек плагин не меняет.", "The plugin doesn't change this settings key."],
   "unknown-style": ["Такого стиля ответов нет среди установленных.", "No installed output style has this name."],
   "no-terminal": ["Хаб не дал плагину терминал — набирать во вкладки не через что.", "The hub gave the plugin no terminal — no way to type into tabs."],
-  "terminal-offline": ["Терминал хаба не на связи — попробуйте позже.", "The hub's terminal is offline — try later."],
+  "terminal-offline": ["Мост терминала хаба не запущен или устарел — запустите его заново: команда в настройках хаба, «Терминал».", "The hub's terminal bridge is down or outdated — start it again: the command is in the hub's Settings, Terminal."],
   "terminal-failed": ["Терминал не набрал команду.", "The terminal didn't type the command."],
   "input-mixed": ["Строку набрали, но в поле оказался и ваш текст: Enter не нажат — проверьте вкладку.", "The line was typed but your text got mixed in: Enter wasn't pressed — check the tab."],
   "unknown-outcome": ["Терминал не ответил вовремя — проверьте вкладку, прежде чем повторять.", "The terminal didn't answer in time — check the tab before retrying."],
@@ -1230,9 +1298,27 @@ async function tabAction(id, arg, home) {
 }
 
 // → { ok, reason? }
-export async function runAction([id, arg], { home = homedir() } = {}) {
+// The text of an input action: the hub writes it to stdin (the text, "\n", end of input). → string or null
+function typedInput() {
+  try {
+    return readFileSync(0, "utf8").slice(0, 256).split("\n")[0];
+  } catch {
+    return null;
+  }
+}
+export async function runAction([id, arg], { home = homedir(), input = null } = {}) {
   if (!claudeInstalled(home)) return { ok: false, reason: "no-claude" };
-  if (id === "set-model") return arg === "default" || MODELS.some((m) => m.id === arg) ? settingsAction(home, "model", arg) : { ok: false, reason: "bad-arg" };
+  if (id === "set-model-id") {
+    // typed by the human in the hub, so it needn't be on the page — that is the point: a model nobody here has used
+    // yet. Only the shape is checked (the hub checked the same pattern); it is written as a full id, like any other.
+    const typed = input ?? typedInput();
+    return parseModel(typed) ? settingsAction(home, "model", typed) : { ok: false, reason: "bad-arg" };
+  }
+  if (id === "set-model") {
+    // only a model from the page's list (the same sources as the page) or "default"
+    const page = knownModels({ listed: hubModels(), seen: seenModels(), remembered: loadState().models, base: readBase(readSettings(home) || {}).model }).page;
+    return arg === "default" || page.some((m) => m.id === arg) ? settingsAction(home, "model", arg) : { ok: false, reason: "bad-arg" };
+  }
   if (id === "set-effort") {
     if (!isLevel(arg)) return { ok: false, reason: "bad-arg" };
     const before = readBase(readSettings(home) || {});

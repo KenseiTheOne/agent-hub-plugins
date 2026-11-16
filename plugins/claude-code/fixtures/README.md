@@ -10,6 +10,8 @@ up.
   read terminal files; the conversation text marker in `lastBody` must not reach the output).
 - `hub-sessions.json` — the hub's file with the sessions' model and effort (`$AGENTHUB_CLAUDE_SESSIONS_FILE`,
   contract 3).
+- `hub-models.json` — the hub's model list (`$AGENTHUB_CLAUDE_MODELS_FILE`, hub 0.1.5+): newer and older versions of
+  one family and a dated id, to check that the page takes the newest of each family.
 
 Processes (`ps`) in the tests are a double script in `AGENTHUB_TEST_BIN_DIR`; the hub's terminal is a hub socket
 double that the test starts in HOME (`hub.sock`).

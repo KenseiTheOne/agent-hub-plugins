@@ -24,6 +24,20 @@ and these docs are in English; this is a documentation change only, with no chan
   Claude Code takes its own default. The model in brackets is the plugin's default-model table (`DEFAULT_MODEL`): the
   hub's sessions file can't tell a default model from `--model`. The header then reads "Base: default (Opus 5.5) ·
   medium", the tile "Opus 5.5 · medium".
+- **Model list (1.3.0):** the "Model" segment isn't a table in the code. The hub asks Anthropic which models your
+  Claude Code sign-in can use and gives the plugin the list (`$AGENTHUB_CLAUDE_MODELS_FILE`, hub 0.1.5+, refreshed
+  every 6 hours). The buttons are the newest version of each family in that list, so a new model shows up by itself,
+  without a plugin release. The base model from settings.json is added as it is — even an older one — but only as one
+  more item: a value typed into settings.json by hand never hides the newest model. Names ("Fable 5.2") and the effort
+  rules are derived from the id. An id with a date suffix (`claude-opus-4-5-20251101`) isn't a version and isn't
+  listed. Every button writes and types the **full id** (`/model claude-fable-5-2`), never an alias, so a base set from
+  the hub doesn't move when Claude Code repoints an alias.
+  **Without the hub's list** (an older hub, the `models` service is off, nothing fetched yet, signed out) the segment
+  is put together from the models this machine has met: the ones open sessions run on (the hub's sessions file), the
+  ones remembered from earlier runs (`state.json`) and a small built-in floor (Opus 5.5, Sonnet 5.5, Haiku 5.5,
+  Fable 5.1).
+  **"Another model…"** is the spare way: you type the full id (`claude-fable-5-2`) and the plugin writes it as the
+  base — for a hub without the list, or for an id the list doesn't show (a dated one).
 - **Open sessions** — what a row says: a free tab that differs gets "Fix", a busy one "after the turn", one waiting for
   you "after your answer".
 - **Progress of "Apply base to all"**: what was typed, what waits for the turn to end or for your answer, what was
@@ -37,6 +51,7 @@ Where each thing comes from:
 | Style list | built-in (Default, Proactive, Concise, Explanatory, Learning), `~/.claude/output-styles/*.md` (the name comes from the file header), styles of enabled Claude Code plugins (`~/.claude/plugins/installed_plugins.json` → the plugin folder in `~/.claude/plugins/cache` → `output-styles/` or the manifest's `outputStyles`; name `<plugin>:<style>`) |
 | Sessions | `~/.claude/sessions/<pid>.json`: id, folder, name, state, start time. A session is live if the process with this pid is alive, started at the same time (`procStart`, ps in UTC) and is Claude Code |
 | Tab | not read: the plugin knows only the `sessionId`; the hub finds the tab (the hub's terminal for typing, the `session.focus` effect for "Switch") |
+| Model list | the hub's file `$AGENTHUB_CLAUDE_MODELS_FILE` (the models the sign-in can use). Without it: the hub's file `$AGENTHUB_CLAUDE_SESSIONS_FILE` (models of open sessions), the plugin's `state.json` (`models` — met earlier), the built-in floor |
 | Session model and effort | whichever is fresher: the hub's file `$AGENTHUB_CLAUDE_SESSIONS_FILE` (transcript write time, see "From the hub") or what the plugin set itself. Without the hub's file — only the latter, and the header says "tabs: no data", not "as base" |
 
 ## What it doesn't read
@@ -153,7 +168,8 @@ finds the tab, and if there is none, the hub refuses.
 
 | id | level | what | `reason=` refusals |
 |---|---|---|---|
-| `set-model <id>` | immediate | model for new sessions (Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1) | `bad-arg` |
+| `set-model <id>` | immediate | model for new sessions: `default` or a model from the page's list (see "Model list") | `bad-arg` |
+| `set-model-id` | immediate, typed text | model for new sessions by the full id the human types in the hub (`claude-<family>-<major>[-<minor>]`); the text comes on stdin, not from the plugin's output; only the shape is checked | `bad-arg` |
 | `set-effort <level>` | immediate | low, medium, high, xhigh; leaving max | `bad-arg` |
 | `effort-max` | confirm-cost | max via `env`; the price in the window — "the limit runs out several times faster, it applies at once in every tab" | — |
 | `set-style <name>` | immediate | a style from the list (built-in, yours, plugins') | `bad-arg`, `unknown-style` |
@@ -186,12 +202,13 @@ core's window, its "Are you sure?" is in `cost`. The registry linter flags every
 | `fsRead ~/.claude/sessions/*.json` | open sessions: pid, folder, name, state, start time |
 | `fsRead ~/.local/bin/claude, ~/.local/share/claude/versions, /opt/homebrew/bin/claude, /usr/local/bin/claude` | whether Claude Code is installed (native install, Homebrew, npm; another sign is an existing `~/.claude/settings.json`) |
 | `fsRead $AGENTHUB_CLAUDE_SESSIONS_FILE` | model (`modelId`) and effort of open sessions from the hub — metadata only; the plugin doesn't take the tabs (`surfaceId`) |
+| `fsRead $AGENTHUB_CLAUDE_MODELS_FILE` | the model list from the hub: model ids, display names and release dates — what Anthropic offers your sign-in. The hub fetches it; the plugin never sees the sign-in token and makes no network requests |
 | `fsWrite ~/.claude/settings.json` | write the choice (only the allow list of keys) |
 | `fsWrite ~/.claude/backups/settings.json.*-agenthub` | a copy before every change, the last 20 are kept |
 | `exec /bin/ps -o pid=,lstart=,comm= -p …` | whether a session is alive and is Claude Code (no process arguments or environment) |
 | `terminal send /model /effort` | type `/model` and `/effort` into a tab through the hub: the hub checks the session, the signature and the input line and presses Enter; the screen isn't given to the plugin. The consent window shows a red line "Typing into Claude Code sessions" |
 | `effects session.focus` | the "Switch" button on an open session: the hub finds the tab |
-| `watch ~/.claude/settings.json`, `~/.claude/sessions/*.json`, `$AGENTHUB_CLAUDE_SESSIONS_FILE` | show changes at once, type deferred commands when a session becomes free, and see the session's answer to the typing |
+| `watch ~/.claude/settings.json`, `~/.claude/sessions/*.json`, `$AGENTHUB_CLAUDE_SESSIONS_FILE`, `$AGENTHUB_CLAUDE_MODELS_FILE` | show changes at once, type deferred commands when a session becomes free, see the session's answer to the typing, and redraw the Model buttons when the hub refreshes the list |
 
 **What changed since 1.0.0:** `fsRead ~/.cmuxterm/claude-hook-sessions.json`, `exec …/cmux read-screen|send|send-key`
 and `exec /usr/bin/codesign` are gone — typing, finding the tab and checking the signature are done by the hub. Added
@@ -202,6 +219,14 @@ grow, so updating shows a consent window. Needs a hub with contract 3 (`<agenthu
 **What changed in 1.2.0:** the `set-model` action also takes `default` (its argument pattern grew from
 `^claude-…$` to `^(?:default|claude-…)$`): it removes the `model` key from settings.json — still within the allow list,
 nothing new is written or read. A changed action is a permission change, so updating shows a consent window.
+
+**What changed in 1.3.0:** added `fsRead` and `watch $AGENTHUB_CLAUDE_MODELS_FILE` — the model list is no longer a
+table in the code, it comes from the hub (see "Model list"; needs hub 0.1.5, an older hub skips the two lines and the
+plugin falls back to the models it has met); the permissions grow, so updating shows a consent window. Without the
+consent the previous version keeps running. The refusal for a hub terminal bridge that isn't running now says to start it and where the command is (the
+hub's Settings, Terminal) instead of "try later". New action `set-model-id` ("Another model…", a typed full id) for
+a model the list doesn't have. The `fable` alias in a hand-written settings.json is read as Fable 5.1 — what
+Claude Code 2.1.323 resolves it to.
 
 ## From the hub (contract 3)
 
