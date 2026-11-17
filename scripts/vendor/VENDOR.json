@@ -27,8 +27,8 @@
   },
   "docs": {
     "README.md": "857f0b19092e9ae21408832bf0d7bb7992ffaf750a83c55cdda7a5f8f81333a8",
-    "writing-plugins.md": "1e382cbc98fc9615e1c9eaa622d9f54a4424acca8a695094818d34c90232d509",
-    "extension-points.md": "7ffef1fbd114f9323c140a6dbf1f04de4aa519dd4abf8e542d383560bbf89d5c",
+    "writing-plugins.md": "7c805d9058ef3ca9a0f6e2e56d4667d3809a4d63ff00d6e2f62a4e8693b66d72",
+    "extension-points.md": "3008e96100df50e9fe02c1e1cb4cc9d0ad03bdc6cafccfb1fae1f11978d25b65",
     "push.md": "db0e323a56a06872c9577b634461fb72bbf4e45d3fc4aa017bafd00ce82fadd1",
     "plugins-registry.md": "94d1598467c9e07144e26d7b077798ee0fda95b82b521c62bb5b3c8d4cdbde74",
     "api.md": "d11977d15581f37eb036d12a577f371306fcbb5b8ae3c332066e02a0dd06a871"
