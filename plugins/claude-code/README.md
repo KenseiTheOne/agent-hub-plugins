@@ -54,6 +54,21 @@ Where each thing comes from:
 | Model list | the hub's file `$AGENTHUB_CLAUDE_MODELS_FILE` (the models the sign-in can use). Without it: the hub's file `$AGENTHUB_CLAUDE_SESSIONS_FILE` (models of open sessions), the plugin's `state.json` (`models` — met earlier), the built-in floor |
 | Session model and effort | whichever is fresher: the hub's file `$AGENTHUB_CLAUDE_SESSIONS_FILE` (transcript write time, see "From the hub") or what the plugin set itself. Without the hub's file — only the latter, and the header says "tabs: no data", not "as base" |
 
+## 1M context (1.4.0)
+
+The "1M-token context" switch is for new sessions. What it writes depends on the base model, as Claude Code's
+"Extended context" documentation describes it:
+
+- **Fable, Sonnet 5+, Haiku 5.5+, Opus 4.7+** have the 1M window by themselves. Off writes
+  `env.CLAUDE_CODE_DISABLE_1M_CONTEXT = "1"` (the window is 200K and history is compacted sooner — a long session
+  then uses the limit slower); on deletes the key. The key applies to every model, so it is written only for these.
+- **Opus 4.6, Sonnet 4.6** get the window from the `[1m]` suffix on `model`: on adds it, off removes it. Picking
+  another model in the "Model" segment keeps the window on (the suffix is added where it is needed).
+- **Older models** have no 1M window: the page shows a line instead of a switch, the action refuses with `no-1m`.
+
+Open tabs are not touched by the switch: the plugin can't tell a 200K tab from a 1M one, so the sessions table doesn't
+compare them by it.
+
 ## What it doesn't read
 
 - Session transcripts — never: they hold the conversation text. The hub provides the sessions' model and effort as
@@ -69,7 +84,7 @@ Where each thing comes from:
 
 **Only** these paths are written (`ALLOWED_PATHS` in the code, checked on every operation):
 `model`, `effortLevel`, `modelSettings.<model id>.effortLevel`, `outputStyle`, `ultracode`,
-`env.CLAUDE_CODE_EFFORT_LEVEL`. Any other path, including `env.ANTHROPIC_BASE_URL`, `hooks`, `permissions`,
+`env.CLAUDE_CODE_EFFORT_LEVEL`, `env.CLAUDE_CODE_DISABLE_1M_CONTEXT`. Any other path, including `env.ANTHROPIC_BASE_URL`, `hooks`, `permissions`,
 `apiKeyHelper`, `statusLine`, `__proto__`, is refused with `not-allowed` (the "allow list" test). Otherwise the plugin
 could hijack Claude Code.
 
@@ -174,6 +189,7 @@ finds the tab, and if there is none, the hub refuses.
 | `effort-max` | confirm-cost | max via `env`; the price in the window — "the limit runs out several times faster, it applies at once in every tab" | — |
 | `set-style <name>` | immediate | a style from the list (built-in, yours, plugins') | `bad-arg`, `unknown-style` |
 | `ultracode-on`, `ultracode-off` | immediate | the `ultracode` key (turning off deletes the key) | — |
+| `context-1m-on`, `context-1m-off` | immediate | the 1M-token context window for new sessions (see "1M context") | `no-1m` |
 | `apply <sessionId>` | confirm-cost | "Fix": type into a free session's tab | `no-terminal`, `no-session`, `session-busy`, `rate`, `unverified`, `no-tab`, `input-text`, `input-mixed`, `unknown-outcome`, `partial`, `terminal-offline`, `terminal-failed`, `paused`, `no-ps` |
 | `apply-all` | confirm-cost | "Apply base to all" and "Retry for K" | `no-terminal`, `nothing-to-do`, `job-running`, `no-ps` |
 | `apply-continue` | confirm-cost | "Continue": type the deferred commands into tabs that became free | `no-terminal`, `no-ps` |
@@ -227,6 +243,10 @@ consent the previous version keeps running. The refusal for a hub terminal bridg
 hub's Settings, Terminal) instead of "try later". New action `set-model-id` ("Another model…", a typed full id) for
 a model the list doesn't have. The `fable` alias in a hand-written settings.json is read as Fable 5.1 — what
 Claude Code 2.1.323 resolves it to.
+
+**What changed in 1.4.0:** `fsRead` and `fsWrite` of `~/.claude/settings.json` name one more key,
+`env.CLAUDE_CODE_DISABLE_1M_CONTEXT` (the "1M-token context" switch). A refused "Fix" also prints `fact=`, `hint=` and
+`session=` lines for the refusal window of hub 0.1.6 (an older hub ignores them).
 
 ## From the hub (contract 3)
 

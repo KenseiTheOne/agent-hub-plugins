@@ -149,6 +149,8 @@ test("metadata: contract 3, typing only through the hub terminal (send /model /e
       ["set-style", "immediate", "style"],
       ["ultracode-on", "immediate", null],
       ["ultracode-off", "immediate", null],
+      ["context-1m-on", "immediate", null],
+      ["context-1m-off", "immediate", null],
       ["apply", "confirm-cost", "session"],
       ["apply-all", "confirm-cost", null],
       ["apply-continue", "confirm-cost", null],
@@ -184,6 +186,8 @@ test("base: modelSettings beats effortLevel for Opus 5.5; legacy effortLevel for
     envOverride: false,
     envAuto: false,
     maxPendingClear: false,
+    context1m: true,
+    context1mKind: "default",
     outputStyle: "Default",
     ultracode: false,
   });
@@ -309,6 +313,47 @@ test("write: file changed between read and write — re-read and retry; changed 
   }
 });
 
+test("1M context: which models have it, the toggle writes the env key or the [1m] suffix, a model change keeps it", POSIX, () => {
+  assert.deepEqual(
+    ["claude-fable-5-2", "claude-opus-5-5", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-5-5", "claude-haiku-4-5", "claude-nova-1", "junk"].map(mod.wideContext),
+    ["default", "default", "default", "suffix", "none", "default", "suffix", "none", "default", "none", "default", "none"],
+  );
+  // read: on by itself, off by the env key, on by the suffix only where the suffix is what asks for it
+  assert.equal(mod.readBase({ model: "claude-fable-5-2[1m]" }).context1m, true);
+  assert.equal(mod.readBase({}).context1m, true, "no model key — the default model has the window");
+  assert.equal(mod.readBase({ model: "claude-fable-5-2[1m]", env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "1" } }).context1m, false);
+  assert.equal(mod.readBase({ model: "claude-fable-5-2", env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "0" } }).context1m, true);
+  assert.equal(mod.readBase({ model: "claude-opus-4-6" }).context1m, false);
+  assert.equal(mod.readBase({ model: "claude-opus-4-6[1m]" }).context1m, true);
+  assert.equal(mod.readBase({ model: "claude-sonnet-4-5[1m]" }).context1m, false);
+  const home = makeHome();
+  try {
+    // off on a model that has the window by itself: the env key holds it at 200K, the suffix goes away
+    writeSettingsFile(home, { ...settings(home), model: "claude-fable-5-2[1m]" });
+    assert.match(run(home, WITH_HUB).text, /^Контекст 1 млн токенов \| toggle=on action=context-1m-off note="[^"]+"$/m);
+    assert.deepEqual(act(home, ["context-1m-off"]), { out: "ok", code: 0 });
+    assert.deepEqual([settings(home).model, settings(home).env.CLAUDE_CODE_DISABLE_1M_CONTEXT], ["claude-fable-5-2", "1"]);
+    assert.match(run(home, WITH_HUB).text, /^Контекст 1 млн токенов \| toggle=off action=context-1m-on note="[^"]+"$/m);
+    // on: the key is removed, the model stays as it is
+    assert.deepEqual(act(home, ["context-1m-on"]), { out: "ok", code: 0 });
+    assert.deepEqual([settings(home).model, settings(home).env?.CLAUDE_CODE_DISABLE_1M_CONTEXT], ["claude-fable-5-2", undefined]);
+    // a model that needs the suffix: on writes it, off removes it and writes no env key; a model change keeps the window
+    writeSettingsFile(home, { ...settings(home), model: "claude-opus-4-6" });
+    assert.deepEqual(act(home, ["context-1m-on"]), { out: "ok", code: 0 });
+    assert.equal(settings(home).model, "claude-opus-4-6[1m]");
+    assert.deepEqual(mod.opsFor("model", "claude-sonnet-4-6", settings(home)).find((o) => o.path[0] === "model"), { path: ["model"], value: "claude-sonnet-4-6[1m]" });
+    assert.deepEqual(mod.opsFor("model", "claude-fable-5-2", settings(home)).find((o) => o.path[0] === "model"), { path: ["model"], value: "claude-fable-5-2" });
+    assert.deepEqual(act(home, ["context-1m-off"]), { out: "ok", code: 0 });
+    assert.deepEqual([settings(home).model, settings(home).env?.CLAUDE_CODE_DISABLE_1M_CONTEXT], ["claude-opus-4-6", undefined]);
+    // a model without the window: no switch on the page, the action refuses in words
+    writeSettingsFile(home, { ...settings(home), model: "claude-sonnet-4-5" });
+    assert.match(run(home, WITH_HUB).text, /^Контекст 1 млн токенов \| note="[^"]+"$/m);
+    assert.deepEqual(act(home, ["context-1m-on"]), { out: "reason=no-1m", code: 3, message: "У этой модели нет окна в 1 млн токенов — выберите другую модель." });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("settings actions: model (effort moves along), effort, style (only from the list), ultracode", POSIX, () => {
   const home = makeHome();
   try {
@@ -420,6 +465,14 @@ test("Fix: a busy or unverified session is refused without typing; text in the i
       rmSync(join(home, flag));
     }
     assert.deepEqual(sent(home), []);
+    // hub 0.1.6: the refusal window gets its rows — what was to be typed, the advice, the session — before message=
+    writeFileSync(join(home, "typed"), "");
+    const raw = spawnSync(process.execPath, [PLUGIN, "--action", "apply", S1], { env: env(home, WITH_HUB), encoding: "utf8", timeout: 10_000 }).stdout.trim().split("\n");
+    rmSync(join(home, "typed"));
+    assert.match(raw[0], /^fact=Хотел набрать: \/(?:model|effort) \S+(?:, \/effort \S+)?$/);
+    assert.deepEqual(raw.slice(1), ["hint=Сотрите или отправьте текст во вкладке и нажмите «Повторить».", `session=${S1}`, "message=В поле ввода есть текст — вкладку не трогаю.", "reason=input-text"]);
+    assert.deepEqual(mod.refusalLines({ ok: false, reason: "bad-arg" }, "en"), ["message=No such value.", "reason=bad-arg"], "a refusal with nothing to add stays two lines");
+    assert.deepEqual(mod.refusalLines({ ok: false, reason: "rate", session: "junk", want: [] }, "en"), ["hint=Wait a minute and try again.", "message=Too often — try again in a minute.", "reason=rate"]);
     assert.equal(act(home, ["apply", "99999999-9999-4999-8999-999999999999"]).out, "reason=no-session");
   } finally {
     rmSync(home, { recursive: true, force: true });

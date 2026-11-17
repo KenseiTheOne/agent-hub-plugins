@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // <agenthub.title>Claude Code Настройки</agenthub.title>
 // <agenthub.title lang="en">Claude Code Settings</agenthub.title>
-// <agenthub.version>1.3.0</agenthub.version>
+// <agenthub.version>1.4.0</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="text.alignleft" color="#D97757"></agenthub.icon>
-// <agenthub.desc>Настройки Claude Code для новых сессий (модель, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
-// <agenthub.desc lang="en">Claude Code settings for new sessions (model, effort, output style, ultracode) and open tabs: which differ from the base, and a button to bring them in line</agenthub.desc>
+// <agenthub.desc>Настройки Claude Code для новых сессий (модель, контекст 1 млн, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
+// <agenthub.desc lang="en">Claude Code settings for new sessions (model, 1M context, effort, output style, ultracode) and open tabs: which differ from the base, and a button to bring them in line</agenthub.desc>
 // <agenthub.status value="ok" label="Настройки Claude">Базовые настройки прочитаны</agenthub.status>
 // <agenthub.status value="ok" lang="en" label="Claude settings">Base settings are read</agenthub.status>
 // <agenthub.status value="wait" label="Проставляю во вкладки">Идёт «Проставить базовые»: часть вкладок ждёт конца хода или вашего ответа</agenthub.status>
@@ -19,8 +19,8 @@
 // <agenthub.platforms>macos</agenthub.platforms>
 // <agenthub.requires name="Claude Code" url="https://code.claude.com/docs" check="~/.claude/settings.json">агент, чьи настройки показывает и меняет плагин</agenthub.requires>
 // <agenthub.requires lang="en" name="Claude Code">the agent whose settings this plugin shows and changes</agenthub.requires>
-// <agenthub.fsRead>~/.claude/settings.json — базовые настройки новых сессий: model, effortLevel, modelSettings, outputStyle, ultracode, env.CLAUDE_CODE_EFFORT_LEVEL (остальные ключи не показываются)</agenthub.fsRead>
-// <agenthub.fsRead lang="en">~/.claude/settings.json — base settings for new sessions: model, effortLevel, modelSettings, outputStyle, ultracode, env.CLAUDE_CODE_EFFORT_LEVEL (other keys aren't shown)</agenthub.fsRead>
+// <agenthub.fsRead>~/.claude/settings.json — базовые настройки новых сессий: model, effortLevel, modelSettings, outputStyle, ultracode, env.CLAUDE_CODE_EFFORT_LEVEL, env.CLAUDE_CODE_DISABLE_1M_CONTEXT (остальные ключи не показываются)</agenthub.fsRead>
+// <agenthub.fsRead lang="en">~/.claude/settings.json — base settings for new sessions: model, effortLevel, modelSettings, outputStyle, ultracode, env.CLAUDE_CODE_EFFORT_LEVEL, env.CLAUDE_CODE_DISABLE_1M_CONTEXT (other keys aren't shown)</agenthub.fsRead>
 // <agenthub.fsRead>~/.claude/output-styles — ваши стили ответов для списка «Стиль ответов» (только имя из заголовка файла)</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.claude/output-styles — your output styles for the Output style list (only the name from the file header)</agenthub.fsRead>
 // <agenthub.fsRead>~/.claude/plugins/installed_plugins.json, ~/.claude/plugins/cache — стили ответов включённых плагинов Claude Code (имя плагина и имя стиля)</agenthub.fsRead>
@@ -31,8 +31,8 @@
 // <agenthub.fsRead lang="en">~/.local/bin/claude, ~/.local/share/claude/versions, /opt/homebrew/bin/claude, /usr/local/bin/claude — whether Claude Code is installed</agenthub.fsRead>
 // <agenthub.fsRead>$AGENTHUB_CLAUDE_SESSIONS_FILE — модель и effort открытых сессий от хаба (только метаданные, без текста переписки)</agenthub.fsRead>
 // <agenthub.fsRead lang="en">$AGENTHUB_CLAUDE_SESSIONS_FILE — model and effort of open sessions from the hub (metadata only, no conversation text)</agenthub.fsRead>
-// <agenthub.fsWrite>~/.claude/settings.json — только ключи model, effortLevel, modelSettings.*.effortLevel, outputStyle, ultracode и env.CLAUDE_CODE_EFFORT_LEVEL, по вашей кнопке; остальное не меняется</agenthub.fsWrite>
-// <agenthub.fsWrite lang="en">~/.claude/settings.json — only the keys model, effortLevel, modelSettings.*.effortLevel, outputStyle, ultracode and env.CLAUDE_CODE_EFFORT_LEVEL, on your click; nothing else changes</agenthub.fsWrite>
+// <agenthub.fsWrite>~/.claude/settings.json — только ключи model, effortLevel, modelSettings.*.effortLevel, outputStyle, ultracode, env.CLAUDE_CODE_EFFORT_LEVEL и env.CLAUDE_CODE_DISABLE_1M_CONTEXT, по вашей кнопке; остальное не меняется</agenthub.fsWrite>
+// <agenthub.fsWrite lang="en">~/.claude/settings.json — only the keys model, effortLevel, modelSettings.*.effortLevel, outputStyle, ultracode, env.CLAUDE_CODE_EFFORT_LEVEL and env.CLAUDE_CODE_DISABLE_1M_CONTEXT, on your click; nothing else changes</agenthub.fsWrite>
 // <agenthub.fsWrite>~/.claude/backups/settings.json.*-agenthub — копия настроек до каждой правки (хранятся последние 20)</agenthub.fsWrite>
 // <agenthub.fsWrite lang="en">~/.claude/backups/settings.json.*-agenthub — a copy of the settings before each change (the last 20 are kept)</agenthub.fsWrite>
 // <agenthub.exec>/bin/ps -o pid=,lstart=,comm= -p … — жива ли сессия и это ли Claude Code (без аргументов и окружения процесса)</agenthub.exec>
@@ -57,6 +57,8 @@
 // <agenthub.action id="set-style" level="immediate" arg="style:^[A-Za-z0-9][A-Za-z0-9 _.:()-]{0,79}$" title="Стиль ответов" title-en="Output style">claude-code.30s.mjs --action set-style {style}</agenthub.action>
 // <agenthub.action id="ultracode-on" level="immediate" title="Включить ultracode для новых сессий (многоагентные воркфлоу — лимит уходит быстрее)" title-en="Turn on ultracode for new sessions (multi-agent workflows — the limit goes faster)">claude-code.30s.mjs --action ultracode-on</agenthub.action>
 // <agenthub.action id="ultracode-off" level="immediate" title="Выключить ultracode для новых сессий" title-en="Turn off ultracode for new sessions">claude-code.30s.mjs --action ultracode-off</agenthub.action>
+// <agenthub.action id="context-1m-on" level="immediate" title="Включить контекст 1 млн токенов для новых сессий (длинные сессии тратят лимит быстрее)" title-en="Turn on the 1M-token context for new sessions (long sessions use the limit faster)">claude-code.30s.mjs --action context-1m-on</agenthub.action>
+// <agenthub.action id="context-1m-off" level="immediate" title="Выключить контекст 1 млн токенов для новых сессий: окно 200 тыс." title-en="Turn off the 1M-token context for new sessions: a 200K window">claude-code.30s.mjs --action context-1m-off</agenthub.action>
 // <agenthub.action id="apply" level="confirm-cost" arg="session:^[0-9a-fA-F-]{36}$" title="Привести вкладку к базовым: набрать в неё /model и /effort" title-en="Bring the tab to the base: type /model and /effort into it" cost="из хаба не отменить: прежние модель и effort вкладки вернёте только сами" cost-en="can't be undone from the hub: only you can bring back the tab's previous model and effort">claude-code.30s.mjs --action apply {session}</agenthub.action>
 // <agenthub.action id="apply-all" level="confirm-cost" title="Проставить базовые во все вкладки не как базовые: набрать в них /model и /effort — свободные сейчас, занятые после хода или вашего ответа; вкладку с текстом в поле ввода пропустить" title-en="Apply the base to every tab that differs: type /model and /effort — free tabs now, busy ones after the turn or your answer; skip a tab with text in its input line" cost="из хаба не отменить: прежние модель и effort вкладок вернёте только сами" cost-en="can't be undone from the hub: only you can bring back the tabs' previous model and effort">claude-code.30s.mjs --action apply-all</agenthub.action>
 // <agenthub.action id="apply-continue" level="confirm-cost" title="Набрать отложенные /model и /effort во вкладки, которые освободились" title-en="Type the deferred /model and /effort into tabs that became free" cost="из хаба не отменить: прежние модель и effort вкладок вернёте только сами" cost-en="can't be undone from the hub: only you can bring back the tabs' previous model and effort">claude-code.30s.mjs --action apply-continue</agenthub.action>
@@ -139,6 +141,20 @@ export function parseModel(id) {
   return m ? { id, family: m[1], major: Number(m[2]), minor: m[3] === undefined ? -1 : Number(m[3]) } : null;
 }
 const cmpVersion = (a, b) => a.major - b.major || a.minor - b.minor;
+// The 1M-token context window (Claude Code docs, "Extended context"): Fable, Sonnet 5+, Haiku 5.5+ and Opus 4.7+ have
+// it without asking — only env.CLAUDE_CODE_DISABLE_1M_CONTEXT=1 takes it away; Opus 4.6 and Sonnet 4.6 get it with the
+// [1m] suffix on the model; older models don't have it. A family the plugin has never met is taken as a new one.
+const atLeast = (p, major, minor) => p.major > major || (p.major === major && p.minor >= minor);
+export function wideContext(id) {
+  const p = parseModel(id);
+  if (!p) return "none";
+  if (p.family === "opus") return atLeast(p, 4, 7) ? "default" : atLeast(p, 4, 6) ? "suffix" : "none";
+  if (p.family === "sonnet") return p.major >= 5 ? "default" : atLeast(p, 4, 6) ? "suffix" : "none";
+  if (p.family === "haiku") return atLeast(p, 5, 5) ? "default" : "none";
+  return "default";
+}
+const WIDE = "[1m]";
+const envOn = (v) => typeof v === "string" && v !== "" && !["0", "false", "no", "off"].includes(v.toLowerCase());
 const familyRank = (f) => (FAMILY_ORDER.includes(f) ? FAMILY_ORDER.indexOf(f) : FAMILY_ORDER.length);
 const newestPerFamily = (ids) => {
   const newest = new Map();
@@ -242,7 +258,12 @@ export function readBase(s) {
   else if (!newEffort(em) && isLevel(s?.effortLevel)) [effort, effortFrom] = [s.effortLevel, "effortLevel"];
   else if (defaultEffort(em)) [effort, effortFrom] = [defaultEffort(em), "default"];
   const modelRaw = typeof s?.model === "string" ? s.model.trim().toLowerCase() : null;
+  const wideOff = envOn(env.CLAUDE_CODE_DISABLE_1M_CONTEXT);
+  const wideKind = wideContext(em);
   return {
+    // the 1M-token window for new sessions: not switched off, and the model has it by itself or the [1m] suffix asks for it
+    context1m: !wideOff && (wideKind === "default" || (wideKind === "suffix" && Boolean(modelRaw?.endsWith(WIDE)))),
+    context1mKind: wideKind,
     model,
     // what to type in /model: the value as written (alias, [1m]) if /model accepts it; otherwise the id
     modelArg: model ? (modelRaw && MODEL_ARG_RE.test(modelRaw) ? modelRaw : model) : null,
@@ -266,6 +287,7 @@ const ALLOWED_PATHS = [
   /^outputStyle$/,
   /^ultracode$/,
   /^env\.CLAUDE_CODE_EFFORT_LEVEL$/,
+  /^env\.CLAUDE_CODE_DISABLE_1M_CONTEXT$/,
 ];
 export function pathAllowed(path) {
   return ALLOWED_PATHS.some((r) => r.test(path.join(".")));
@@ -308,7 +330,11 @@ export function opsFor(kind, value, s) {
     if (value === "default") {
       if (s?.model !== undefined) ops.push({ path: ["model"], delete: true });
       value = DEFAULT_MODEL;
-    } else if (s?.model !== value) ops.push({ path: ["model"], value });
+    } else {
+      // the 1M window stays on across a model change: a model that needs the [1m] suffix for it gets the suffix
+      const written = base.context1m && wideContext(value) === "suffix" ? value + WIDE : value;
+      if (s?.model !== written) ops.push({ path: ["model"], value: written });
+    }
     // effort carries over to the new model, otherwise it would silently start from its own default
     if (isLevel(base.effort) && ["modelSettings", "effortLevel"].includes(base.effortFrom) && !isLevel(ms[value]?.effortLevel)) ops.push({ path: ["modelSettings", value, "effortLevel"], value: base.effort });
   } else if (kind === "effort") {
@@ -324,6 +350,20 @@ export function opsFor(kind, value, s) {
     if (value === "Default") {
       if (s?.outputStyle !== undefined) ops.push({ path: ["outputStyle"], delete: true });
     } else if (s?.outputStyle !== value) ops.push({ path: ["outputStyle"], value });
+  } else if (kind === "context1m") {
+    // on: nothing switches it off, and a model that needs the suffix has it; off: no suffix, and a model that has the
+    // window by itself is held at 200K by the env key (it applies to every model, so it is written only then)
+    const em = base.model || DEFAULT_MODEL;
+    const raw = typeof s?.model === "string" ? s.model.trim() : null;
+    const bare = raw && raw.toLowerCase().endsWith(WIDE) ? raw.slice(0, -WIDE.length) : raw;
+    if (value) {
+      if (base.context1mKind === "none") throw new Error("no-1m");
+      if (s?.env?.CLAUDE_CODE_DISABLE_1M_CONTEXT !== undefined) ops.push({ path: ["env", "CLAUDE_CODE_DISABLE_1M_CONTEXT"], delete: true });
+      if (base.context1mKind === "suffix" && raw === bare) ops.push({ path: ["model"], value: em + WIDE });
+    } else {
+      if (raw !== bare) ops.push({ path: ["model"], value: bare });
+      if (base.context1mKind === "default" && !envOn(s?.env?.CLAUDE_CODE_DISABLE_1M_CONTEXT)) ops.push({ path: ["env", "CLAUDE_CODE_DISABLE_1M_CONTEXT"], value: "1" });
+    }
   } else if (kind === "ultracode") {
     if (value && s?.ultracode !== true) ops.push({ path: ["ultracode"], value: true });
     if (!value && s?.ultracode !== undefined) ops.push({ path: ["ultracode"], delete: true });
@@ -386,7 +426,7 @@ export function writeSettings(home, opsFn, { now = Date.now(), beforeRename = nu
     try {
       ops = opsFn(obj);
     } catch (e) {
-      return { ok: false, reason: String(e.message).startsWith("not-allowed") ? "not-allowed" : "bad-arg" };
+      return { ok: false, reason: String(e.message).startsWith("not-allowed") ? "not-allowed" : e.message === "no-1m" ? "no-1m" : "bad-arg" };
     }
     if (!ops.length) return { ok: true, changed: false, ops };
     try {
@@ -1107,6 +1147,15 @@ export function render(r, { lang = envLang() } = {}) {
   const defLabel = tr(`По умолчанию (${modelLabel(DEFAULT_MODEL)})`, `Default (${modelLabel(DEFAULT_MODEL)})`);
   out.push(`--${line(defLabel, !b.model ? { selected: "true" } : { action: "set-model", arg: "default" })}`);
   for (const m of r.models) out.push(`--${line(m.label, b.model === m.id ? { selected: "true" } : { action: "set-model", arg: m.id })}`);
+  {
+    const wideNote =
+      b.context1mKind === "none"
+        ? tr("эта модель работает только с окном 200 тыс.", "this model works with a 200K window only")
+        : b.context1m
+          ? tr("новые сессии; длинные сессии тратят лимит быстрее", "new sessions; long sessions use the limit faster")
+          : tr("новые сессии: окно 200 тыс., сжатие истории раньше", "new sessions: a 200K window, history is compacted sooner");
+    out.push(line(tr("Контекст 1 млн токенов", "1M-token context"), b.context1mKind === "none" ? { note: wideNote } : { toggle: b.context1m ? "on" : "off", action: b.context1m ? "context-1m-off" : "context-1m-on", note: wideNote }));
+  }
   out.push(line("Effort", { segment: "true" }));
   for (const l of LEVELS) out.push(`--${line(l, b.effort === l && !b.envOverride ? { selected: "true" } : { action: "set-effort", arg: l })}`);
   // max is the segment's last option, orange (a separate line would split the settings into separate cards)
@@ -1210,6 +1259,7 @@ export const REFUSALS = {
   "plugin-failed": ["Сбой плагина — подробности в журнале хаба.", "Plugin failure — see the hub journal."],
   "settings-busy": ["Настройки менялись одновременно с плагином — попробуйте ещё раз.", "The settings changed at the same time — try again."],
   "not-allowed": ["Этот ключ настроек плагин не меняет.", "The plugin doesn't change this settings key."],
+  "no-1m": ["У этой модели нет окна в 1 млн токенов — выберите другую модель.", "This model has no 1M-token window — pick another model."],
   "unknown-style": ["Такого стиля ответов нет среди установленных.", "No installed output style has this name."],
   "no-terminal": ["Хаб не дал плагину терминал — набирать во вкладки не через что.", "The hub gave the plugin no terminal — no way to type into tabs."],
   "terminal-offline": ["Мост терминала хаба не запущен или устарел — запустите его заново: команда в настройках хаба, «Терминал».", "The hub's terminal bridge is down or outdated — start it again: the command is in the hub's Settings, Terminal."],
@@ -1230,6 +1280,31 @@ export const REFUSALS = {
   "plugin-busy": ["Плагин занят другой командой — попробуйте через несколько секунд.", "The plugin is busy with another command — try again in a few seconds."],
   "unknown-action": ["Плагин не знает такого действия.", "The plugin doesn't know this action."],
 };
+// What the human can do about a refusal — the advice line of the hub's refusal window (hint=, hub 0.1.6)
+const HINTS = {
+  "input-text": ["Сотрите или отправьте текст во вкладке и нажмите «Повторить».", "Clear or send the text in the tab and press Try again."],
+  "input-mixed": ["Откройте вкладку и сотрите лишнее в поле ввода: Enter не нажат.", "Open the tab and clear the input line: Enter wasn't pressed."],
+  "session-busy": ["Дождитесь конца хода и повторите — или нажмите «Проставить всем».", "Wait for the turn to end and try again — or use Apply to all."],
+  "unknown-outcome": ["Откройте вкладку и посмотрите, набрана ли команда.", "Open the tab and see whether the command was typed."],
+  partial: ["Откройте вкладку: вторую команду можно набрать самому.", "Open the tab: you can type the second command yourself."],
+  "terminal-offline": ["Запустите мост заново и повторите.", "Start the bridge again and retry."],
+  rate: ["Подождите минуту и повторите.", "Wait a minute and try again."],
+  paused: ["Снимите паузу хаба и повторите.", "Unpause the hub and try again."],
+};
+// The lines of a refused action, as the hub reads them: the window's rows first (fact=, hint=, session= — a hub before
+// 0.1.6 ignores them), then message= and reason= — message= must stay within the last 5 lines for those hubs.
+export function refusalLines(r, lang = envLang()) {
+  const en = lang === "en";
+  const out = [];
+  if (Array.isArray(r.want) && r.want.length) out.push(`fact=${en ? "Wanted to type" : "Хотел набрать"}: ${r.want.join(", ")}`);
+  const hint = HINTS[r.reason];
+  if (hint) out.push(`hint=${hint[en ? 1 : 0]}`);
+  if (typeof r.session === "string" && SESSION_RE.test(r.session)) out.push(`session=${r.session}`);
+  const msg = refusalMessage(r.reason, lang);
+  if (msg) out.push(`message=${msg}`);
+  out.push(`reason=${r.reason}`);
+  return out;
+}
 export function refusalMessage(reason, lang = envLang()) {
   const t = REFUSALS[reason];
   return t ? t[lang === "en" ? 1 : 0] : null;
@@ -1269,9 +1344,12 @@ async function tabAction(id, arg, home) {
         if (!SESSION_RE.test(String(arg || ""))) return { ok: false, reason: "bad-arg" };
         const sess = sessions.find((s) => s.sessionId === arg);
         if (!sess) return { ok: false, reason: "no-session" };
-        const t = await typeInto(sess, base, sessionNow(sess, base, hub, st), { deadline });
-        if (t.phase === "waitTurn" || t.phase === "waitAnswer" || (t.phase === "later" && t.reason !== "rate")) return { ok: false, reason: "session-busy" };
-        if (t.phase !== "done") return { ok: false, reason: t.reason || "terminal-failed" };
+        const now = sessionNow(sess, base, hub, st);
+        // for the hub's refusal window (hub 0.1.6): which tab it was about and what the plugin was going to type
+        const about = { session: sess.sessionId, want: commandsFor(now, base) };
+        const t = await typeInto(sess, base, now, { deadline });
+        if (t.phase === "waitTurn" || t.phase === "waitAnswer" || (t.phase === "later" && t.reason !== "rate")) return { ok: false, reason: "session-busy", ...about };
+        if (t.phase !== "done") return { ok: false, reason: t.reason || "terminal-failed", ...about };
         st.applied[sess.sessionId] = { model: t.result.model, effort: t.result.effort, at: t.result.at || Date.now() };
         save();
         return { ok: true };
@@ -1343,6 +1421,7 @@ export async function runAction([id, arg], { home = homedir(), input = null } = 
     if (!styles.some((s) => s.name === arg)) return { ok: false, reason: "unknown-style" };
     return settingsAction(home, "style", arg);
   }
+  if (id === "context-1m-on" || id === "context-1m-off") return settingsAction(home, "context1m", id === "context-1m-on");
   if (id === "ultracode-on" || id === "ultracode-off") return settingsAction(home, "ultracode", id === "ultracode-on");
   if (["apply", "apply-all", "apply-continue", "apply-stop", "apply-done"].includes(id)) return tabAction(id, arg, home);
   return { ok: false, reason: "unknown-action" };
@@ -1357,8 +1436,7 @@ async function main() {
     } catch {
       r = { ok: false, reason: "plugin-failed" };
     }
-    const msg = r.ok ? null : refusalMessage(r.reason, envLang());
-    process.stdout.write(r.ok ? "ok\n" : `${msg ? `message=${msg}\n` : ""}reason=${r.reason}\n`);
+    process.stdout.write(r.ok ? "ok\n" : `${refusalLines(r, envLang()).join("\n")}\n`);
     process.exitCode = r.ok ? 0 : 3;
     return;
   }
