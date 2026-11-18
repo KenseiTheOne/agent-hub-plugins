@@ -4,7 +4,7 @@
 // The registry's CI can't see the sibling agent-hub repository, so what it needs lives here as a copy:
 //   scripts/vendor/ — daemon modules:
 //     meta.mjs, output.mjs                — metadata and output parsing (daemon/lib/)
-//     minisign.mjs, tarball.mjs, perms.mjs — signature, archive, permissions (daemon/lib/registry/)
+//     minisign.mjs, tarball.mjs, registry/perms.mjs — signature, archive, permissions (daemon/lib/registry/)
 //     messages/parse.mjs                  — parser and linter texts (daemon/lib/messages/), imported by meta and output
 //     native.mjs                           — a stub (the registry needs no peercred addon; binary xattrs aren't
 //                                            our case: the registry holds text plugins only)
@@ -32,7 +32,8 @@ export const FILES = {
   "output.mjs": "daemon/lib/output.mjs",
   "minisign.mjs": "daemon/lib/registry/minisign.mjs",
   "tarball.mjs": "daemon/lib/registry/tarball.mjs",
-  "perms.mjs": "daemon/lib/registry/perms.mjs",
+  // meta.mjs imports "./registry/perms.mjs": the same subfolder here, so the copy stays byte-identical
+  "registry/perms.mjs": "daemon/lib/registry/perms.mjs",
   // meta.mjs and output.mjs import "./messages/parse.mjs": keep the subfolder so the copies stay byte-identical
   "messages/parse.mjs": "daemon/lib/messages/parse.mjs",
 };

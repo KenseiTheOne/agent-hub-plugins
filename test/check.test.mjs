@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { runCheck } from "../scripts/check.mjs";
 import { permissionsAtDir, permissionsDiff } from "../scripts/lib/registry.mjs";
 import { checkVendor } from "../scripts/sync-vendor.mjs";
-import { pathViolation } from "../scripts/vendor/perms.mjs";
+import { pathViolation } from "../scripts/vendor/registry/perms.mjs";
 import { cleanup, makeRegistry, pluginSource, README } from "./helpers.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");

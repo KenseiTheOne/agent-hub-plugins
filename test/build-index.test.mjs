@@ -12,7 +12,7 @@ import { keygen } from "../scripts/keygen.mjs";
 import { generateKeyPair, verify } from "../scripts/vendor/minisign.mjs";
 import { readTarGz } from "../scripts/vendor/tarball.mjs";
 import { parseMetaText } from "../scripts/vendor/meta.mjs";
-import { permissionsFingerprint, permissionsFromMeta } from "../scripts/vendor/perms.mjs";
+import { permissionsFingerprint, permissionsFromMeta } from "../scripts/vendor/registry/perms.mjs";
 import { cleanup, makeRegistry, pluginSource, README, tempDir } from "./helpers.mjs";
 
 const sha = (b) => createHash("sha256").update(b).digest("hex");

@@ -6,15 +6,15 @@
     "output.mjs": "daemon/lib/output.mjs",
     "minisign.mjs": "daemon/lib/registry/minisign.mjs",
     "tarball.mjs": "daemon/lib/registry/tarball.mjs",
-    "perms.mjs": "daemon/lib/registry/perms.mjs",
+    "registry/perms.mjs": "daemon/lib/registry/perms.mjs",
     "messages/parse.mjs": "daemon/lib/messages/parse.mjs"
   },
   "files": {
-    "meta.mjs": "040b5a683e81592a32e02e2c20df756cad82ab939f3d66179012c8e99beb26ee",
+    "meta.mjs": "876f5947cb8b024cf95b505721fa5bc01424c901c93ba2f10165bc3239fb7797",
     "output.mjs": "a7d38e13ca8c5876fef4a481ca0d6261db17e8e14158f8d94907158693b4b07e",
     "minisign.mjs": "9970eb608a1d5d0ea2d3198b4fd189548d1b792109ffaa70d3042d651a0d95f5",
     "tarball.mjs": "9a5e79a43c970263870707581526d89795f11045c9ed9f4fdcae11517ec63d41",
-    "perms.mjs": "daafd93f0020d8c209253d8df84bc8e25f13ce4941efdac483998c3cf9e4386f",
+    "registry/perms.mjs": "09eb9f17cc3e59329a2a2e1735efbf5d0c7fa5e97e6f181a2f8fedc50b15939c",
     "messages/parse.mjs": "2e653d5440dec67416697b200987b9e6c32aa8746eff0e576ad619062499687f",
     "native.mjs": "7c6e6450148d63dc77542453820ae8dcdd0bec12073dd8becd3116a1c21f3491"
   },
@@ -27,10 +27,10 @@
   },
   "docs": {
     "README.md": "857f0b19092e9ae21408832bf0d7bb7992ffaf750a83c55cdda7a5f8f81333a8",
-    "writing-plugins.md": "7c805d9058ef3ca9a0f6e2e56d4667d3809a4d63ff00d6e2f62a4e8693b66d72",
-    "extension-points.md": "3008e96100df50e9fe02c1e1cb4cc9d0ad03bdc6cafccfb1fae1f11978d25b65",
+    "writing-plugins.md": "4dee9458fc2cdf85718e2813f146032798597bfba9b88080c12653fb2e180701",
+    "extension-points.md": "4c35c9ae44c0fd0a1c872cbc07acf2a1616f5ae834cab347f80aba6d517d8569",
     "push.md": "db0e323a56a06872c9577b634461fb72bbf4e45d3fc4aa017bafd00ce82fadd1",
     "plugins-registry.md": "94d1598467c9e07144e26d7b077798ee0fda95b82b521c62bb5b3c8d4cdbde74",
-    "api.md": "d11977d15581f37eb036d12a577f371306fcbb5b8ae3c332066e02a0dd06a871"
+    "api.md": "2692d8239445bbe4abb2ca6441b33950f7aed10b85541045a62ff72796241cd6"
   }
 }

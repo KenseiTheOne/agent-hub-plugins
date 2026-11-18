@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEffectSpec, parseOutput } from "./vendor/output.mjs";
-import { effectUnderCeiling, THIRD_PARTY_EFFECTS } from "./vendor/perms.mjs";
+import { effectUnderCeiling, THIRD_PARTY_EFFECTS } from "./vendor/registry/perms.mjs";
 import { parseFileName } from "./vendor/meta.mjs";
 import { checkVendor } from "./sync-vendor.mjs";
 import { isMain } from "./lib/is-main.mjs";

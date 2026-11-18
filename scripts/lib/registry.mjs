@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONTRACT_VERSION, parseFileName, parseMetaText } from "../vendor/meta.mjs";
-import { diffPermissions, ID_RE, lintPlugin, permissionsFromMeta, pushWarnings, RESERVED_IDS, sourceViolations } from "../vendor/perms.mjs";
+import { diffPermissions, ID_RE, lintPlugin, permissionsFromMeta, pushWarnings, RESERVED_IDS, sourceViolations } from "../vendor/registry/perms.mjs";
 import { LIMITS, packTarGz } from "../vendor/tarball.mjs";
 
 // The registry takes only text plugins with a known interpreter: a reviewer can't read a binary.
@@ -27,8 +27,8 @@ export function readJson(path, fallback = undefined) {
 }
 
 // Hub core event keys and warnings about push rules (kind="security", reserved keys) — shared with the daemon's
-// check of a local folder: scripts/vendor/perms.mjs (daemon/lib/registry/perms.mjs).
-export { CORE_PUSH_KEYS, pushWarnings } from "../vendor/perms.mjs";
+// check of a local folder: scripts/vendor/registry/perms.mjs (daemon/lib/registry/perms.mjs).
+export { CORE_PUSH_KEYS, pushWarnings } from "../vendor/registry/perms.mjs";
 
 // Contract version (<agenthub.contract>, docs/contract/extension-points.md "Contract versions"). A plugin that uses
 // contract 2 features without the tag is a warning: a hub of contract 2 or newer would show "Needs a newer hub" given

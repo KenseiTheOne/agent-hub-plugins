@@ -74,10 +74,14 @@ cli gets `403 peer:cli`, not `400 args:…` (UI pass 2026-11-05).
   pattern, version or plugin tier changed (the file was replaced before a rescan, updated, demoted) —
   `409 facts:action-changed`. The command is argv without a shell, the argument value is a separate element. `result`:
   `code`, `timedOut`, `durationMs`, `reason` (the action's last stdout line `reason=<code>` — the plugin's own
-  machine-readable refusal reason) and `message` (contract 2: a `message=<text>` line among the last 5 stdout lines — an
-  explanation for the human in the hub language, the plugin gets `AGENTHUB_LANG`; cleaned like `activity=` phrases, up to
-  120 graphemes). The shell shows a refusal as ""<button>": <message>"; without `message` — "the plugin refused
-  (<reason>)". The hub has no texts of its own for specific plugins' codes.
+  machine-readable refusal reason), `message` (contract 2: a `message=<text>` line among the last 5 non-empty stdout
+  lines — an explanation for the human in the hub language, the plugin gets `AGENTHUB_LANG`; cleaned like `activity=`
+  phrases, up to 120 graphemes) and, since hub 0.1.6, the optional refusal details `hint`, `session` and `facts` (the
+  `hint=` / `session=` / `fact=` lines among the last 12 non-empty stdout lines of a foreground action; `facts` — up to
+  three `"<label>: <value>"` strings, the only list a result carries). The shell shows a refusal in its own window:
+  `message` is the headline (without it — "The plugin refused", the reason code in small print), then the "Action" row,
+  the session's tab, the `facts` rows and the `hint` — see [`extension-points.md`](extension-points.md), "Refusal
+  details". The hub has no texts of its own for specific plugins' codes.
 
 ### Connections — `GET /connections` (app, cli), `POST /connections/:id/connect|cancel|disconnect` (app only), `POST /connections/:id/mcp`, `POST /connections/:id/http` (a plugin process)
 The hub signs into external services via OAuth 2.1 and calls their MCP servers on behalf of plugins (the `oauth`
@@ -297,7 +301,7 @@ window (as a red line).
 
 | Route | Body | 200 |
 |---|---|---|
-| `POST /terminal/read-screen` | `{sessionId, lines?}` (1…30) | `{ok, sessionId, terminal, idle, foreground, promptFound, promptEmpty, busy, ready}` — flags only, no screen text |
+| `POST /terminal/read-screen` | `{sessionId, lines?}` (1…30) | `{ok, sessionId, terminal, idle, foreground, promptFound, promptEmpty, busy, bound, ready}` — flags only, no screen text; `bound` — the tab is confirmed to belong to this very session process (`false` — `send-text` would answer `terminal:binding-unknown`, and `ready` is `false`) |
 | `POST /terminal/send-text` | `{sessionId, text}` | `{ok, sessionId, terminal}` |
 
 Checks in order: the plugin and permission (`403 terminal:not-a-plugin|untrusted|not-declared`), the plugin's overall
@@ -306,7 +310,12 @@ request rate (`429`, `scope: requests`), the pause (`423 estop`), the body (`400
 the line against the permission (`403 terminal:text-not-declared`), the session in the registry
 (`409 terminal:unknown-session`; a non-Claude agent session — `409 terminal:external-session`), the Claude Code signature now and the same start time (`409 terminal:unverified`), the
 terminal knows the tab and it belongs to the same pid and start time (`409 terminal:no-tab|pid-mismatch`), the terminal
-supports the operation (`409 terminal:unsupported`, with `terminal` and `capability`), for typing —
+supports the operation (`409 terminal:unsupported`, with `terminal` and `capability`), for typing — the binding
+session → process → tab is **confirmed**, not merely "not contradicted" (`409 terminal:binding-unknown` with `part`:
+`process` — the start time of the session's process is missing in the registry or in the verification just made, so a
+reused pid cannot be ruled out; `tab` — the terminal's record of the tab carries no start time to match, with
+`terminal`; nothing is typed, the plugin tries again on a later frame; `read-screen` still answers, with
+`bound: false`),
 the session is free (`409 terminal:session-busy`: the registry status, without it — the terminal's), the process is not
 stopped and is in the foreground of its terminal (`409 terminal:not-foreground|process-unknown`) and the typing rate per
 plugin and per tab (`429`, `scope: plugin|tab`). Then the terminal:
@@ -316,8 +325,14 @@ plugin and per tab (`429`, `scope: plugin|tab`). Then the terminal:
 daemon puts into the operation; a late bridge answer is `bridge-op-late` in the journal). No service —
 `503 terminal:disabled`. Journal: `terminal-send {plugin, sessionId, surfaceId, workspaceId, terminal, tab, len, sha, head,
 ok, error}` (`surfaceId`/`workspaceId` — cmux only, `tab` — the adapter's tab key) (head — the declared slash command at the start of the line, sha — 12 characters of the line's sha256, only
-together with head; for a line under the `*` permission both are `null`; duplicated in the audit log),
+together with head; for a line under the `*` permission both are `null`; in the main journal only — it is a routine
+record, up to `sendPerMin` a minute, and the audit log is kept for rare ones),
 `bridge-op-late {op, opId, sessionId, surfaceId, ok, error, lateMs}` (also in the audit log) and
-`terminal-denied {plugin, op, sessionId, error}` (a refusal by the overall rate — at most once a minute per plugin); bus —
+`terminal-denied {plugin, op, sessionId, error, part?, repeats?}` — refusals, collapsed: `part` — only with
+`terminal:binding-unknown`, the `part` of the reply (`"process"` \| `"tab"`: which half of the session → process → tab
+binding could not be confirmed), in the first line and in the counted one; the first refusal of a kind (the same
+plugin, operation, session, reason and `part`; for the overall request rate — the plugin alone) is written at once, the same
+one again within `deniedWindowMs` is only counted, and when the window ends one more line with `repeats: N` says how
+many there were (a plugin polling a screen it may not read no longer writes a line per request); bus —
 `terminal.send {plugin, sessionId, ok, error}`. The whole line and the screen text never go anywhere. Settings —
-`services.terminal`: `requestsPerMin` (60), `sendPerMin` (12), `sendPerTabPerMin` (4).
+`services.terminal`: `requestsPerMin` (60), `sendPerMin` (12), `sendPerTabPerMin` (4), `deniedWindowMs` (60000).

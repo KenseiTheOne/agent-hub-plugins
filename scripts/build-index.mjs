@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sign } from "./vendor/minisign.mjs";
-import { indexPermissions } from "./vendor/perms.mjs";
+import { indexPermissions } from "./vendor/registry/perms.mjs";
 import { isMain } from "./lib/is-main.mjs";
 import { inspectPlugin, packPlugin, pluginIds, readBlocklist, readOfficial, sha256 } from "./lib/registry.mjs";
 
