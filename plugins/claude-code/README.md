@@ -18,8 +18,10 @@ and these docs are in English; this is a documentation change only, with no chan
   dropdown (`select=true`), ultracode a switch (`toggle=`), open sessions a table (`table=true`): tabs that differ, have
   no data or are queued come first, the ones as the base sit in a collapsible "As base · N" group (`group=true`). A row:
   a state dot, the tab, state, model and effort cells (orange where they differ, `cellColors=`), "Fix" or a note, and an
-  icon-only "Switch". "Apply base · N" is the table's header button (`header=true`). These are display lines of hub
-  0.1.1 (contract 3); an older hub draws the children as plain lines and buttons.
+  icon-only "Switch". "Apply base · N" is the table's header button (`header=true`; N is the number of tabs that
+  differ). The button has one name everywhere — "Apply base" («Проставить базовые» in Russian): on the page, in the
+  confirmation window, in refusal texts and in the consent window. These are display lines of hub 0.1.1 (contract 3);
+  an older hub draws the children as plain lines and buttons.
 - **Default model:** the first segment is "Default (Opus 5.5)": choosing it removes `model` from settings.json, so
   Claude Code takes its own default. The model in brackets is the plugin's default-model table (`DEFAULT_MODEL`): the
   hub's sessions file can't tell a default model from `--model`. The header then reads "Base: default (Opus 5.5) ·
@@ -40,7 +42,7 @@ and these docs are in English; this is a documentation change only, with no chan
   base — for a hub without the list, or for an id the list doesn't show (a dated one).
 - **Open sessions** — what a row says: a free tab that differs gets "Fix", a busy one "after the turn", one waiting for
   you "after your answer".
-- **Progress of "Apply base to all"**: what was typed, what waits for the turn to end or for your answer, what was
+- **Progress of "Apply base"**: what was typed, what waits for the turn to end or for your answer, what was
   skipped and why. The result stays until it is dismissed.
 
 Where each thing comes from:
@@ -94,8 +96,10 @@ How it is written:
    file is a symlink (dotfiles): the file it points to is written, and the link stays.
 2. A copy before the change: `~/.claude/backups/settings.json.<time>-agenthub` (mode 0600: it holds your `env`). The
    last 20 such copies are kept; other files in `backups` are not deleted.
-3. Write the new text (indent 2, key order kept, new keys at the end) to a temp file next to it, with the previous
-   permissions.
+3. Write the new text (indent 2, key order kept, new keys at the end) to a temp file next to it. The temp file has a
+   random name and is created exclusively with mode 0600 (since 1.4.1; a file or a link planted under a guessable
+   name is never written through); the previous permissions are put back once the text is in. It is removed on every
+   path that doesn't end in the rename.
 4. Before replacing, check that the file hasn't changed since it was read. If it changed (`/model`, `/effort` in a
    session, another plugin) — re-read and retry. After three attempts — refused with `settings-busy`.
 5. `rename` over it. The hub logs the action run in its journal.
@@ -126,7 +130,7 @@ Claude Code specifics (checked against the installed 2.1.321):
 - **Claude Code itself saves /model and /effort typed into a tab as the base.** The plugin types exactly the base
   values, and the model as it is written (`opus[1m]` stays `opus[1m]` rather than turning into an id without 1M).
 
-## Typing into a tab ("Fix", "Apply base to all", "Continue")
+## Typing into a tab ("Fix", "Apply base", "Continue")
 
 Only through the hub's terminal (contract 3): `POST /terminal/send-text {sessionId, text}` to the
 `$AGENTHUB_HUB_SOCKET` socket from the plugin's own process, under the permission
@@ -160,7 +164,7 @@ Code writes the answer to `/model` and `/effort` into the transcript, the hub pu
 the page shows it instead. If the session didn't accept the command, after the next turn the hub's file shows the real
 model and the tab differs from the base again.
 
-"Apply base to all" queues the tabs that differ. Free ones are typed into at once. Busy ones (working, waiting for
+"Apply base" queues the tabs that differ. Free ones are typed into at once. Busy ones (working, waiting for
 you) — when they become free: the session file changes, the hub runs the plugin via `watch`, and the plugin types the
 deferred commands — **only if the hub reports it isn't paused** (`AGENTHUB_PAUSED=0`, a request to the hub). If the hub
 doesn't report it (older) or is paused, a tab that became free waits for the "Continue" button (the `apply-continue`
@@ -170,9 +174,11 @@ The queue and the result live in the plugin's data (`PluginData/claude-code/stat
 The regular run and actions change it only under the `state.lock` lock: "Stop" isn't overwritten by a run, and one tab
 doesn't get the command twice. A lock abandoned by a killed run (the process in the lock is gone) is removed at once.
 Before the first send the item is saved as "typing"; if the core killed the run mid-typing, this item isn't typed a
-second time ("interrupted while typing — check the tab"). Time limits count from the process start: a regular run fits
-into 4 s of 5, an action into 26 s of 30, including waiting for the lock and `ps`. "Stop" drops the deferred items.
-Retry is the same "Apply base to all" button: it takes the tabs that differ now.
+second time ("interrupted while typing — check the tab"). Time limits count from the process start, including waiting
+for the lock and `ps`. The hub's timeouts for a run and for an action are hub settings (`standardTimeoutMs`,
+`actionTimeoutMs`) and the contract doesn't pass their values to a plugin, so the plugin keeps its own budget — 4 s
+for a regular run, 26 s for an action — below the hub's defaults. "Stop" drops the deferred items.
+Retry is the same "Apply base" button: it takes the tabs that differ now.
 
 If the hub didn't give the plugin a terminal (no `$AGENTHUB_HUB_SOCKET`), the page is read-only: no typing buttons,
 and a "View-only" line. Which terminal is behind the tab — cmux or another one the hub has an adapter for — doesn't
@@ -191,7 +197,7 @@ finds the tab, and if there is none, the hub refuses.
 | `ultracode-on`, `ultracode-off` | immediate | the `ultracode` key (turning off deletes the key) | — |
 | `context-1m-on`, `context-1m-off` | immediate | the 1M-token context window for new sessions (see "1M context") | `no-1m` |
 | `apply <sessionId>` | confirm-cost | "Fix": type into a free session's tab | `no-terminal`, `no-session`, `session-busy`, `rate`, `unverified`, `no-tab`, `input-text`, `input-mixed`, `unknown-outcome`, `partial`, `terminal-offline`, `terminal-failed`, `paused`, `no-ps` |
-| `apply-all` | confirm-cost | "Apply base to all" and "Retry for K" | `no-terminal`, `nothing-to-do`, `job-running`, `no-ps` |
+| `apply-all` | confirm-cost | "Apply base" and "Retry for K" | `no-terminal`, `nothing-to-do`, `job-running`, `no-ps` |
 | `apply-continue` | confirm-cost | "Continue": type the deferred commands into tabs that became free | `no-terminal`, `no-ps` |
 | `apply-stop` | immediate | drop the deferred items | — |
 | `apply-done` | immediate | dismiss the result | — |
@@ -204,11 +210,14 @@ Before `reason=` the plugin prints `message=<explanation>` in the hub's language
 **Levels follow the registry rule** (`docs/contract/plugins-registry.md`): `immediate` is only a toggle that spends
 nothing at the moment of the click and is undone by the same click; a future price is described in words in `title`.
 That's how model, effort below max, style, ultracode, "Stop" and "Dismiss" work (the button hint of model, effort and
-ultracode says the limit goes faster). Typing into a tab can't be undone from the hub — "Fix", "Apply base to all" and
+ultracode says the limit goes faster). Typing into a tab can't be undone from the hub — "Fix", "Apply base" and
 "Continue" go through a window with the price (`confirm-cost`). So does max: window L from the mockup became the
 core's window, its "Are you sure?" is in `cost`. The registry linter flags every `immediate` for the reviewer.
 
-## Permissions 1.1.0
+## Permissions
+
+The full set the plugin declares as of 1.4.1. The set last grew in 1.4.0; what each version changed is below the
+table.
 
 | Permission | Why |
 |---|---|
@@ -225,6 +234,7 @@ core's window, its "Are you sure?" is in `cost`. The registry linter flags every
 | `terminal send /model /effort` | type `/model` and `/effort` into a tab through the hub: the hub checks the session, the signature and the input line and presses Enter; the screen isn't given to the plugin. The consent window shows a red line "Typing into Claude Code sessions" |
 | `effects session.focus` | the "Switch" button on an open session: the hub finds the tab |
 | `watch ~/.claude/settings.json`, `~/.claude/sessions/*.json`, `$AGENTHUB_CLAUDE_SESSIONS_FILE`, `$AGENTHUB_CLAUDE_MODELS_FILE` | show changes at once, type deferred commands when a session becomes free, see the session's answer to the typing, and redraw the Model buttons when the hub refreshes the list |
+| `actions` — the 14 actions of the "Actions" table above (id, level, command, argument pattern) | the page's buttons: each changes only the allow list of settings keys or types `/model` and `/effort` into a tab; nothing runs without your click |
 
 **What changed since 1.0.0:** `fsRead ~/.cmuxterm/claude-hook-sessions.json`, `exec …/cmux read-screen|send|send-key`
 and `exec /usr/bin/codesign` are gone — typing, finding the tab and checking the signature are done by the hub. Added
@@ -245,8 +255,16 @@ a model the list doesn't have. The `fable` alias in a hand-written settings.json
 Claude Code 2.1.323 resolves it to.
 
 **What changed in 1.4.0:** `fsRead` and `fsWrite` of `~/.claude/settings.json` name one more key,
-`env.CLAUDE_CODE_DISABLE_1M_CONTEXT` (the "1M-token context" switch). A refused "Fix" also prints `fact=`, `hint=` and
-`session=` lines for the refusal window of hub 0.1.6 (an older hub ignores them).
+`env.CLAUDE_CODE_DISABLE_1M_CONTEXT` (the "1M-token context" switch), and two actions are new: `context-1m-on` and
+`context-1m-off` — the permissions grow, so updating from 1.3.0 or older shows a consent window. A refused "Fix"
+also prints `fact=`, `hint=` and `session=` lines for the refusal window of hub 0.1.6 (an older hub ignores them).
+
+**What changed in 1.4.1:** no permission is added or widened — only the "why" of `terminal send /model /effort` and
+three action titles are reworded, which is not permission growth, so updating from 1.4.0 shows no consent window.
+Texts: the button that types into every tab that differs is called "Apply base" («Проставить базовые») everywhere
+(refusal texts and the consent text used to say "Apply to all"); the advice for a paused hub says "Resume the hub" —
+the hub's word for lifting the pause. The temp file for `settings.json` gets a random name and is created exclusively with mode 0600 (see
+"Writing settings"). The docs no longer promise the hub's action timeout as a number.
 
 ## From the hub (contract 3)
 

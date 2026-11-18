@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // <agenthub.title>Claude Code Настройки</agenthub.title>
 // <agenthub.title lang="en">Claude Code Settings</agenthub.title>
-// <agenthub.version>1.4.0</agenthub.version>
+// <agenthub.version>1.4.1</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="text.alignleft" color="#D97757"></agenthub.icon>
 // <agenthub.desc>Настройки Claude Code для новых сессий (модель, контекст 1 млн, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
@@ -9,7 +9,7 @@
 // <agenthub.status value="ok" label="Настройки Claude">Базовые настройки прочитаны</agenthub.status>
 // <agenthub.status value="ok" lang="en" label="Claude settings">Base settings are read</agenthub.status>
 // <agenthub.status value="wait" label="Проставляю во вкладки">Идёт «Проставить базовые»: часть вкладок ждёт конца хода или вашего ответа</agenthub.status>
-// <agenthub.status value="wait" lang="en" label="Applying to tabs">Apply to tabs is running: some tabs wait for the turn to end or for your answer</agenthub.status>
+// <agenthub.status value="wait" lang="en" label="Applying to tabs">Apply base is running: some tabs wait for the turn to end or for your answer</agenthub.status>
 // <agenthub.status value="error" label="Сбой плагина или настроек">~/.claude/settings.json — не JSON (плагин его не трогает) или сбой самого плагина</agenthub.status>
 // <agenthub.status value="error" lang="en" label="Plugin or settings failure">~/.claude/settings.json isn't valid JSON (the plugin leaves it alone) or the plugin itself failed</agenthub.status>
 // <agenthub.status value="unknown" label="Claude Code не найден">Claude Code не установлен</agenthub.status>
@@ -37,8 +37,8 @@
 // <agenthub.fsWrite lang="en">~/.claude/backups/settings.json.*-agenthub — a copy of the settings before each change (the last 20 are kept)</agenthub.fsWrite>
 // <agenthub.exec>/bin/ps -o pid=,lstart=,comm= -p … — жива ли сессия и это ли Claude Code (без аргументов и окружения процесса)</agenthub.exec>
 // <agenthub.exec lang="en">/bin/ps -o pid=,lstart=,comm= -p … — whether a session is alive and is Claude Code (no process arguments or environment)</agenthub.exec>
-// <agenthub.terminal>send /model /effort — набрать во вкладку открытой сессии только /model и /effort с базовыми значениями — по вашей кнопке «Привести» или «Проставить всем»; хаб сам проверяет, что сессия свободна, поле ввода пустое и это подписанный Claude Code, и жмёт Enter</agenthub.terminal>
-// <agenthub.terminal lang="en">send /model /effort — type only /model and /effort with the base values into an open session's tab — on your Fix or Apply to all click; the hub checks the session is free, the input line is empty and it's signed Claude Code, and presses Enter</agenthub.terminal>
+// <agenthub.terminal>send /model /effort — набрать во вкладку открытой сессии только /model и /effort с базовыми значениями — по вашей кнопке «Привести» или «Проставить базовые»; хаб сам проверяет, что сессия свободна, поле ввода пустое и это подписанный Claude Code, и жмёт Enter</agenthub.terminal>
+// <agenthub.terminal lang="en">send /model /effort — type only /model and /effort with the base values into an open session's tab — on your Fix or Apply base click; the hub checks the session is free, the input line is empty and it's signed Claude Code, and presses Enter</agenthub.terminal>
 // <agenthub.effects>session.focus</agenthub.effects>
 // <agenthub.fsRead>$AGENTHUB_CLAUDE_MODELS_FILE — список моделей Claude, доступных вашему входу, от хаба: из него строятся кнопки «Модель», новая модель появляется сама</agenthub.fsRead>
 // <agenthub.fsRead lang="en">$AGENTHUB_CLAUDE_MODELS_FILE — the Claude models your sign-in can use, from the hub: the Model buttons are built from it, a new model shows up by itself</agenthub.fsRead>
@@ -60,10 +60,10 @@
 // <agenthub.action id="context-1m-on" level="immediate" title="Включить контекст 1 млн токенов для новых сессий (длинные сессии тратят лимит быстрее)" title-en="Turn on the 1M-token context for new sessions (long sessions use the limit faster)">claude-code.30s.mjs --action context-1m-on</agenthub.action>
 // <agenthub.action id="context-1m-off" level="immediate" title="Выключить контекст 1 млн токенов для новых сессий: окно 200 тыс." title-en="Turn off the 1M-token context for new sessions: a 200K window">claude-code.30s.mjs --action context-1m-off</agenthub.action>
 // <agenthub.action id="apply" level="confirm-cost" arg="session:^[0-9a-fA-F-]{36}$" title="Привести вкладку к базовым: набрать в неё /model и /effort" title-en="Bring the tab to the base: type /model and /effort into it" cost="из хаба не отменить: прежние модель и effort вкладки вернёте только сами" cost-en="can't be undone from the hub: only you can bring back the tab's previous model and effort">claude-code.30s.mjs --action apply {session}</agenthub.action>
-// <agenthub.action id="apply-all" level="confirm-cost" title="Проставить базовые во все вкладки не как базовые: набрать в них /model и /effort — свободные сейчас, занятые после хода или вашего ответа; вкладку с текстом в поле ввода пропустить" title-en="Apply the base to every tab that differs: type /model and /effort — free tabs now, busy ones after the turn or your answer; skip a tab with text in its input line" cost="из хаба не отменить: прежние модель и effort вкладок вернёте только сами" cost-en="can't be undone from the hub: only you can bring back the tabs' previous model and effort">claude-code.30s.mjs --action apply-all</agenthub.action>
+// <agenthub.action id="apply-all" level="confirm-cost" title="Проставить базовые во все вкладки не как базовые: набрать в них /model и /effort — свободные сейчас, занятые после хода или вашего ответа; вкладку с текстом в поле ввода пропустить" title-en="Apply base to every tab that differs: type /model and /effort — free tabs now, busy ones after the turn or your answer; skip a tab with text in its input line" cost="из хаба не отменить: прежние модель и effort вкладок вернёте только сами" cost-en="can't be undone from the hub: only you can bring back the tabs' previous model and effort">claude-code.30s.mjs --action apply-all</agenthub.action>
 // <agenthub.action id="apply-continue" level="confirm-cost" title="Набрать отложенные /model и /effort во вкладки, которые освободились" title-en="Type the deferred /model and /effort into tabs that became free" cost="из хаба не отменить: прежние модель и effort вкладок вернёте только сами" cost-en="can't be undone from the hub: only you can bring back the tabs' previous model and effort">claude-code.30s.mjs --action apply-continue</agenthub.action>
-// <agenthub.action id="apply-stop" level="immediate" title="Остановить «Проставить базовые»" title-en="Stop applying the base">claude-code.30s.mjs --action apply-stop</agenthub.action>
-// <agenthub.action id="apply-done" level="immediate" title="Убрать итог «Проставить базовые»" title-en="Dismiss the apply result">claude-code.30s.mjs --action apply-done</agenthub.action>
+// <agenthub.action id="apply-stop" level="immediate" title="Остановить «Проставить базовые»" title-en="Stop Apply base">claude-code.30s.mjs --action apply-stop</agenthub.action>
+// <agenthub.action id="apply-done" level="immediate" title="Убрать итог «Проставить базовые»" title-en="Dismiss the Apply base result">claude-code.30s.mjs --action apply-done</agenthub.action>
 //
 // The "Claude Code" plugin (agent-hub-plugins registry, tier official). It does the work itself; the hub is the sandbox
 // and the permissions:
@@ -97,13 +97,16 @@
 // Actions: `--action <id> [<argument>]`; a refusal is exit code 3, a line message=<explanation> and last reason=<code>.
 
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { request } from "node:http";
-import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Process start time: the core kills a regular run after 5 s and an action after 30 s, counted from the start
+// Process start time: the core kills a regular run and an action after the hub's timeouts (standardTimeoutMs and
+// actionTimeoutMs — hub settings; the contract doesn't pass their values to a plugin), counted from the start. The
+// plugin keeps its own budgets below the hub's defaults.
 const T0 = Date.now();
 const RUN_DEADLINE = () => T0 + 4000;
 const ACTION_DEADLINE = () => T0 + 26_000;
@@ -393,7 +396,22 @@ function parseSettings(text) {
   }
 }
 
+// A new temp file next to `path` (the rename has to stay on one volume): a random name, created exclusively — a file
+// or a link planted under a guessable name is never written through — and owner-only while it is being written (the
+// settings hold your env). → { tmp, fd }
+function openTemp(path) {
+  for (let i = 0; ; i++) {
+    const tmp = `${path}.agenthub-${randomBytes(8).toString("hex")}.tmp`;
+    try {
+      return { tmp, fd: openSync(tmp, "wx", 0o600) };
+    } catch (e) {
+      if (e.code !== "EEXIST" || i >= 4) throw e;
+    }
+  }
+}
+
 // Read → change (opsFn) → backup → write to a temp file next to it → check the file didn't change → rename.
+// The temp file is removed on every path that doesn't end in the rename (a concurrent change, a failed write).
 // Changed between the read and the write — re-read and retry (up to 3 times), otherwise refuse with settings-busy.
 // settings.json is a symlink (dotfiles)? The file it points to is written; the link itself stays.
 // → { ok, changed?, reason?, ops? }
@@ -441,19 +459,27 @@ export function writeSettings(home, opsFn, { now = Date.now(), beforeRename = nu
       writeFileSync(join(backupsDir(home), `settings.json.${stamp(now)}-agenthub`), text, { mode: 0o600 });
       pruneBackups(home);
     }
-    const tmp = `${path}.agenthub-${process.pid}.tmp`;
-    writeFileSync(tmp, out, { mode });
-    if (beforeRename) beforeRename(attempt);
-    let now2 = null;
+    const { tmp, fd } = openTemp(path);
+    let renamed = false;
     try {
-      now2 = readFileSync(path, "utf8");
-    } catch {}
-    if (now2 !== text) {
-      rmSync(tmp, { force: true });
-      continue;
+      try {
+        writeFileSync(fd, out);
+        fchmodSync(fd, mode); // the target's previous permissions, set only once the text is in
+      } finally {
+        closeSync(fd);
+      }
+      if (beforeRename) beforeRename(attempt);
+      let now2 = null;
+      try {
+        now2 = readFileSync(path, "utf8");
+      } catch {}
+      if (now2 !== text) continue;
+      renameSync(tmp, path);
+      renamed = true;
+      return { ok: true, changed: true, ops };
+    } finally {
+      if (!renamed) rmSync(tmp, { force: true });
     }
-    renameSync(tmp, path);
-    return { ok: true, changed: true, ops };
   }
   return { ok: false, reason: "settings-busy" };
 }
@@ -724,7 +750,7 @@ function dataDir() {
   return process.env.AGENTHUB_PLUGIN_DATA_PATH || null;
 }
 export const LOCKED = Symbol("locked");
-const STALE_LOCK_MS = 60_000; // a run killed by the core (5 s / 30 s timeout) — a lock older than a minute is removed
+const STALE_LOCK_MS = 60_000; // a run killed by the core (its timeout) — a lock older than a minute is removed
 // The lock is abandoned: the process that wrote it is gone (the core killed the run), or it's older than a minute
 function lockStale(p) {
   try {
@@ -918,7 +944,7 @@ const PENDING = ["queued", "waitTurn", "waitAnswer", "ready"];
 const FINAL = ["done", "skipped", "failed"];
 const PHASES = [...PENDING, ...FINAL, "typing"];
 
-// Walk the "Apply" queue: free tabs — type (if typing is allowed: allowType), busy ones — wait, vanished ones — skip.
+// Walk the "Apply base" queue: free tabs — type (if typing is allowed: allowType), busy ones — wait, vanished ones — skip.
 // The state is saved after each item (save). Call under the lock.
 // "typing" left over from a killed run: don't type a second time — let the person check the tab
 function markInterrupted(job) {
@@ -1135,7 +1161,7 @@ export function render(r, { lang = envLang() } = {}) {
   else if (unknownN) differText = tr(`как базовые · ${unknownN} без данных`, `as base · ${unknownN} unknown`);
   else differText = tr("как базовые", "as base");
 
-  // header: the base on one line and the differences (the "Apply" button lives in the sessions table)
+  // header: the base on one line and the differences (the "Apply base" button lives in the sessions table)
   out.push(line(tr(`Базовые: ${baseLong}`, `Base: ${baseLong}`), { status: jobActive ? "wait" : "ok", tile: baseText, tileLabel: TILE_LABEL() }));
   out.push(line(differText));
   out.push("---");
@@ -1182,7 +1208,7 @@ export function render(r, { lang = envLang() } = {}) {
   );
   out.push("---");
 
-  // progress and result of "Apply"
+  // progress and result of "Apply base"
   if (job) {
     const done = job.items.filter((i) => i.phase === "done").length;
     const M = job.items.length;
@@ -1271,7 +1297,7 @@ export const REFUSALS = {
   rate: ["Слишком часто — попробуйте через минуту.", "Too often — try again in a minute."],
   "no-session": ["Такой открытой сессии нет.", "No such open session."],
   "no-tab": ["Хаб не нашёл вкладку этой сессии.", "The hub didn't find this session's tab."],
-  "session-busy": ["Сессия сейчас занята — наберу, когда освободится, через «Проставить всем».", "The session is busy — use Apply to all to type once it's free."],
+  "session-busy": ["Сессия сейчас занята — наберу, когда освободится, через «Проставить базовые».", "The session is busy — use Apply base to type once it's free."],
   unverified: ["Подпись Claude Code у этой сессии не подтверждена — набирать не буду.", "This session's Claude Code signature isn't verified — not typing."],
   "input-text": ["В поле ввода есть текст — вкладку не трогаю.", "There's text in the input line — leaving the tab alone."],
   "no-ps": ["Не удалось проверить, жива ли сессия (ps не ответил).", "Couldn't check whether the session is alive (ps didn't respond)."],
@@ -1284,12 +1310,12 @@ export const REFUSALS = {
 const HINTS = {
   "input-text": ["Сотрите или отправьте текст во вкладке и нажмите «Повторить».", "Clear or send the text in the tab and press Try again."],
   "input-mixed": ["Откройте вкладку и сотрите лишнее в поле ввода: Enter не нажат.", "Open the tab and clear the input line: Enter wasn't pressed."],
-  "session-busy": ["Дождитесь конца хода и повторите — или нажмите «Проставить всем».", "Wait for the turn to end and try again — or use Apply to all."],
+  "session-busy": ["Дождитесь конца хода и повторите — или нажмите «Проставить базовые».", "Wait for the turn to end and try again — or use Apply base."],
   "unknown-outcome": ["Откройте вкладку и посмотрите, набрана ли команда.", "Open the tab and see whether the command was typed."],
   partial: ["Откройте вкладку: вторую команду можно набрать самому.", "Open the tab: you can type the second command yourself."],
   "terminal-offline": ["Запустите мост заново и повторите.", "Start the bridge again and retry."],
   rate: ["Подождите минуту и повторите.", "Wait a minute and try again."],
-  paused: ["Снимите паузу хаба и повторите.", "Unpause the hub and try again."],
+  paused: ["Снимите паузу хаба и повторите.", "Resume the hub and try again."],
 };
 // The lines of a refused action, as the hub reads them: the window's rows first (fact=, hint=, session= — a hub before
 // 0.1.6 ignores them), then message= and reason= — message= must stay within the last 5 lines for those hubs.
@@ -1360,7 +1386,7 @@ async function tabAction(id, arg, home) {
         save();
         return { ok: true };
       }
-      // apply-all ("Apply base to all", "Retry for K"): the tabs that differ now
+      // apply-all ("Apply base", "Retry for K"): the tabs that differ now
       if (st.job && !st.job.finishedAt) return { ok: false, reason: "job-running" };
       const todo = sessions.map((s) => rowFor(s, base, hub, st)).filter((x) => x.differs);
       if (!todo.length) return { ok: false, reason: "nothing-to-do" };

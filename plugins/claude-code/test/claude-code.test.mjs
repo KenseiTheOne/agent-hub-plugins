@@ -265,6 +265,45 @@ test("write: other keys and their order are kept, a copy before the change, file
   }
 });
 
+test("write: the temp file has a random name, is created exclusively and owner-only, and never stays behind", POSIX, () => {
+  const home = makeHome();
+  try {
+    const dir = join(home, ".claude");
+    const p = join(dir, "settings.json");
+    const temps = () => readdirSync(dir).filter((n) => n.endsWith(".tmp"));
+    chmodSync(p, 0o644);
+    // the name earlier versions used (pid-based, guessable) is planted as a link to someone else's file
+    const victim = join(home, "victim.txt");
+    writeFileSync(victim, "untouched");
+    const planted = `settings.json.agenthub-${process.pid}.tmp`;
+    symlinkSync(victim, join(dir, planted));
+    const seen = [];
+    const r = mod.writeSettings(home, (s) => mod.opsFor("style", "Learning", s), {
+      beforeRename: () => {
+        for (const n of temps().filter((x) => x !== planted)) seen.push([n, statSync(join(dir, n)).mode & 0o777]);
+      },
+    });
+    assert.equal(r.ok, true);
+    assert.equal(seen.length, 1);
+    assert.match(seen[0][0], /^settings\.json\.agenthub-[0-9a-f]{16}\.tmp$/);
+    assert.equal(seen[0][1], 0o644, "the target's previous permissions are back before the rename");
+    assert.equal(statSync(p).mode & 0o777, 0o644);
+    assert.equal(readFileSync(victim, "utf8"), "untouched", "a planted link isn't written through");
+    assert.deepEqual(temps(), [planted], "the plugin's own temp file is gone, someone else's isn't touched");
+    // two writes never share a name
+    const names = new Set();
+    for (const style of ["Concise", "Learning"]) mod.writeSettings(home, (s) => mod.opsFor("style", style, s), { beforeRename: () => temps().filter((x) => x !== planted).forEach((n) => names.add(n)) });
+    assert.equal(names.size, 2);
+    // a concurrent change on every attempt (settings-busy) and a failure before the rename leave nothing behind
+    assert.deepEqual(mod.writeSettings(home, (s) => mod.opsFor("style", "Concise", s), { beforeRename: (i) => writeSettingsFile(home, { ...settings(home), theme: `t${i}` }) }), { ok: false, reason: "settings-busy" });
+    assert.deepEqual(temps(), [planted]);
+    assert.throws(() => mod.writeSettings(home, (s) => mod.opsFor("style", "Concise", s), { beforeRename: () => { throw new Error("boom"); } }), /boom/);
+    assert.deepEqual(temps(), [planted]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("write: settings.json is a symlink (dotfiles): the target file changes, the link stays", POSIX, () => {
   const home = makeHome();
   try {
@@ -412,7 +451,8 @@ test("open sessions: model and effort from the hub file, differences in orange, 
   try {
     const { text, parsed } = run(home, WITH_HUB);
     assert.match(text, /^2 вкладки не как базовые$/m);
-    assert.doesNotMatch(text, /^Проставить всем/m, "the Apply button moved from the header into the sessions table");
+    assert.doesNotMatch(text, /^Проставить (?:базовые|всем)/m, "the Apply base button moved from the header into the sessions table");
+    assert.doesNotMatch(text, /Проставить всем|Apply to all/, "one name for the button: Apply base");
     assert.match(text, /^Открытые сессии · 3 \| table=true columns="Вкладка¦Состояние¦Модель¦Effort"\n--Проставить базовые · 2 \| action=apply-all header=true$/m);
     // a table: the rows that differ first (cells, orange where they differ, a state dot), Fix/notes and an icon Switch;
     // the ones as the base in a collapsible group
@@ -451,7 +491,7 @@ test("Fix: a busy or unverified session is refused without typing; text in the i
   const home = makeHome();
   try {
     // beta is working: Fix from a stale page is refused rather than typed into a running turn
-    assert.deepEqual(act(home, ["apply", S2], WITH_HUB), { out: "reason=session-busy", code: 3, message: "Сессия сейчас занята — наберу, когда освободится, через «Проставить всем»." });
+    assert.deepEqual(act(home, ["apply", S2], WITH_HUB), { out: "reason=session-busy", code: 3, message: "Сессия сейчас занята — наберу, когда освободится, через «Проставить базовые»." });
     // the hub didn't verify alpha's signature in its file — the plugin doesn't even ask to type
     assert.equal(act(home, ["apply", S1], hubWith(home, { [S1]: { verified: false } })).out, "reason=unverified");
     assert.match(run(home, hubWith(home, { [S1]: { verified: false } })).text, /^----подпись не подтверждена \| color=#8E8E93$/m);
@@ -473,6 +513,9 @@ test("Fix: a busy or unverified session is refused without typing; text in the i
     assert.deepEqual(raw.slice(1), ["hint=Сотрите или отправьте текст во вкладке и нажмите «Повторить».", `session=${S1}`, "message=В поле ввода есть текст — вкладку не трогаю.", "reason=input-text"]);
     assert.deepEqual(mod.refusalLines({ ok: false, reason: "bad-arg" }, "en"), ["message=No such value.", "reason=bad-arg"], "a refusal with nothing to add stays two lines");
     assert.deepEqual(mod.refusalLines({ ok: false, reason: "rate", session: "junk", want: [] }, "en"), ["hint=Wait a minute and try again.", "message=Too often — try again in a minute.", "reason=rate"]);
+    // the hub's own words: its button is "Apply base" on the page, and a paused hub is resumed
+    assert.deepEqual(mod.refusalLines({ ok: false, reason: "session-busy" }, "en"), ["hint=Wait for the turn to end and try again — or use Apply base.", "message=The session is busy — use Apply base to type once it's free.", "reason=session-busy"]);
+    assert.deepEqual(mod.refusalLines({ ok: false, reason: "paused" }, "en"), ["hint=Resume the hub and try again.", "message=The hub is paused.", "reason=paused"]);
     assert.equal(act(home, ["apply", "99999999-9999-4999-8999-999999999999"]).out, "reason=no-session");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -536,7 +579,7 @@ test("Fix: the model is typed as written in the settings (the opus[1m] alias doe
   }
 });
 
-test("Apply to all: a free tab at once, a busy one after the turn (hub not paused), the result and Dismiss", POSIX, () => {
+test("Apply base: a free tab at once, a busy one after the turn (hub not paused), the result and Dismiss", POSIX, () => {
   const home = makeHome();
   try {
     assert.deepEqual(act(home, ["apply-all"], AUTO), { out: "ok", code: 0 });
@@ -562,7 +605,7 @@ test("Apply to all: a free tab at once, a busy one after the turn (hub not pause
   }
 });
 
-test("Apply to all: the hub doesn't report \"not paused\" — deferred typing waits for Continue; paused — the same", POSIX, () => {
+test("Apply base: the hub doesn't report \"not paused\" — deferred typing waits for Continue; paused — the same", POSIX, () => {
   const home = makeHome();
   try {
     act(home, ["apply-all"], WITH_HUB);
@@ -581,7 +624,7 @@ test("Apply to all: the hub doesn't report \"not paused\" — deferred typing wa
   }
 });
 
-test("Apply to all: Stop drops deferred items; ps didn't respond — the queue isn't lost", POSIX, () => {
+test("Apply base: Stop drops deferred items; ps didn't respond — the queue isn't lost", POSIX, () => {
   const home = makeHome();
   try {
     act(home, ["apply-all"], AUTO);
