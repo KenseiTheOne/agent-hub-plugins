@@ -775,6 +775,18 @@ test("commands into a tab — only /model and /effort with the base values; with
   assert.deepEqual(mod.commandsFor({ model: "claude-sonnet-5-5", effort: "max" }, mx), ["/model claude-opus-5-5"]);
 });
 
+test("Default base: a tab on another model differs and gets /model default (not the id, which /model would save)", () => {
+  const base = mod.readBase({ effortLevel: "high", modelSettings: { [mod.DEFAULT_MODEL]: { effortLevel: "high" } } });
+  assert.equal(base.model, null);
+  const sonnet = { sessionId: "s1", status: "idle", model: "claude-sonnet-5-5", effort: "high" };
+  const row = mod.rowFor(sonnet, base, new Map([["s1", { model: "claude-sonnet-5-5", effort: "high", verified: true, at: 1 }]]), {});
+  assert.equal(row.modelDiffers, true);
+  assert.equal(row.action, "fix");
+  assert.deepEqual(mod.commandsFor({ model: "claude-sonnet-5-5", effort: "medium" }, base), ["/model default", "/effort high"]);
+  // already on the default model and effort — nothing to type
+  assert.deepEqual(mod.commandsFor({ model: mod.DEFAULT_MODEL, effort: "high" }, base), []);
+});
+
 test("every refusal code has a ru and en text, up to 120 chars, no newline and no \"|\"", () => {
   const src = readFileSync(PLUGIN, "utf8");
   const codes = new Set([...src.matchAll(/reason: "([a-z0-9-]+)"/g)].map((m) => m[1]));

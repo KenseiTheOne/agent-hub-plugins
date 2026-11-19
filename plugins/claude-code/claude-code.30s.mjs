@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // <agenthub.title>Claude Code Настройки</agenthub.title>
 // <agenthub.title lang="en">Claude Code Settings</agenthub.title>
-// <agenthub.version>1.4.1</agenthub.version>
+// <agenthub.version>1.4.2</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="text.alignleft" color="#D97757"></agenthub.icon>
 // <agenthub.desc>Настройки Claude Code для новых сессий (модель, контекст 1 млн, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
@@ -857,11 +857,11 @@ export function sessionNow(sess, base, hub, st) {
 // A table row: how it differs from the base and what can be done
 export function rowFor(sess, base, hub, st) {
   const now = sessionNow(sess, base, hub, st);
-  const modelDiffers = Boolean(base.model && now.model && now.model !== base.model);
-  // The base effort is for the base model (none chosen — Opus 5.5): a tab on another model isn't compared by effort,
-  // otherwise /effort would overwrite its model's saved effort. env auto — each has its own model default.
-  const sameModel = base.model ? true : !now.model || now.model === DEFAULT_MODEL;
-  const effortDiffers = Boolean(!base.envAuto && sameModel && base.effort && now.effort && now.effort !== base.effort);
+  // No model in the base ("Default") means Claude Code's default model: a tab on another model differs and is brought
+  // back with /model default. Effort is compared on every tab — Fix switches the model first. env auto — each has its
+  // own model default.
+  const modelDiffers = Boolean(now.model && now.model !== (base.model || DEFAULT_MODEL));
+  const effortDiffers = Boolean(!base.envAuto && base.effort && now.effort && now.effort !== base.effort);
   const differs = modelDiffers || effortDiffers;
   const action = !differs ? "same" : sess.status === "busy" ? "afterTurn" : sess.status === "waiting" ? "afterAnswer" : "fix";
   return { ...sess, now, modelDiffers, effortDiffers, differs, action };
@@ -871,12 +871,14 @@ export function rowFor(sess, base, hub, st) {
 // What to type so the session matches the base (only /model and /effort). → ["/model …", "/effort …"]
 export function commandsFor(now, base) {
   const cmds = [];
-  if (base.model && now.model !== base.model) cmds.push(`/model ${base.modelArg}`);
+  // "default" (not the model id): /model saves its choice to settings.json, and an id would turn the base from
+  // Default into that model
+  if (now.model && now.model !== (base.model || DEFAULT_MODEL)) cmds.push(`/model ${base.model ? base.modelArg : "default"}`);
   // env (max or a level) holds everyone's effort — /effort isn't needed and wouldn't work
   if (!base.envOverride && isLevel(base.effort) && now.effort !== base.effort) cmds.push(`/effort ${base.effort}`);
   return cmds;
 }
-const COMMAND_RE = /^\/(?:model (?:claude-[a-z]+-[0-9]+(?:-[0-9]+)?|opus|sonnet|haiku|fable|best)(?:\[1m\])?|effort (?:low|medium|high|xhigh))$/;
+const COMMAND_RE = /^\/(?:model (?:default|(?:claude-[a-z]+-[0-9]+(?:-[0-9]+)?|opus|sonnet|haiku|fable|best)(?:\[1m\])?)|effort (?:low|medium|high|xhigh))$/;
 
 // A hub refusal (body { error: "terminal:<code>" }) → what the plugin does:
 //   wait    — wait for the next frame (session busy, input not found, rate limit): nothing was typed;
@@ -937,7 +939,7 @@ export async function typeInto(sess, base, now, { deadline = ACTION_DEADLINE(), 
     if (i === 0) return { phase: o.reason === "input-mixed" ? "failed" : "skipped", reason: o.reason };
     return { phase: "failed", reason: o.reason || "partial" };
   }
-  return { phase: "done", result: { model: base.model || now.model, effort: base.envOverride ? base.effort : base.effort || now.effort, at: sentAt } };
+  return { phase: "done", result: { model: base.model || DEFAULT_MODEL, effort: base.envOverride ? base.effort : base.effort || now.effort, at: sentAt } };
 }
 
 const PENDING = ["queued", "waitTurn", "waitAnswer", "ready"];

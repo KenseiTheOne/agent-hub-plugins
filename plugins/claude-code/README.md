@@ -134,7 +134,8 @@ Claude Code specifics (checked against the installed 2.1.321):
 
 Only through the hub's terminal (contract 3): `POST /terminal/send-text {sessionId, text}` to the
 `$AGENTHUB_HUB_SOCKET` socket from the plugin's own process, under the permission
-`<agenthub.terminal>send /model /effort`. Only two commands: `/model <id>` and `/effort <level>` (the pattern is
+`<agenthub.terminal>send /model /effort`. Only two commands: `/model <id>` (`/model default` when the base is
+"Default") and `/effort <level>` (the pattern is
 checked both in the plugin and in the hub by the permission). The plugin itself picks sessions that are:
 
 - live and Claude Code (pid, start time, executable path). If `ps` didn't respond, the plugin doesn't treat sessions as
@@ -216,7 +217,7 @@ core's window, its "Are you sure?" is in `cost`. The registry linter flags every
 
 ## Permissions
 
-The full set the plugin declares as of 1.4.1. The set last grew in 1.4.0; what each version changed is below the
+The full set the plugin declares as of 1.4.2. The set last grew in 1.4.0; what each version changed is below the
 table.
 
 | Permission | Why |
@@ -265,6 +266,12 @@ Texts: the button that types into every tab that differs is called "Apply base" 
 (refusal texts and the consent text used to say "Apply to all"); the advice for a paused hub says "Resume the hub" —
 the hub's word for lifting the pause. The temp file for `settings.json` gets a random name and is created exclusively with mode 0600 (see
 "Writing settings"). The docs no longer promise the hub's action timeout as a number.
+
+**What changed in 1.4.2:** no permission changes. A bug fix: with "Default" chosen as the model, a tab on another
+model counted as matching the base, so it had no "Fix" and "Apply base" skipped it. Now the base model is Claude
+Code's default model, such a tab differs, and "Fix" types `/model default` — not the model id: `/model` saves its
+choice to `settings.json`, and an id would turn the base from "Default" into that model. The tab's effort is
+compared too, since the model switch comes first.
 
 ## From the hub (contract 3)
 
