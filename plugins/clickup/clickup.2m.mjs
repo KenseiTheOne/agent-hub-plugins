@@ -1,31 +1,31 @@
 #!/usr/bin/env node
 // <agenthub.title>ClickUp</agenthub.title>
-// <agenthub.version>1.5.0</agenthub.version>
+// <agenthub.version>1.6.0</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="checklist" color="#FF375F"></agenthub.icon>
-// <agenthub.desc>Ваши тикеты ClickUp и какие из них сейчас в работе у агентов (ночь, /ticket, сессии). Только чтение</agenthub.desc>
-// <agenthub.desc lang="en">Your ClickUp tickets and which ones agents are working on (night, /ticket, sessions). Read-only</agenthub.desc>
+// <agenthub.desc>Ваши тикеты ClickUp и какие из них открыты в сессиях Claude Code (по ветке или папке). Только чтение</agenthub.desc>
+// <agenthub.desc lang="en">Your ClickUp tickets and which ones are open in Claude Code sessions (by branch or folder). Read-only</agenthub.desc>
 // <agenthub.status value="ok" label="Тикеты загружены">Список тикетов свежий</agenthub.status>
 // <agenthub.status value="ok" lang="en" label="Tickets loaded">The ticket list is up to date</agenthub.status>
 // <agenthub.status value="error" label="Подключите снова или нет доступа">Вход в ClickUp истёк или отозван, ClickUp отклонил токен или закрыл доступ к рабочему пространству, или хаб не пустил запрос</agenthub.status>
 // <agenthub.status value="error" lang="en" label="Reconnect / no access">The ClickUp sign-in expired or was revoked, ClickUp rejected the token or closed access to the workspace, or the hub blocked a request</agenthub.status>
-// <agenthub.status value="unknown" label="Не подключён или нет связи">ClickUp не подключён (ни входа, ни токена) или не отвечает</agenthub.status>
-// <agenthub.status value="unknown" lang="en" label="Not connected / offline">ClickUp isn't connected (no sign-in, no token), or isn't responding</agenthub.status>
+// <agenthub.status value="unknown" label="Не подключён или нет связи">ClickUp не подключён (ни входа, ни токена), не отвечает, хаб не ответил или ClickUp вернул ошибку на запрос</agenthub.status>
+// <agenthub.status value="wait" label="Нужна настройка">У вас несколько рабочих пространств ClickUp — укажите нужное в config.json плагина</agenthub.status>
+// <agenthub.status value="unknown" lang="en" label="Not connected / offline">ClickUp isn't connected (no sign-in, no token), isn't responding, the hub didn't answer, or ClickUp returned an error for the request</agenthub.status>
+// <agenthub.status value="wait" lang="en" label="Needs setup">You have several ClickUp workspaces — choose one in the plugin's config.json</agenthub.status>
 // <agenthub.author.name>Kensei</agenthub.author.name>
 // <agenthub.author.github>KenseiTheOne</agenthub.author.github>
-// <agenthub.platforms>macos,windows</agenthub.platforms>
+// <agenthub.platforms>macos</agenthub.platforms>
 // <agenthub.secrets>clickup.token — запасной путь: ваш личный токен ClickUp, только чтобы читать тикеты</agenthub.secrets>
 // <agenthub.secrets lang="en">clickup.token — fallback: your personal ClickUp token, only to read tickets</agenthub.secrets>
 // <agenthub.net>mcp.clickup.com — тикеты через вход в ClickUp («Подключить ClickUp»): запросы делает хаб, плагин токена не видит; только чтение, раз в 15 мин</agenthub.net>
 // <agenthub.net lang="en">mcp.clickup.com — tickets via the ClickUp sign-in (Connect ClickUp): the hub makes the requests, the plugin never sees the token; read-only, every 15 min</agenthub.net>
 // <agenthub.net>api.clickup.com — запасной путь по личному токену: запросы к ClickUp только на чтение и только по заранее заданному списку адресов</agenthub.net>
 // <agenthub.net lang="en">api.clickup.com — fallback with a personal token: read-only requests to ClickUp, only to a fixed list of addresses</agenthub.net>
-// <agenthub.fsRead>~/.claude/task-runs — какие тикеты сейчас делают агенты (ночь и /ticket)</agenthub.fsRead>
-// <agenthub.fsRead lang="en">~/.claude/task-runs — which tickets agents are working on (night runs and /ticket)</agenthub.fsRead>
 // <agenthub.fsRead>~/.claude/sessions/*.json — в каких папках идут сессии, чтобы связать их с тикетами (ключи сессий не открываются)</agenthub.fsRead>
 // <agenthub.fsRead lang="en">~/.claude/sessions/*.json — which folders sessions run in, to link them to tickets (session keys are never opened)</agenthub.fsRead>
-// <agenthub.fsRead><session cwd>/.git/HEAD — ветка сессии: по ней видно номер тикета</agenthub.fsRead>
-// <agenthub.fsRead lang="en"><session cwd>/.git/HEAD — the session's branch: it shows the ticket number</agenthub.fsRead>
+// <agenthub.fsRead><session cwd>/.git/HEAD — ветка сессии, по ней видно номер тикета. .git ищется в папке сессии и выше (до 12 уровней); у git worktree — его HEAD в каталоге основного репо</agenthub.fsRead>
+// <agenthub.fsRead lang="en"><session cwd>/.git/HEAD — the session's branch: it shows the ticket number. .git is looked up in the session folder and above it (up to 12 levels); for a git worktree — its HEAD in the main repo's git dir</agenthub.fsRead>
 // <agenthub.effects>open.url,session.focus</agenthub.effects>
 // <agenthub.connection id="clickup" type="mcp" url="https://mcp.clickup.com/mcp" scope="read" title="ClickUp" tools="clickup_filter_tasks" interval="15m" budget="100">ваши открытые тикеты ClickUp: только чтение, один инструмент — список тикетов</agenthub.connection>
 // <agenthub.connection lang="en" id="clickup" title="ClickUp">your open ClickUp tickets: read-only, one tool — the ticket list</agenthub.connection>
@@ -48,22 +48,19 @@
 // The token comes from the clickup.token secret (the core puts it in AGENTHUB_SECRET_CLICKUP_TOKEN); it never reaches
 // the output, cache or log. X-RateLimit-Remaining / X-RateLimit-Reset are honoured; on 429 — exponential backoff.
 //
-// Settings (optional): <AGENTHUB_PLUGIN_DATA_PATH>/config.json
+// Settings (optional): <AGENTHUB_PLUGIN_DATA_PATH>/config.json — on macOS
+//   ~/Library/Application Support/AgentHub/PluginData/clickup/config.json
 //   { "teamIds": ["123"], "listIds": ["456"], "assignee": "me" | null, "limit": 15 }
 //   by default — open tickets assigned to the token's user in all of their workspaces (up to 3).
 //
-// Ticket ↔ work link (design, section 4), by decreasing confidence:
-//   night   — certain: ~/.claude/task-runs/night/projects/*/attempts/<id>.json, night/<date>/<id>/agent.json,
-//                      RUN.md of a night run (branch night/…, folder *-night, unattended);
-//   /ticket — certain: ~/.claude/task-runs/<repo>/<id>/RUN.md;
-//   session — certain if RUN.md names session_id; strong — the session branch contains the ticket id or matches
-//             the RUN.md branch in the same repo; possible — the session folder matches the RUN.md repo, the branch doesn't.
+// Ticket ↔ session link: a live Claude Code session (~/.claude/sessions/*.json, the process is alive) whose git branch
+// or folder contains the ticket id (id or custom id as a whole word) — "likely".
 //
 // Events: auth-failed (401/403 on /user — token rejected), source-broken (unfamiliar response shape).
 // 401/403 on the tickets of one workspace or list while the token is accepted (/user answers) — a denial for that scope:
 // its tickets are skipped, the rest are collected, and the workspace list is re-requested next time.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,9 +73,8 @@ export const ALLOWED_PATHS = [
   /^\/api\/v2\/team$/,
   /^\/api\/v2\/team\/\d{1,20}\/task$/,
   /^\/api\/v2\/list\/\d{1,20}\/task$/,
-  /^\/api\/v2\/task\/[A-Za-z0-9_-]{1,40}$/,
 ];
-const ALLOWED_QUERY = new Set(["assignees[]", "include_closed", "subtasks", "order_by", "reverse", "page", "statuses[]", "custom_task_ids", "team_id"]);
+const ALLOWED_QUERY = new Set(["assignees[]", "include_closed", "subtasks", "order_by", "page"]);
 const DEADLINE_MS = 4000; // a standard plugin lives 5 s
 const META_TTL_MS = 24 * 3600_000; // user and team
 const RATE_FLOOR = 3; // this many requests left — wait for the window to reset
@@ -86,6 +82,8 @@ const BACKOFF_BASE_MS = 60_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
 const STALE_MS = 30 * 60_000;
 const MCP_WAIT_MS = 3600; // hub reply to an MCP call (the service waits for ClickUp up to 3 s, then answers "loading")
+const PAGE_SIZE = 100; // ClickUp returns up to 100 tasks per page; only the first page is read
+const MAX_TEAMS = 3; // workspaces read with a personal token (one request each)
 // Task fields requested from clickup_filter_tasks (besides id, name, url) — a smaller response, less parsing.
 export const MCP_FIELDS = ["custom_id", "status", "due_date", "date_updated", "list", "priority"];
 
@@ -94,12 +92,11 @@ export function clean(s, max = 120) {
   return String(s ?? "")
     .replace(/[\r\n\t]+/g, " ")
     .replace(/\|/g, "¦")
-    .replace(/^[-\s]+/, "")
-    .replace(/^~~~$/, "~")
+    .replace(/^[-~\s]+/, "")
     .slice(0, max);
 }
 function q(v) {
-  return `"${String(v).replace(/[\\"]/g, "\\$&")}"`;
+  return `"${String(v).replace(/[\\"]/g, "\\$&").replace(/\|/g, "¦")}"`;
 }
 function line(title, params = {}) {
   const ps = Object.entries(params)
@@ -230,6 +227,8 @@ export function pickPriority(v) {
   return Number.isInteger(n) && n >= 1 && n <= 4 ? PRIORITIES[n - 1] : null;
 }
 
+// due_date_time: true — the due date has a time, false — a date only (the whole day counts), unknown — null.
+const dueTimeOf = (v) => (v === true || v === "true" ? true : v === false || v === "false" ? false : null);
 export function pickTask(t) {
   if (!t || typeof t !== "object" || typeof t.id !== "string" || typeof t.name !== "string") throw shapeError("task-no-id");
   const st = t.status && typeof t.status === "object" ? t.status : {};
@@ -245,6 +244,7 @@ export function pickTask(t) {
     list: t.list && typeof t.list.name === "string" ? t.list.name : null,
     updatedMs: Number(t.date_updated) || null,
     dueMs: Number(t.due_date) || null,
+    dueTime: dueTimeOf(t.due_date_time),
     priority: pickPriority(t.priority),
   };
 }
@@ -265,9 +265,11 @@ export async function fetchTasks(client, cfg, state, now, info = {}, { retried =
     if (!state.teams || now - state.teams.at > META_TTL_MS) {
       const t = await client.get("/api/v2/team");
       if (!t || !Array.isArray(t.teams)) throw shapeError("team-no-teams");
-      state.teams = { ids: t.teams.map((x) => String(x.id)).filter((x) => /^\d+$/.test(x)).slice(0, 3), at: now };
+      const ids = t.teams.map((x) => String(x.id)).filter((x) => /^\d+$/.test(x));
+      state.teams = { ids: ids.slice(0, MAX_TEAMS), total: ids.length, at: now };
     }
     teamIds = state.teams.ids;
+    if (state.teams.total > teamIds.length) info.teamsSkipped = state.teams.total - teamIds.length;
   }
   const assignee = cfg.assignee === null ? null : state.user.id;
   const base = { include_closed: "false", subtasks: "true", order_by: "updated", page: "0" };
@@ -275,6 +277,7 @@ export async function fetchTasks(client, cfg, state, now, info = {}, { retried =
   const tasks = new Map();
   const add = (list) => {
     if (!list || !Array.isArray(list.tasks)) throw shapeError("no-tasks");
+    if (list.tasks.length >= PAGE_SIZE || list.last_page === false) info.truncated = true;
     for (const t of list.tasks) {
       const p = pickTask(t);
       tasks.set(p.id, p);
@@ -315,9 +318,9 @@ export async function fetchTasks(client, cfg, state, now, info = {}, { retried =
 // ---------- ClickUp sign-in through the hub (MCP) ----------
 // Request to the hub over its socket: POST /connections/clickup/mcp. The plugin has no token — the core adds it.
 // → { status, body } or { status: 0, error } (the hub didn't answer).
-export function hubMcp(socketPath, payload, { timeoutMs = MCP_WAIT_MS, requestImpl = null } = {}) {
-  return new Promise(async (resolve) => {
-    const { request } = requestImpl || (await import("node:http"));
+export async function hubMcp(socketPath, payload, { timeoutMs = MCP_WAIT_MS, requestImpl = null } = {}) {
+  const { request } = requestImpl || (await import("node:http"));
+  return new Promise((resolve) => {
     const data = JSON.stringify(payload);
     let done = false;
     const finish = (r) => {
@@ -333,7 +336,10 @@ export function hubMcp(socketPath, payload, { timeoutMs = MCP_WAIT_MS, requestIm
         res.setEncoding("utf8");
         res.on("data", (c) => {
           s += c;
-          if (s.length > 4 * 1024 * 1024) rq.destroy();
+          if (s.length > 4 * 1024 * 1024) {
+            finish({ status: 0, error: "too-large" });
+            rq.destroy();
+          }
         });
         res.on("end", () => {
           let body = null;
@@ -393,6 +399,7 @@ export function pickMcpTask(t) {
     list: typeof list === "string" ? list : null,
     updatedMs: msOf(t.date_updated),
     dueMs: msOf(t.due_date),
+    dueTime: dueTimeOf(t.due_date_time),
     priority: pickPriority(t.priority),
   };
 }
@@ -410,7 +417,7 @@ function resultText(result) {
 // Tool result → tasks. structuredContent or text with JSON: an array, {tasks}, {data: {tasks}}.
 export function tasksFromMcp(result) {
   if (!result || typeof result !== "object") throw shapeError("mcp-no-result");
-  // a tool error is not an "unfamiliar shape": ClickUp's text goes to the output (hubs older than Nov 9 return it as a result)
+  // a tool error is not an "unfamiliar shape": ClickUp's text goes to the output (older hubs return it as a result)
   if (result.isError) {
     const e = toolError(resultText(result));
     throw new ApiError("tool", null, { reason: e.reason, workspace: e.workspace });
@@ -443,23 +450,6 @@ function safeStat(p) {
   } catch {
     return null;
   }
-}
-
-const RUN_KEYS = new Set(["task_id", "task_ref", "branch", "repo_root", "worktree", "status", "outcome", "session_id", "unattended", "mode"]);
-
-// /ticket RUN.md: only top-level "key: value" lines from the list; of the steps — only the last one's name.
-export function parseRunMd(text) {
-  const o = {};
-  for (const raw of text.split("\n").slice(0, 400)) {
-    const m = /^([a-z_]+):\s*(.*)$/.exec(raw);
-    if (!m) continue;
-    const [, k, v] = m;
-    if (k === "step") {
-      const s = /^([\w-]+)/.exec(v);
-      if (s) o.lastStep = s[1];
-    } else if (RUN_KEYS.has(k) && !(k in o)) o[k] = v.trim().slice(0, 200);
-  }
-  return o;
 }
 
 export function gitBranch(cwd) {
@@ -506,49 +496,9 @@ export function pidsAlive(pids) {
   return out;
 }
 
-// Work info on disk. → { runs: Map(id → [run]), attempts: Map(id → {outcome,date}), nightDirs: Map(id → date), sessions: [...] }
+// Live Claude Code sessions: ~/.claude/sessions/<pid>.json whose process is alive, with the git branch of the folder.
+// → { sessions: [{ pid, sessionId, cwd, name, branch }] }
 export function scanWork({ home = homedir(), alive = pidsAlive } = {}) {
-  const tr = join(home, ".claude", "task-runs");
-  const runs = new Map();
-  const attempts = new Map();
-  const nightDirs = new Map();
-  const push = (m, k, v) => (m.has(k) ? m.get(k).push(v) : m.set(k, [v]));
-  for (const repo of safeReaddir(tr)) {
-    if (repo.startsWith(".") || repo === "night") continue;
-    for (const d of safeReaddir(join(tr, repo))) {
-      const p = join(tr, repo, d, "RUN.md");
-      const st = safeStat(p);
-      if (!st) continue;
-      const id = d.split(".")[0].toLowerCase();
-      let info;
-      try {
-        info = parseRunMd(readFileSync(p, "utf8"));
-      } catch {
-        continue;
-      }
-      const night = /-night$/.test(repo) || /^night\//.test(info.branch || "") || /^(true|yes|да)$/i.test(info.unattended || "");
-      const r = { repo, dir: join(tr, repo, d), mtimeMs: st.mtimeMs, night, ...info };
-      push(runs, id, r);
-      for (const alt of [info.task_id, info.task_ref]) if (alt && alt.toLowerCase() !== id && /^[\w-]{3,40}$/.test(alt)) push(runs, alt.toLowerCase(), r);
-    }
-  }
-  const nightRoot = join(tr, "night");
-  for (const proj of safeReaddir(join(nightRoot, "projects"))) {
-    for (const f of safeReaddir(join(nightRoot, "projects", proj, "attempts"))) {
-      if (!f.endsWith(".json")) continue;
-      try {
-        const o = JSON.parse(readFileSync(join(nightRoot, "projects", proj, "attempts", f), "utf8"));
-        attempts.set(f.slice(0, -5).toLowerCase(), { outcome: typeof o.outcome === "string" ? o.outcome : null, date: typeof o.date === "string" ? o.date : null, updatedMs: Number(o.updated_ms) || null });
-      } catch {}
-    }
-  }
-  for (const day of safeReaddir(nightRoot)) {
-    if (!/^\d{8}$/.test(day)) continue;
-    for (const d of safeReaddir(join(nightRoot, day))) if (existsSync(join(nightRoot, day, d, "agent.json"))) {
-      const id = d.toLowerCase();
-      if (!nightDirs.has(id) || nightDirs.get(id) < day) nightDirs.set(id, day);
-    }
-  }
   const sessions = [];
   const sdir = join(home, ".claude", "sessions");
   for (const f of safeReaddir(sdir)) {
@@ -559,8 +509,7 @@ export function scanWork({ home = homedir(), alive = pidsAlive } = {}) {
     } catch {}
   }
   const live = alive(sessions.map((s) => s.pid));
-  const liveSessions = sessions.filter((s) => live.has(s.pid)).map((s) => ({ ...s, branch: gitBranch(s.cwd) }));
-  return { runs, attempts, nightDirs, sessions: liveSessions };
+  return { sessions: sessions.filter((s) => live.has(s.pid)).map((s) => ({ ...s, branch: gitBranch(s.cwd) })) };
 }
 
 // sessionId for session.focus — UUID only (the hub effect accepts only that; the hub finds the tab).
@@ -569,71 +518,22 @@ const UUID_RE = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0
 function idRe(id) {
   return new RegExp(`(^|[^a-z0-9])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i");
 }
-function within(dir, root) {
-  if (!dir || !root || !isAbsolute(root)) return false;
-  const r = root.replace(/\/+$/, "");
-  return dir === r || dir.startsWith(r + "/");
-}
-function nightDate(s) {
-  if (!/^\d{8}$/.test(s || "")) return s || "";
-  return EN() ? `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(s.slice(4, 6)) - 1]} ${Number(s.slice(6, 8))}` : `${s.slice(6, 8)}.${s.slice(4, 6)}`;
-}
 function sessionLabel(s) {
   return s.name ? tr(`«${clean(s.name, 40)}»`, `"${clean(s.name, 40)}"`) : s.sessionId.slice(0, 8);
 }
 
-// → [{ kind: night|ticket|session, confidence: certain|likely|possible, text, sessionId? }]
+// A live session whose branch or folder contains the ticket id (id or custom id as a whole word).
+// → [{ kind: "session", confidence: "likely", text, sessionId, label }]
 export function linksFor(task, work) {
   const ids = [task.id, task.customId].filter(Boolean).map((x) => x.toLowerCase());
   const links = [];
-  const seenSessions = new Set();
-  const runs = ids.flatMap((id) => work.runs.get(id) || []).sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const uniqRuns = [...new Map(runs.map((r) => [r.dir, r])).values()];
-  // night
-  const att = ids.map((id) => work.attempts.get(id)).find(Boolean);
-  const nightDay = ids.map((id) => work.nightDirs.get(id)).find(Boolean);
-  const nightRun = uniqRuns.find((r) => r.night);
-  if (att) links.push({ kind: "night", confidence: "certain", text: `${tr("ночь", "night")}: ${clean(att.outcome || tr("попытка", "attempt"), 60)}${att.date ? `, ${nightDate(att.date)}` : ""}` });
-  else if (nightRun) links.push({ kind: "night", confidence: "certain", text: `${tr("ночь", "night")}: ${clean(nightRun.outcome || nightRun.lastStep || tr("прогон", "run"), 60)}${nightRun.branch ? tr(`, ветка ${clean(nightRun.branch, 60)}`, `, branch ${clean(nightRun.branch, 60)}`) : ""}` });
-  else if (nightDay) links.push({ kind: "night", confidence: "certain", text: tr(`ночь: прогон ${nightDate(nightDay)}`, `night: run ${nightDate(nightDay)}`) });
-  // daytime /ticket
-  const day = uniqRuns.find((r) => !r.night);
-  if (day) {
-    const what = day.outcome || (day.lastStep ? tr(`шаг ${day.lastStep}`, `step ${day.lastStep}`) : day.status || tr("прогон", "run"));
-    links.push({ kind: "ticket", confidence: "certain", text: `/ticket: ${clean(what, 60)}${day.mode ? ` (${clean(day.mode, 20)})` : ""}` });
-    const sid = day.session_id && /^[\w-]{8,64}$/.test(day.session_id) ? day.session_id : null;
-    const exact = sid && work.sessions.find((s) => s.sessionId === sid);
-    if (exact) {
-      links.push({ kind: "session", confidence: "certain", sessionId: exact.sessionId, label: sessionLabel(exact), text: tr(`сессия ${sessionLabel(exact)} (из RUN.md)`, `session ${sessionLabel(exact)} (from RUN.md)`) });
-      seenSessions.add(exact.sessionId);
-    }
-    const root = day.worktree && isAbsolute(day.worktree.split(/\s/)[0]) ? day.worktree.split(/\s/)[0] : day.repo_root;
-    for (const s of work.sessions) {
-      if (seenSessions.has(s.sessionId) || !within(s.cwd, root)) continue;
-      if (day.branch && s.branch && s.branch === day.branch.split(/\s/)[0]) {
-        links.push({ kind: "session", confidence: "likely", sessionId: s.sessionId, label: sessionLabel(s), text: tr(`сессия ${sessionLabel(s)}: ветка ${clean(s.branch, 60)} как в RUN.md`, `session ${sessionLabel(s)}: branch ${clean(s.branch, 60)} as in RUN.md`) });
-        seenSessions.add(s.sessionId);
-      }
-    }
-  }
-  // sessions by a branch/folder with the ticket id
-  for (const s of work.sessions) {
-    if (seenSessions.has(s.sessionId)) continue;
+  for (const s of work.sessions || []) {
     const hit = ids.find((id) => (s.branch && idRe(id).test(s.branch)) || idRe(id).test(s.cwd));
-    if (hit) {
-      links.push({ kind: "session", confidence: "likely", sessionId: s.sessionId, label: sessionLabel(s), text: `${tr("сессия", "session")} ${sessionLabel(s)}: ${s.branch && idRe(hit).test(s.branch) ? tr(`ветка ${clean(s.branch, 60)}`, `branch ${clean(s.branch, 60)}`) : tr("каталог", "folder")}` });
-      seenSessions.add(s.sessionId);
-    }
-  }
-  if (day && !links.some((l) => l.kind === "session")) {
-    const root = day.repo_root;
-    const s = work.sessions.find((x) => within(x.cwd, root));
-    if (s && now() - day.mtimeMs < 6 * 3600_000) links.push({ kind: "session", confidence: "possible", sessionId: s.sessionId, label: sessionLabel(s), text: tr(`сессия ${sessionLabel(s)} в том же репо`, `session ${sessionLabel(s)} in the same repo`) });
+    if (!hit) continue;
+    const where = s.branch && idRe(hit).test(s.branch) ? tr(`ветка ${clean(s.branch, 60)}`, `branch ${clean(s.branch, 60)}`) : tr("папка", "folder");
+    links.push({ kind: "session", confidence: "likely", sessionId: s.sessionId, label: sessionLabel(s), text: `${tr("сессия", "session")} ${sessionLabel(s)}: ${where}` });
   }
   return links;
-}
-function now() {
-  return Date.now();
 }
 
 // ---------- state between runs ----------
@@ -654,6 +554,8 @@ function saveJson(p, o) {
 
 // ---------- run ----------
 export async function collect({ env = process.env, home = homedir(), nowMs = Date.now(), fetchImpl = globalThis.fetch, alive = pidsAlive, hubCall = hubMcp } = {}) {
+  // the run's own clock (not nowMs, which tests set): the hub call and the REST fallback share one deadline
+  const startedAt = Date.now();
   const token = env.AGENTHUB_SECRET_CLICKUP_TOKEN;
   // hub socket: the core gives this variable only to trusted plugins and only with the oauth service enabled
   const sock = typeof env.AGENTHUB_HUB_SOCKET === "string" && env.AGENTHUB_HUB_SOCKET.startsWith("/") ? env.AGENTHUB_HUB_SOCKET : null;
@@ -662,7 +564,7 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
   const cfg = dataDir ? loadJson(join(dataDir, "config.json"), {}) : {};
   const statePath = cacheDir ? join(cacheDir, "state.json") : null;
   const state = statePath ? loadJson(statePath, {}) : {};
-  const r = { tokenMissing: false, mode: null, oauth: null, connectInHub: Boolean(sock), tasks: state.last?.tasks || [], fetchedAt: state.last?.at || null, error: null, pausedUntil: null, rate: state.rate || null, requests: 0, links: new Map(), limit: Math.min(50, Math.max(1, Number(cfg.limit) || 15)) };
+  const r = { dataDir, truncated: false, teamsSkipped: 0, tokenMissing: false, mode: null, oauth: null, connectInHub: Boolean(sock), tasks: state.last?.tasks || [], fetchedAt: state.last?.at || null, error: null, pausedUntil: null, rate: state.rate || null, requests: 0, links: new Map(), limit: Math.min(50, Math.max(1, Number(cfg.limit) || 15)) };
   let dirty = false;
   // 1. ClickUp sign-in through the hub (MCP): the core keeps the rate, the limit and the token
   if (sock) {
@@ -686,6 +588,7 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
         try {
           const tasks = tasksFromMcp(b.result);
           r.tasks = tasks;
+          r.truncated = tasks.length >= PAGE_SIZE;
           r.fetchedAt = r.oauth.fetchedAt || nowMs;
           state.last = { at: r.fetchedAt, tasks };
           state.mode = "oauth";
@@ -702,8 +605,12 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
     } else if (res.status === 403 || res.status === 400 || res.status === 413) {
       // the hub blocked the call (core policy: not trusted, no net permission, tool not on the list)
       r.oauth = { denied: typeof b.error === "string" ? b.error : `http-${res.status}` };
+    } else if (res.status === 0 || (res.status === 409 && b.error === "oauth:unavailable")) {
+      // the hub didn't answer in time (a slow keychain read) or its sign-in service is busy: not "not connected" —
+      // the token, if any, takes over; otherwise the last tickets stay with a "the hub didn't answer" note
+      r.oauth = { noAnswer: true };
     }
-    // 409 not-connected / unavailable, 404 (hub without the oauth service), no answer — no sign-in: fall through to the personal token
+    // 409 not-connected, 404 (hub without the oauth service) — no sign-in: fall through to the personal token
   }
   // 2. fallback — a personal token (REST v2), if there is no sign-in through the hub
   if (!r.mode && token) {
@@ -718,7 +625,7 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
         token,
         base: resolveBase(env.AGENTHUB_CLICKUP_API_BASE),
         fetchImpl,
-        deadlineAt: nowMs + DEADLINE_MS,
+        deadlineAt: startedAt + DEADLINE_MS,
         onRate: (x) => {
           if (x.remaining !== null || x.resetMs !== null) state.rate = { remaining: x.remaining, resetMs: x.resetMs, at: nowMs };
         },
@@ -732,6 +639,8 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
         r.tasks = tasks;
         r.fetchedAt = nowMs;
         r.denied = info.denied || [];
+        r.truncated = Boolean(info.truncated);
+        r.teamsSkipped = info.teamsSkipped || 0;
       } catch (e) {
         const kind = e instanceof ApiError ? e.kind : "net";
         r.error = { kind, status: e.status ?? null, reason: e.reason || null, denied: e.denied || null };
@@ -755,7 +664,7 @@ export async function collect({ env = process.env, home = homedir(), nowMs = Dat
   }
   if (statePath && dirty) saveJson(statePath, state);
   // neither sign-in nor token: "not connected" (an expired sign-in gets its own "reconnect" banner)
-  if (!r.mode && !r.oauth?.expired) r.tokenMissing = true;
+  if (!r.mode && !r.oauth?.expired && !r.oauth?.noAnswer) r.tokenMissing = true;
   if (r.tokenMissing) r.tasks = [];
   if (r.tasks.length) {
     const work = scanWork({ home, alive });
@@ -800,15 +709,17 @@ const prioRank = (t) => PRIORITY_RANK[t.priority] ?? 2;
 // the status name — then the kind comes from the name (English and Russian ClickUp defaults).
 export function statusKind(t) {
   const s = String(t.status || "").toLowerCase();
-  if (/block|hold|stuck|блок|пауз/.test(s)) return "block";
-  if (/review|\bqa\b|testing|ревью|провер/.test(s)) return "review";
-  if (t.statusType === "done" || t.statusType === "closed" || /\bdone\b|complete|closed|resolved|готов|закрыт/.test(s)) return "done";
-  if (t.statusType === "open" || /to ?do|\bopen\b|backlog|\bnew\b|planned|сделать|бэклог|нов/.test(s)) return "todo";
-  if (t.statusType === "custom" || /progress|doing|\bdev\b|работ/.test(s)) return "work";
+  // English names — whole words (\b); Russian — by the word start (\b does not see Cyrillic letters)
+  const ru = (stems) => new RegExp(`(^|[^а-яё])(${stems})`).test(s);
+  if (/\b(blocked|block|on hold|hold|stuck)\b/.test(s) || ru("блок|пауз")) return "block";
+  if (/\b(review|in review|qa|testing)\b/.test(s) || ru("ревью|провер")) return "review";
+  if (t.statusType === "done" || t.statusType === "closed" || /\b(done|complete|completed|closed|resolved)\b/.test(s) || ru("готов|закрыт")) return "done";
+  if (t.statusType === "open" || /\b(to ?do|open|backlog|new|planned)\b/.test(s) || ru("сделать|бэклог|нов")) return "todo";
+  if (t.statusType === "custom" || /\b(in progress|progress|doing|dev|wip)\b/.test(s) || ru("в работе|работ")) return "work";
   return null;
 }
 const STATUS_HUE = { work: "#5B8DEF", review: "#B07CFF", block: "#F06A6A", todo: "#9AA3AF", done: "#3DD68C" };
-// The status color: ClickUp's own (REST), otherwise by kind as in the design.
+// The status color: ClickUp's own (REST), otherwise by kind.
 export function statusHue(t) {
   return t.statusColor || STATUS_HUE[statusKind(t)] || "#9AA3AF";
 }
@@ -826,6 +737,18 @@ function dayDiff(ms, nowMs) {
   const b = new Date(nowMs);
   return Math.round((new Date(a.getFullYear(), a.getMonth(), a.getDate()) - new Date(b.getFullYear(), b.getMonth(), b.getDate())) / DAY_MS);
 }
+// A date-only due date (no time) is due for the whole day: overdue only from the next day. ClickUp stores such a date
+// at the start of the day (00:00 or 04:00 local); without due_date_time (the sign-in path) — judged by that time.
+function dateOnly(t) {
+  if (t.dueTime === true) return false;
+  if (t.dueTime === false) return true;
+  const d = new Date(t.dueMs);
+  return d.getMilliseconds() === 0 && d.getSeconds() === 0 && d.getMinutes() === 0 && (d.getHours() === 0 || d.getHours() === 4);
+}
+export function isOverdue(t, nowMs) {
+  if (!t.dueMs) return false;
+  return dateOnly(t) ? dayDiff(t.dueMs, nowMs) < 0 : t.dueMs < nowMs;
+}
 export function dueWord(ms, nowMs) {
   const d = dayDiff(ms, nowMs);
   if (d === 0) return tr("сегодня", "today");
@@ -835,8 +758,7 @@ export function dueWord(ms, nowMs) {
 }
 const priorityText = (p) => (p === "urgent" ? tr("срочно", "urgent") : p === "high" ? tr("высокий приоритет", "high priority") : null);
 
-// → { agents, due, rest, overdueCount, weekCount, nearestDue }. agents — tickets linked to agent work
-// (night, /ticket, session); due — the others with an overdue or near due date; rest — everything else.
+// → { agents, due, rest, overdueCount, weekCount, nearestDue }. agents — tickets open in a live session; due — the others with an overdue or near due date; rest — everything else.
 export function groupTasks(r, nowMs) {
   const links = (t) => r.links.get(t.id) || [];
   const byPrio = (a, b) => prioRank(a) - prioRank(b) || (b.updatedMs || 0) - (a.updatedMs || 0);
@@ -845,8 +767,8 @@ export function groupTasks(r, nowMs) {
   const due = r.tasks.filter((t) => !taken.has(t.id) && t.dueMs && t.dueMs - nowMs <= DUE_SOON_DAYS * DAY_MS).sort((a, b) => a.dueMs - b.dueMs || prioRank(a) - prioRank(b));
   for (const t of due) taken.add(t.id);
   const rest = r.tasks.filter((t) => !taken.has(t.id)).sort(byPrio);
-  const overdue = r.tasks.filter((t) => t.dueMs && t.dueMs < nowMs).sort((a, b) => a.dueMs - b.dueMs);
-  const week = r.tasks.filter((t) => t.dueMs && t.dueMs >= nowMs && t.dueMs - nowMs <= WEEK_DAYS * DAY_MS).sort((a, b) => a.dueMs - b.dueMs);
+  const overdue = r.tasks.filter((t) => isOverdue(t, nowMs)).sort((a, b) => a.dueMs - b.dueMs);
+  const week = r.tasks.filter((t) => t.dueMs && !isOverdue(t, nowMs) && t.dueMs - nowMs <= WEEK_DAYS * DAY_MS).sort((a, b) => a.dueMs - b.dueMs);
   return { agents, due, rest, overdueCount: overdue.length, oldestOverdue: overdue[0] || null, weekCount: week.length, nearestDue: week[0] || null };
 }
 
@@ -875,13 +797,9 @@ export function tileText(n, working, overdue) {
 }
 
 // A row of stat cards: with agents, overdue, due this week, open.
-const KIND_TEXT = { night: ["ночь", "night"], ticket: ["/ticket", "/ticket"], session: ["сессия", "session"] };
-function statCards(g, n, nowMs, links) {
-  const kinds = new Set();
-  for (const t of g.agents) for (const l of links.get(t.id) || []) kinds.add(l.kind);
-  const kindText = ["night", "ticket", "session"].filter((k) => kinds.has(k)).map((k) => KIND_TEXT[k][EN() ? 1 : 0]).join(", ");
+function statCards(g, n, nowMs) {
   const out = [];
-  out.push(line(String(g.agents.length), { stat: tr("У агентов", "With agents"), note: kindText || tr("никто не взял", "none taken") }));
+  out.push(line(String(g.agents.length), { stat: tr("У агентов", "With agents"), note: g.agents.length ? tr("в открытых сессиях", "in open sessions") : tr("никто не взял", "none taken") }));
   const o = g.oldestOverdue;
   out.push(line(String(g.overdueCount), o ? { stat: tr("Просрочено", "Overdue"), note: `${clean(o.customId || o.id, 20)}, ${tr("срок", "due")} ${dueWord(o.dueMs, nowMs)}`, color: "red" } : { stat: tr("Просрочено", "Overdue"), note: tr("всё в срок", "all on time") }));
   const w = g.nearestDue;
@@ -898,11 +816,11 @@ function taskBlock(t, links, nowMs, { due = false } = {}) {
   const out = [line(clean(t.name, 80), { sfimage: statusSymbol(t), iconColor: hue, badge: clean(t.status, 24), badgeColor: hue })];
   const meta = [ref, t.list ? clean(t.list, 40) : null, priorityText(t.priority)];
   // due date: overdue or in "Due soon" — on its own colored line, otherwise — in the number line
-  const loud = t.dueMs && (due || t.dueMs < nowMs);
+  const late = isOverdue(t, nowMs);
+  const loud = t.dueMs && (due || late);
   if (t.dueMs && !loud) meta.push(`${tr("срок", "due")} ${dueWord(t.dueMs, nowMs)}`);
   out.push(line(`--${meta.filter(Boolean).join(" · ")}`, {}));
   if (loud) {
-    const late = t.dueMs < nowMs;
     out.push(line(`--${late ? tr(`просрочен: срок ${dueWord(t.dueMs, nowMs)}`, `overdue: was due ${dueWord(t.dueMs, nowMs)}`) : tr(`срок ${dueWord(t.dueMs, nowMs)}`, `due ${dueWord(t.dueMs, nowMs)}`)}`, { color: late ? "red" : "orange" }));
   }
   for (const l of links) out.push(line(`--→ ${l.text} · ${confText(l.confidence)}`, l.confidence === "possible" ? { color: "gray" } : {}));
@@ -916,6 +834,11 @@ function taskBlock(t, links, nowMs, { due = false } = {}) {
     out.push(line(`--${tr(`Перейти: сессия ${l.label || ""}`, `Switch to session ${l.label || ""}`).trim()}`, { effect: `session.focus ${l.sessionId}`, sfimage: "arrow.right.square" }));
   }
   return out;
+}
+
+// The settings file path to show: the hub's data folder for this plugin, or its usual place on macOS.
+function configPath(dataDir) {
+  return dataDir ? join(dataDir, "config.json") : "~/Library/Application Support/AgentHub/PluginData/clickup/config.json";
 }
 
 // The header answers "is there anything to do": how many are with agents and how many are overdue. tile= — what needs attention.
@@ -939,7 +862,8 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
     // The hub's secrets service looks up the keychain entry: service agent-hub.clickup, account exactly "token"
     // (find-generic-password -s agent-hub.clickup -a token) — an entry with any other account name won't be found.
     out.push(line(tr("--1. Заведите персональный токен ClickUp: Settings → Apps → API Token", "--1. Create a personal ClickUp token: Settings → Apps → API Token"), { color: "gray" }));
-    out.push(line(tr("--2. Сохраните его в связке ключей macOS командой в Терминале (она спросит токен):", "--2. Save it in the macOS keychain with this Terminal command (it asks for the token):"), { color: "gray" }));
+    out.push(line(tr("--2. Вставьте его кнопкой «Задать ключ…» на этой странице (раздел «Ключи», ключ token)", "--2. Paste it with the Set key… button on this page (the Keys section, key token)"), { color: "gray" }));
+    out.push(line(tr("--Или сохраните в связке ключей macOS командой в Терминале (она спросит токен):", "--Or save it in the macOS keychain with this Terminal command (it asks for the token):"), { color: "gray" }));
     out.push(line(`--${SECRET_CMD}`, { color: "gray" }));
     out.push(line(tr("--Сервис — agent-hub.clickup, учётная запись — ровно token: с другим именем хаб запись не найдёт", "--Service agent-hub.clickup, account exactly token: under any other name the hub won't find it"), { color: "gray" }));
     return out.join("\n");
@@ -957,6 +881,12 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
     }
   } else if (r.oauth?.denied && r.mode === "token") {
     notes.push(line(tr(`Хаб не пустил запрос через вход (${clean(r.oauth.denied, 40)}) — работаю по личному токену`, `The hub blocked the sign-in request (${clean(r.oauth.denied, 40)}) — using the personal token`), { color: "orange" }));
+  }
+  if (r.oauth?.noAnswer && !r.mode) {
+    // the hub didn't answer this time: the last tickets stay, the next run asks again
+    status = "unknown";
+    if (!r.fetchedAt) problem = tr("ClickUp: хаб не ответил", "ClickUp: the hub didn't answer");
+    notes.push(line(r.fetchedAt ? tr(`Хаб не ответил — показаны тикеты на ${fmtTime(r.fetchedAt, nowMs)}, повторю при следующем обновлении`, `The hub didn't answer — showing the tickets as of ${fmtTime(r.fetchedAt, nowMs)}, will ask again on the next refresh`) : tr("Хаб не ответил — повторю при следующем обновлении", "The hub didn't answer — will ask again on the next refresh"), { color: "gray" }));
   }
   if (r.mode === "oauth") {
     const o = r.oauth;
@@ -979,12 +909,19 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
       if (r.error.reason) notes.push(line(`--${clean(shapeText(r.error.reason), 80)}`, { color: "gray" }));
     } else if (r.error.kind === "tool") {
       // ClickUp answered the request with an error: ClickUp's text goes to the output; several workspaces — a hint
-      status = "unknown";
-      problem = r.error.workspace ? tr("ClickUp: укажите рабочее пространство", "ClickUp: set the workspace") : tr("ClickUp: запрос вернул ошибку", "ClickUp: the request returned an error");
-      const what = r.error.workspace
-        ? tr("У вас несколько рабочих пространств ClickUp — укажите teamIds в config.json плагина (через вход берётся одно)", "You have several ClickUp workspaces — set teamIds in the plugin's config.json (the sign-in uses one)")
-        : tr("ClickUp вернул ошибку на запрос тикетов", "ClickUp returned an error for the ticket request");
-      notes.push(line(what, { color: "orange", event: "source-broken" }));
+      if (r.error.workspace) {
+        // a setting, not a broken source: no source-broken event, status "wait" (needs the person)
+        status = "wait";
+        problem = tr("ClickUp: укажите рабочее пространство", "ClickUp: choose the workspace");
+        notes.push(line(tr("У вас несколько рабочих пространств ClickUp — через вход читается одно. Укажите его номер в файле настроек плагина:", "You have several ClickUp workspaces — the sign-in reads one. Put its number in the plugin's settings file:"), { color: "orange" }));
+        notes.push(line(`--${clean(configPath(r.dataDir), 200)}`, { color: "gray" }));
+        notes.push(line(`--{ "teamIds": ["123456"] }`, { color: "gray" }));
+        notes.push(line(tr("--Номер — в адресе ClickUp: app.clickup.com/<номер>/…", "--The number is in the ClickUp address: app.clickup.com/<number>/…"), { color: "gray" }));
+      } else {
+        status = "unknown";
+        problem = tr("ClickUp: запрос вернул ошибку", "ClickUp: the request returned an error");
+        notes.push(line(tr("ClickUp вернул ошибку на запрос тикетов", "ClickUp returned an error for the ticket request"), { color: "orange", event: "source-broken" }));
+      }
       if (r.error.reason) notes.push(line(`--${clean(r.error.reason, 120)}`, { color: "gray" }));
     } else if (r.error.kind === "forbidden") {
       status = "error";
@@ -1020,7 +957,7 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
     if (!r.fetchedAt || (old && r.oauth.why && r.oauth.why !== "interval")) status = "unknown";
   }
 
-  // Page groups (design 1.4.0): "With agents now" → "Due soon" → "Others" by status.
+  // Page groups: "With agents now" → "Due soon" → "Others" by status.
   const g = groupTasks(r, nowMs);
   const n = r.tasks.length;
   const working = g.agents.length;
@@ -1032,12 +969,12 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
   if (notes.length) out.push("---");
   if (!n) out.push(line(r.fetchedAt ? tr("Открытых тикетов нет", "No open tickets") : tr("Тикеты ещё не загружены", "Tickets not loaded yet"), { color: "gray" }));
   else {
-    out.push(...statCards(g, n, nowMs, r.links));
+    out.push(...statCards(g, n, nowMs));
     out.push("---");
     let shown = 0;
     if (g.agents.length) {
       out.push(line(tr(`У агентов · ${g.agents.length}`, `With agents · ${g.agents.length}`), { sfimage: "person.2.fill", iconColor: "#7CC4FF" }));
-      for (const t of g.agents) out.push(...taskBlock(t, r.links.get(t.id) || [], nowMs, { agents: true })), shown++;
+      for (const t of g.agents) out.push(...taskBlock(t, r.links.get(t.id) || [], nowMs, )), shown++;
       out.push("---");
     }
     if (g.due.length) {
@@ -1046,7 +983,7 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
       out.push("---");
     }
     if (g.rest.length) {
-      // the others — briefly, per the design: a status group (gray title, colored dot), then each ticket as a text link
+      // the others — briefly: a status group (gray title, colored dot), then each ticket as a text link
       // (link=true — not a capsule) with a gray "number · list · due" line under it.
       const room = Math.max(0, limit - shown);
       const visible = g.rest.slice(0, room);
@@ -1064,6 +1001,9 @@ export function render(r, { nowMs = Date.now(), limit = r.limit || 15, lang = LA
       out.push("---");
     }
   }
+  // what the plugin did not read: only the first page (100 tickets) per request, at most 3 workspaces with a token
+  if (r.truncated) out.push(line(tr(`Прочитана только первая страница ClickUp (${PAGE_SIZE} тикетов на запрос) — остальные в ClickUp`, `Only ClickUp's first page was read (${PAGE_SIZE} tickets per request) — the rest are in ClickUp`), { color: "gray" }));
+  if (r.teamsSkipped) out.push(line(tr(`Читаются ${MAX_TEAMS} рабочих пространства из ${MAX_TEAMS + r.teamsSkipped} — нужные можно указать в teamIds`, `Reading ${MAX_TEAMS} of ${MAX_TEAMS + r.teamsSkipped} workspaces — choose them with teamIds`), { color: "gray" }));
   const parts = [];
   if (r.fetchedAt) parts.push(tr(`обновлено ${fmtTime(r.fetchedAt, nowMs)}`, `updated ${fmtTime(r.fetchedAt, nowMs)}`));
   if (r.mode === "oauth" && r.oauth.nextAt) parts.push(tr(`следующее в ${fmtTime(r.oauth.nextAt, nowMs)}`, `next at ${fmtTime(r.oauth.nextAt, nowMs)}`));

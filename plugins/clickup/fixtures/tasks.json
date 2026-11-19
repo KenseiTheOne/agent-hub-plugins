@@ -9,7 +9,7 @@
       "list": { "id": "8000001", "name": "Синтетический список" }, "url": "https://app.clickup.com/t/86aaa0001"
     },
     {
-      "id": "86aaa0002", "custom_id": "SYN-42", "name": "Синтетика: ночная задача", "text_content": "СИНТЕТИЧЕСКОЕ-ОПИСАНИЕ-НЕ-ВЫВОДИТЬ",
+      "id": "86aaa0002", "custom_id": "SYN-42", "name": "Синтетика: просроченная задача", "text_content": "СИНТЕТИЧЕСКОЕ-ОПИСАНИЕ-НЕ-ВЫВОДИТЬ",
       "status": { "status": "review", "color": "#f8ae00", "type": "custom" },
       "date_created": "1793000000000", "date_updated": "1793600000000", "due_date": "1700000000000",
       "list": { "id": "8000001", "name": "Синтетический список" }, "url": "https://app.clickup.com/t/86aaa0002"

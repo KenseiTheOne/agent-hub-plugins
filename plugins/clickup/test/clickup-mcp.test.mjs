@@ -85,10 +85,12 @@ function run(env) {
 
 const titles = (p) => [...p.header, ...p.body].map((i) => i.title);
 
-test("metadata 1.5.0 (contract 3): net mcp.clickup.com and api.clickup.com, the plugin declares the connection itself, icon, sign-in failures use the shared problems kind (no own toggle)", () => {
+test("metadata 1.6.0 (contract 3, macOS only, no task-runs): net mcp.clickup.com and api.clickup.com, the plugin declares the connection itself, icon, sign-in failures use the shared problems kind (no own toggle)", () => {
   const pm = readPluginMeta(PLUGIN);
   assert.deepEqual(pm.warnings, []);
-  assert.equal(pm.meta.version, "1.5.0");
+  assert.equal(pm.meta.version, "1.6.0");
+  assert.deepEqual(pm.meta.platforms, ["macos"], "the token hint is a macOS keychain command; the hub socket is macOS only");
+  assert.ok(!pm.meta.fsRead.some((e) => /task-runs/.test(e)), "night runs and /ticket are not read");
   assert.equal(pm.meta.contract, 3);
   assert.deepEqual(pm.meta.icon, { symbol: "checklist", color: "#FF375F" });
   const nets = pm.meta.net.map((x) => x.split(" — ")[0]);
@@ -215,11 +217,13 @@ test("not connected (409 not-connected): without a token — \"Connect ClickUp\"
   }
 });
 
-test("hub without the oauth service or not answering — as before: personal token, without it \"token needed\"", HUB, async () => {
+test("hub without the oauth service — \"not connected\"; a hub that didn't answer is not \"not connected\"", HUB, async () => {
   const { home, env } = setupHome();
   try {
     const gone = await run({ ...env, AGENTHUB_HUB_SOCKET: join(home, "nope.sock") });
     assert.equal(gone.parsed.status, "unknown");
+    assert.equal(gone.parsed.header[0].title, "ClickUp: хаб не ответил");
+    assert.doesNotMatch(titles(gone.parsed).join("\n"), /не подключён/);
     const hub404 = await hubDouble(() => ({ status: 404, body: { error: "not-found" } }));
     const r = await run({ ...env, AGENTHUB_HUB_SOCKET: hub404.sock });
     await hub404.close();
@@ -229,6 +233,51 @@ test("hub without the oauth service or not answering — as before: personal tok
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("slow hub (no answer in time, or 409 oauth:unavailable): the last tickets stay with a gray note; a token takes over", HUB, async () => {
+  const first = await hubDouble(() => ok());
+  const { home, env } = setupHome();
+  try {
+    await run({ ...env, AGENTHUB_HUB_SOCKET: first.sock });
+    await first.close();
+    const busy = await hubDouble(() => ({ status: 409, body: { error: "oauth:unavailable" } }));
+    try {
+      const { parsed } = await run({ ...env, AGENTHUB_HUB_SOCKET: busy.sock });
+      assert.equal(parsed.status, "unknown");
+      assert.match(parsed.header[0].title, /^ClickUp: \d+ тикет/, "the tickets stay, not \"not connected\"");
+      const note = parsed.body.find((i) => /^Хаб не ответил — показаны тикеты на/.test(i.title));
+      assert.equal(note?.params.color, "gray");
+      assert.ok(titles(parsed).some((t) => /Синтетика/.test(t)));
+    } finally {
+      await busy.close();
+    }
+    const rest = await restDouble();
+    try {
+      const { parsed } = await run({ ...env, AGENTHUB_HUB_SOCKET: join(home, "nope.sock"), AGENTHUB_SECRET_CLICKUP_TOKEN: TOKEN, AGENTHUB_CLICKUP_API_BASE: rest.base });
+      assert.equal(parsed.status, "ok");
+      assert.ok(rest.log.length > 0, "the token takes over");
+    } finally {
+      await rest.close();
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("hubMcp: an oversized reply ends the call with too-large instead of hanging", async () => {
+  const fake = {
+    request: (opts, onRes) => {
+      const handlers = {};
+      const rq = { on: (e, f) => ((handlers[e] = f), rq), end: () => {
+        const res = { setEncoding() {}, statusCode: 200, on: (e, f) => (e === "data" ? setImmediate(() => f("x".repeat(4 * 1024 * 1024 + 1))) : null) };
+        onRes(res);
+      }, destroy() {} };
+      return rq;
+    },
+  };
+  const r = await mod.hubMcp("/nonexistent.sock", { tool: "t" }, { requestImpl: fake, timeoutMs: 1000 });
+  assert.deepEqual(r, { status: 0, error: "too-large" });
 });
 
 test("unfamiliar tool response shape → unknown + source-broken; a tool error too", HUB, async () => {
@@ -248,14 +297,14 @@ test("unfamiliar tool response shape → unknown + source-broken; a tool error t
 
 test("response parsing: structuredContent, array, status as a string, ISO and seconds dates; arguments from settings", () => {
   const t = mod.tasksFromMcp({ structuredContent: { tasks: [{ id: 42, name: "A", status: "open", list: "Бэклог", date_updated: "2026-11-09T10:00:00Z", due_date: 1_800_000_000 }] } });
-  assert.deepEqual(t[0], { id: "42", customId: null, name: "A", status: "open", statusColor: null, statusType: null, url: "https://app.clickup.com/t/42", list: "Бэклог", updatedMs: Date.parse("2026-11-09T10:00:00Z"), dueMs: 1_800_000_000_000, priority: null });
+  assert.deepEqual(t[0], { id: "42", customId: null, name: "A", status: "open", statusColor: null, statusType: null, url: "https://app.clickup.com/t/42", list: "Бэклог", updatedMs: Date.parse("2026-11-09T10:00:00Z"), dueMs: 1_800_000_000_000, dueTime: null, priority: null });
   assert.equal(mod.tasksFromMcp({ content: [{ type: "text", text: JSON.stringify([{ id: "x", name: "B", url: "https://evil.example/" }]) }] })[0].url, "https://app.clickup.com/t/x");
   assert.throws(() => mod.tasksFromMcp({ content: [{ type: "text", text: JSON.stringify({ tasks: [{ name: "без id" }] }) }] }), (e) => e.reason === "task-no-id");
   assert.deepEqual(mod.mcpArgs({ assignee: null, listIds: ["12", "x"], teamIds: ["900", "901"] }), { include_closed: false, subtasks: true, order_by: "updated", fields: mod.MCP_FIELDS, list_ids: ["12"], workspace_id: "900" });
 });
 
 // review of Nov 9: tool error text, the workspace_id requirement, "no access" (403), plan from the core budget
-test("tool error: ClickUp's text and a teamIds hint; also with a previous result in the core's memory", HUB, async () => {
+test("tool error: ClickUp's text and a teamIds hint with the config path (status wait, no source-broken); also with a previous result in the core's memory", HUB, async () => {
   const cases = [
     // core Nov 9+: ok:false, error mcp:tool-error, errorText
     { ...ok().body, ok: false, result: null, error: "mcp:tool-error", errorText: "Error: workspace_id required when you belong to several workspaces", why: "tool-error" },
@@ -269,13 +318,14 @@ test("tool error: ClickUp's text and a teamIds hint; also with a previous result
     const { home, env } = setupHome();
     try {
       const { parsed } = await run({ ...env, AGENTHUB_HUB_SOCKET: hub.sock });
-      assert.equal(parsed.status, "unknown");
+      assert.equal(parsed.status, "wait", "a setting, not a failure");
       assert.equal(parsed.header[0].title, "ClickUp: укажите рабочее пространство");
       const all = titles(parsed).join("\n");
-      assert.match(all, /укажите teamIds в config\.json плагина/);
+      assert.ok(all.includes(join(env.AGENTHUB_PLUGIN_DATA_PATH, "config.json")), "the full path to the settings file");
+      assert.match(all, /"teamIds": \["123456"\]/);
       assert.match(all, /workspace_id required/, "ClickUp's text is not dropped");
       assert.doesNotMatch(all, /незнакомая форма|не разобран/);
-      assert.deepEqual(parsed.events, ["source-broken"]);
+      assert.deepEqual(parsed.events, [], "no source-broken for a setting");
     } finally {
       await hub.close();
       rmSync(home, { recursive: true, force: true });

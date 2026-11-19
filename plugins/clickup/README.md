@@ -1,7 +1,8 @@
 # clickup — ClickUp tickets and their link to work
 
 An official plugin of the `agent-hub-plugins` registry (tier `official`, installed and removed by the manager).
-Standard, every 2 min (the link to work — on every run; the tickets themselves — per the data path below). Read-only, no actions.
+Standard, every 2 min (the link to open sessions — on every run; the tickets themselves — per the data path below).
+Read-only, no actions. macOS only (since 1.6.0).
 
 The plugin is bilingual: the hub shows its texts in Russian or English (`AGENTHUB_LANG`). UI texts below are quoted in
 English.
@@ -15,7 +16,7 @@ of a public client (no client_secret), the redirect address is `127.0.0.1` with 
 The registration and tokens live only in the hub's keychain (`agent-hub.oauth`); **the plugin never sees the token**.
 
 The plugin calls one tool — `clickup_filter_tasks` (`assignees: ["me"]`, open, with subtasks, by update time,
-fields `custom_id, status, due_date, date_updated, list`) — through the hub socket: `POST /connections/clickup/mcp`
+fields `custom_id, status, due_date, date_updated, list, priority`) — through the hub socket: `POST /connections/clickup/mcp`
 (the `AGENTHUB_HUB_SOCKET` variable, which the core gives to trusted plugins only). The core lets through only a trusted
 plugin that declares `<agenthub.net>mcp.clickup.com` and only tools from the connection's allowlist. **One call per
 poll**: the server understands the user "me" itself, `clickup_get_user` isn't needed.
@@ -39,13 +40,19 @@ one workspace** — the first value of `teamIds` (one call per poll); the other 
 — no assignee filter. An unfamiliar tool response shape (not JSON, no `tasks`, a task without id/name) —
 `status=unknown` + `source-broken`. **A tool error** (ClickUp answered the request with an error) — also
 `status=unknown` + `source-broken`, but with ClickUp's text (up to 120 characters); the `workspace_id` requirement gets
-the header "ClickUp: set the workspace" and a hint about `teamIds`. The core does not count such a response as a
+the header "ClickUp: choose the workspace", `status=wait` and **no** `source-broken` (a setting, not a broken
+source), with the full path of the settings file and an example (`{ "teamIds": ["123456"] }`; the number is in the
+ClickUp address, `app.clickup.com/<number>/…`). The core does not count such a response as a
 successful refresh (backoff, "updated" doesn't move). **No access** (the core got a 403 — the sign-in lacks
 permissions) — `status=error`, "ClickUp: no access to tickets via the sign-in", without `login-expired`: signing in
 again won't help, the core retries in an hour. The keychain didn't answer — an orange "retrying in a minute" note,
 previous tickets remain.
 
-A hub without the `oauth` service (or older than Nov 9) — the plugin works as 1.1.1: with a personal token.
+A hub without the `oauth` service — the plugin works with a personal token.
+
+**The hub didn't answer** (no reply within 3.6 s — e.g. a slow keychain read — or `409 oauth:unavailable`, since
+1.6.0): this is not "not connected". With a personal token the token takes over; without one the last tickets stay on
+the page with a gray "The hub didn't answer — showing the tickets as of HH:MM" note and `status=unknown`.
 
 ## Fallback — a personal token
 
@@ -53,43 +60,38 @@ If there is no sign-in through the hub (not connected, older hub, service disabl
 token, as before — a refresh every 2 min, REST limits.
 
 **API:** REST v2 `https://api.clickup.com`, **GET only** and only paths from the allowlist
-(`/api/v2/user`, `/api/v2/team`, `/api/v2/team/{id}/task`, `/api/v2/list/{id}/task`, `/api/v2/task/{id}`)
-with allowed parameters; redirects are forbidden. No writes to ClickUp (out of scope).
+(`/api/v2/user`, `/api/v2/team`, `/api/v2/team/{id}/task`, `/api/v2/list/{id}/task`)
+with allowed parameters (`assignees[]`, `include_closed`, `subtasks`, `order_by`, `page`); redirects are forbidden. No writes to ClickUp (out of scope).
 `user` and `team` are cached for a day — a normal run makes one request per workspace.
 
 **Token:** the `clickup.token` secret → `AGENTHUB_SECRET_CLICKUP_TOKEN` (the core calls the secrets provider). The
-user creates the keychain entry — service `agent-hub.clickup`, account exactly `token` (the secrets service looks up
+simplest way is the **Set key…** button on the plugin page (the Keys section). Or create the keychain entry yourself —
+service `agent-hub.clickup`, account exactly `token` (the secrets service looks up
 `find-generic-password -s agent-hub.clickup -a token`):
 
 ```sh
 security add-generic-password -s agent-hub.clickup -a token -T /usr/bin/security -w
 ```
 
-The plugin shows this same command (ru and en) when there is neither a sign-in nor a token (since 1.1.1; since 1.2.0 —
+The plugin points to Set key… first and shows this command as the alternative (ru and en) when there is neither a sign-in nor a token (since 1.1.1; since 1.2.0 —
 under "Fallback — a personal token", after "Click Connect ClickUp"). Neither sign-in nor token — `status=unknown`, no
 requests at all. The token never reaches the output, cache or log.
 
 **Limit:** `X-RateLimit-Remaining` / `X-RateLimit-Reset` are honoured (≤ 3 left — wait for the window to reset);
 on 429 — backoff of 1, 2, 4… min (up to 30 min, not earlier than Reset), previous tickets stay on screen.
 
-**Settings** (optional) — `<AGENTHUB_PLUGIN_DATA_PATH>/config.json`:
+**Settings** (optional) — `<AGENTHUB_PLUGIN_DATA_PATH>/config.json`, on macOS
+`~/Library/Application Support/AgentHub/PluginData/clickup/config.json`:
 `{"teamIds": ["…"], "listIds": ["…"], "assignee": "me" | null, "limit": 15}`. By default — open tickets assigned
-to the token owner in all of their workspaces (up to 3).
+to the token owner in all of their workspaces (up to 3; more workspaces — a gray "Reading 3 of N workspaces" line).
+Only the first page of each request is read (ClickUp gives up to 100 tickets per page); a full page adds a gray "Only
+ClickUp's first page was read" line.
 
-**Ticket ↔ work link** (design, section 4), the confidence is shown on the line:
-
-| Link | Source | Confidence |
-|---|---|---|
-| night | `~/.claude/task-runs/night/projects/*/attempts/<id>.json`, `night/<date>/<id>/agent.json`, a night `RUN.md` (branch `night/…`, folder `*-night`, `unattended`) | certain |
-| /ticket | `~/.claude/task-runs/<repo>/<id>/RUN.md` | certain |
-| session | `session_id` in `RUN.md` | certain |
-| session | a live session on the branch from `RUN.md` in the same repo, or the session branch/folder contains the ticket id | likely |
-| session | a live session in the `RUN.md` repo (a fresh one, < 6 h), the branch doesn't match | possible |
-
-From `RUN.md` only the keys `task_id, task_ref, branch, repo_root, worktree, status, outcome, mode,
-session_id, unattended` and the name of the last `step` are read. Sessions — `~/.claude/sessions/<pid>.json` (the key
-files next to them are not read), liveness — `process.kill(pid, 0)` (no `ps`, works on Windows too), branch — `.git/HEAD` (and `gitdir:` for a worktree) without
-running git.
+**Ticket ↔ session link:** a live Claude Code session whose git branch or folder contains the ticket id (the id or
+the custom id as a whole word) — confidence "likely". Sessions — `~/.claude/sessions/<pid>.json` (the key files next
+to them are not read), liveness — `process.kill(pid, 0)` (no `ps`), branch — the `.git` of the session folder or of a
+folder above it (up to 12 levels), following `gitdir:` for a git worktree to its `HEAD` in the main repo's git dir;
+git is not run.
 
 **Offers:** `open.url` — the ticket in the browser; `session.focus <sessionId>` (since 1.5.0) — a "Switch to session"
 button for a live session linked to the ticket: the hub finds the tab, the plugin knows nothing about the terminal.
@@ -117,7 +119,7 @@ shows a consent window. `api.clickup.com` and the `clickup.token` secret remain 
 
 ## Contract 2 (1.3.0)
 
-Since Nov 9 the hub knows nothing about ClickUp (`docs/contract/extension-points.md`, "Contract versions"): everything
+Since contract 2 the hub knows nothing about ClickUp (`docs/contract/extension-points.md`, "Contract versions"): everything
 the core used to keep — the MCP server address, scope, tool allowlist, interval, daily budget, the name in the shell —
 the plugin declares itself. What is declared and why:
 
@@ -142,11 +144,11 @@ Tickets are grouped by what needs attention — each group as a separate card:
 
 1. **Header** — "ClickUp: 9 tickets · 2 with agents · 1 overdue". The popover tile shows what needs attention:
    "2 with agents", without them "1 overdue", otherwise the open count.
-2. **Stat cards** — with agents (and whose: night, `/ticket`, session), overdue (the oldest), due this week
+2. **Stat cards** — with agents (in open sessions), overdue (the oldest), due this week
    (the nearest), open.
-3. **With agents** — tickets linked to agent work. The name is a line with a status symbol (empty circle —
+3. **With agents** — tickets open in a live session. The name is a line with a status symbol (empty circle —
    open, half-filled — in progress, checkmark — closed) and the status as a badge; under it "number · list · priority ·
-   due", what the agent is doing and with what confidence, the "Open in ClickUp" and "Switch to session …" buttons
+   due", which session has it and with what confidence, the "Open in ClickUp" and "Switch to session …" buttons
    (`session.focus`).
 4. **Due soon** — the other tickets that are overdue or due within the next 3 days, by due date; the due date is a
    colored line (red — overdue, orange — soon).
@@ -185,3 +187,23 @@ adapter for.
 **Permissions 1.5.0:** removed `fsRead ~/.cmuxterm/claude-hook-sessions.json`; the `cmux.focus` effect is replaced by
 `session.focus`. The new effect is a permission increase: the update shows a consent window (switching to a tab is a
 harmless effect, like `open.url`).
+
+## What changed in 1.6.0
+
+- **No more `~/.claude/task-runs`.** Night runs and `/ticket` runs are personal tools, not part of a public plugin:
+  the plugin no longer reads them. A ticket is "with agents" only when a live session's branch or folder has its id.
+- **macOS only.** The hub socket and the token hint (a macOS keychain command) are macOS-only; Windows is dropped from
+  `platforms`.
+- **The hub didn't answer ≠ not connected.** A slow hub or `oauth:unavailable` keeps the last tickets with a gray
+  note instead of the "ClickUp isn't connected" screen; the REST fallback shares the run's deadline with the hub call.
+- **Due today is not overdue.** A date-only due date (`due_date_time: false`, or a start-of-day time on the sign-in
+  path) counts the whole day; overdue starts the next day.
+- **Several workspaces** is a setting, not a failure: `status=wait`, no `source-broken`, the full path of
+  `config.json` and an example on the page.
+- What isn't read is said: the first page only (100 per request), at most 3 workspaces.
+- Smaller: "Set key…" first in the token hint; whole-word status names (`household` is not "on hold"); a leading `~`
+  is stripped from data; an oversized hub reply ends the call instead of hanging; the REST allowlist is narrowed to
+  what is used (`/api/v2/task/{id}`, `reverse`, `statuses[]`, `custom_task_ids`, `team_id` removed).
+
+**Permissions 1.6.0 shrink** — no consent window: removed `fsRead ~/.claude/task-runs` and the `windows` platform; the
+`.git` read is described as it is (the session folder or a folder above it, a worktree's `HEAD` in the main repo).

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseOutput, pluginDir, readPluginMeta, tempHome, testEnv } from "../../../scripts/lib/plugin-test.mjs";
@@ -45,7 +45,8 @@ function setupHome() {
   return { home, env };
 }
 
-// Links: /ticket + a session on the same branch; night via attempts; a second session in a worktree with the id in the branch.
+// Links: a session in a repo whose branch has the ticket id; a second session in a worktree with the id in the branch.
+// Trap: ~/.claude/task-runs holds a run for 86aaa0004 — the plugin no longer reads it, so that ticket stays unlinked.
 function setupWork(home) {
   const repo = join(home, "repo");
   mkdirSync(join(repo, ".git", "worktrees", "wt"), { recursive: true });
@@ -55,13 +56,10 @@ function setupWork(home) {
   writeFileSync(join(wt, ".git"), `gitdir: ${join(repo, ".git", "worktrees", "wt")}\n`);
   writeFileSync(join(repo, ".git", "worktrees", "wt", "HEAD"), "ref: refs/heads/feature/86aaa0003-session\n");
   const tr = join(home, ".claude", "task-runs");
-  mkdirSync(join(tr, "Synth", "86aaa0001"), { recursive: true });
-  writeFileSync(
-    join(tr, "Synth", "86aaa0001", "RUN.md"),
-    ["# Синтетический прогон", "", "task_id: 86aaa0001", "tracker: ClickUp", "task_ref: 86aaa0001", `repo_root: ${repo}`, "mode: fix", "branch: fix/86aaa0001-loading", "step: implement СИНТЕТИЧЕСКИЙ-ТЕКСТ-ШАГА", "step: review СИНТЕТИЧЕСКИЙ-ТЕКСТ-ШАГА", ""].join("\n"),
-  );
+  mkdirSync(join(tr, "Synth", "86aaa0004"), { recursive: true });
+  writeFileSync(join(tr, "Synth", "86aaa0004", "RUN.md"), ["task_id: 86aaa0004", `repo_root: ${repo}`, "step: review НЕ-ЧИТАТЬ", ""].join("\n"));
   mkdirSync(join(tr, "night", "projects", "synth", "attempts"), { recursive: true });
-  writeFileSync(join(tr, "night", "projects", "synth", "attempts", "86aaa0002.json"), JSON.stringify({ updated_ms: Date.now(), outcome: "PR открыт", date: "20261103", noted: {} }));
+  writeFileSync(join(tr, "night", "projects", "synth", "attempts", "86aaa0002.json"), JSON.stringify({ outcome: "НЕ-ЧИТАТЬ" }));
   const sess = join(home, ".claude", "sessions");
   mkdirSync(sess, { recursive: true });
   writeFileSync(join(sess, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: "00000000-0000-4000-8000-00000000000a", cwd: repo, name: "синт-тикет", status: "busy" }));
@@ -106,10 +104,10 @@ test("metadata: secrets clickup.token, effects open.url and session.focus (not c
 });
 
 test("allowlist: GET only and only allowed paths and parameters; base override — loopback only", async () => {
-  for (const ok of ["/api/v2/user", "/api/v2/team", "/api/v2/team/1/task", "/api/v2/list/2/task", "/api/v2/task/86abc"]) mod.checkRequest(ok);
-  for (const bad of ["/api/v2/task/86abc/comment", "/api/v2/team/1/task/x", "/api/v2/user/../team", "/api/v3/user", "/api/v2/webhook", "/api/v2/team/abc/task"])
+  for (const ok of ["/api/v2/user", "/api/v2/team", "/api/v2/team/1/task", "/api/v2/list/2/task"]) mod.checkRequest(ok);
+  for (const bad of ["/api/v2/task/86abc", "/api/v2/task/86abc/comment", "/api/v2/team/1/task/x", "/api/v2/user/../team", "/api/v3/user", "/api/v2/webhook", "/api/v2/team/abc/task"])
     assert.throws(() => mod.checkRequest(bad), (e) => e.kind === "denied", bad);
-  assert.throws(() => mod.checkRequest("/api/v2/user", { archived: "true" }), (e) => e.kind === "denied");
+  for (const k of ["archived", "reverse", "statuses[]", "custom_task_ids", "team_id"]) assert.throws(() => mod.checkRequest("/api/v2/user", { [k]: "true" }), (e) => e.kind === "denied", k);
   assert.equal(mod.resolveBase("http://127.0.0.1:8080"), "http://127.0.0.1:8080");
   for (const b of ["https://evil.example", "http://127.0.0.1.evil.example:80", "http://10.0.0.1:80", undefined]) assert.equal(mod.resolveBase(b), mod.API_BASE);
   // the client itself sends only GET with the token in Authorization and doesn't follow redirects
@@ -159,28 +157,28 @@ test("tickets assigned to the user, open.url links, link to work and confidence;
     assert.deepEqual(q.getAll("assignees[]"), ["1000001"]);
     assert.equal(q.get("include_closed"), "false");
     assert.equal(parsed.status, "ok");
-    assert.equal(parsed.header[0].title, "ClickUp: 4 тикета · у агентов 3 · просрочено 1");
+    assert.equal(parsed.header[0].title, "ClickUp: 4 тикета · у агентов 2 · просрочено 1");
     const items = parsed.body;
     const t1 = items.findIndex((i) => i.title === "Синтетика: починить экран загрузки");
     assert.ok(t1 >= 0);
     assert.equal(items[t1].params.badge, "in progress", "status is a badge on the name");
     assert.match(text, /\n--86aaa0001 · Синтетический список\n/, "number and list on a line under the name");
     assert.ok(items.some((i) => i.href === "https://app.clickup.com/t/86aaa0001" && /Открыть в ClickUp/.test(i.title)));
-    assert.match(text, /→ \/ticket: шаг review \(fix\) · точно/);
-    assert.match(text, /сессия «синт-тикет»: ветка fix\/86aaa0001-loading как в RUN\.md · вероятно/);
+    assert.match(text, /→ сессия «синт-тикет»: ветка fix\/86aaa0001-loading · вероятно/);
+    assert.doesNotMatch(text, /\/ticket|ночь|RUN\.md/, "task-runs (night, /ticket) is not read");
     const focus = items.filter((i) => i.effect && i.effect.startsWith("session.focus"));
     assert.deepEqual(focus.map((i) => [i.title, i.effect]), [
       ["Перейти: сессия «синт-тикет»", "session.focus 00000000-0000-4000-8000-00000000000a"],
       ["Перейти: сессия 00000000", "session.focus 00000000-0000-4000-8000-00000000000b"],
     ], "switching is by sessionId, the hub finds the tab");
     assert.ok(!text.includes(SURF) && !text.includes("cmux"), "the cmux file (the test trap) is not read");
-    assert.match(text, /\nСинтетика: ночная задача \| sfimage=circle\.lefthalf\.filled iconColor=#f8ae00 badge=review badgeColor=#f8ae00\n--SYN-42 · Синтетический список\n--просрочен: срок 14\.11\.2023 \| color=red\n/);
-    assert.match(text, /ночь: PR открыт, 03\.11 · точно/);
+    assert.match(text, /\nСинтетика: просроченная задача \| sfimage=circle\.lefthalf\.filled iconColor=#f8ae00 badge=review badgeColor=#f8ae00\n--SYN-42 · Синтетический список\n--просрочен: срок 14\.11\.2023 \| color=red\n/);
     assert.match(text, /сессия 00000000: ветка feature\/86aaa0003-session · вероятно/);
     assert.ok(!text.includes("dead-86aaa0004"), "a dead session is not linked");
     assert.ok(text.includes("в сессии ¦ с чертой"), "a bar in the name does not break parsing");
     // the others: the name is a text link (link=true), not a capsule
     const t4 = items.find((i) => i.title === "Синтетика: без связи");
+    assert.ok(items.indexOf(t4) > items.findIndex((i) => /^Остальные/.test(i.title)), "a /ticket run alone no longer links a ticket");
     assert.equal(t4.href, "https://app.clickup.com/t/86aaa0004", "an unsafe url is replaced");
     assert.equal(t4.params.link, "true", "the name is a text link");
     assert.match(text, /лимит API: осталось 96/);
@@ -190,21 +188,6 @@ test("tickets assigned to the user, open.url links, link to work and confidence;
     assert.deepEqual(d.log.map((x) => x.path), ["/api/v2/team/9000001/task"]);
     const cache = readFileSync(join(env.AGENTHUB_PLUGIN_CACHE_PATH, "state.json"), "utf8");
     assert.ok(!cache.includes(TOKEN), "the token is not in the cache");
-  } finally {
-    await d.close();
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("RUN.md with session_id → session link is \"certain\"", async () => {
-  const d = await double(okRoutes());
-  const { home, env } = setupHome();
-  setupWork(home);
-  const p = join(home, ".claude", "task-runs", "Synth", "86aaa0001", "RUN.md");
-  writeFileSync(p, readFileSync(p, "utf8").replace("mode: fix", "mode: fix\nsession_id: 00000000-0000-4000-8000-00000000000a"));
-  try {
-    const { text } = await run({ ...env, AGENTHUB_SECRET_CLICKUP_TOKEN: TOKEN, AGENTHUB_CLICKUP_API_BASE: d.base });
-    assert.match(text, /сессия «синт-тикет» \(из RUN\.md\) · точно/);
   } finally {
     await d.close();
     rmSync(home, { recursive: true, force: true });
@@ -412,10 +395,52 @@ test("settings: listIds without teams, assignee: null — no user filter", async
   }
 });
 
-test("parseRunMd: only top-level keys from the list, steps keep only the name", () => {
-  const o = mod.parseRunMd("task_id: X1\nstep: implement длинный текст\n  caveat: вложенное\nprompt: нельзя\nstep: gate ещё текст\nbranch: night/x1-a\n");
-  assert.deepEqual(o, { task_id: "X1", lastStep: "gate", branch: "night/x1-a" });
-  assert.ok(!existsSync("/nonexistent"));
+test("due today is not overdue: a date-only due counts the whole day, a due with a time — to the minute", () => {
+  const now = new Date(2026, 10, 19, 15, 0).getTime();
+  const startOfDay = new Date(2026, 10, 19, 0, 0).getTime();
+  const fourAm = new Date(2026, 10, 19, 4, 0).getTime();
+  const morning = new Date(2026, 10, 19, 10, 30).getTime();
+  assert.equal(mod.isOverdue({ dueMs: startOfDay, dueTime: null }, now), false, "the sign-in path: midnight — a date only");
+  assert.equal(mod.isOverdue({ dueMs: fourAm, dueTime: null }, now), false, "ClickUp keeps date-only dues at 04:00");
+  assert.equal(mod.isOverdue({ dueMs: morning, dueTime: false }, now), false, "REST says date only");
+  assert.equal(mod.isOverdue({ dueMs: morning, dueTime: true }, now), true, "REST says with a time — it passed");
+  assert.equal(mod.isOverdue({ dueMs: morning, dueTime: null }, now), true, "10:30 is a time");
+  assert.equal(mod.isOverdue({ dueMs: startOfDay - 24 * 3600_000, dueTime: false }, now), true, "yesterday");
+  assert.equal(mod.pickTask({ id: "x", name: "n", due_date: String(morning), due_date_time: false }).dueTime, false);
+  const r = { tasks: [{ id: "t1", customId: null, name: "Сегодня", status: "to do", statusType: "open", statusColor: null, url: "https://app.clickup.com/t/t1", list: null, updatedMs: now, dueMs: startOfDay, dueTime: false, priority: null }], links: new Map(), fetchedAt: now, mode: "token", rate: null, error: null, oauth: null, denied: null };
+  const p = parseOutput(mod.render(r, { nowMs: now, lang: "ru" }));
+  assert.equal(p.header[0].title, "ClickUp: 1 тикет");
+  assert.ok(p.body.some((i) => i.title === "срок сегодня" && i.params.color === "orange"));
+  assert.ok(!p.body.some((i) => /просрочен/.test(i.title)));
+});
+
+test("output safety: a leading ~ or - is stripped, a bar in a quoted value does not split it", () => {
+  assert.equal(mod.clean("~~~"), "");
+  assert.equal(mod.clean("~ name"), "name");
+  assert.equal(mod.clean("-- name"), "name");
+  const r = { tasks: [], links: new Map(), fetchedAt: Date.now(), mode: "token", rate: null, error: null, oauth: null, denied: null };
+  assert.deepEqual(parseOutput(mod.render(r, { lang: "en" })).warnings, []);
+});
+
+test("what is not read is said: the first page only, at most 3 workspaces", async () => {
+  const many = { tasks: Array.from({ length: 100 }, (_, i) => ({ id: `p${i}`, name: `T${i}`, status: { status: "to do", type: "open" }, url: `https://app.clickup.com/t/p${i}` })) };
+  const d = await double({
+    "/api/v2/user": () => ({ body: fix("user.json") }),
+    "/api/v2/team": () => ({ body: { teams: [{ id: "1" }, { id: "2" }, { id: "3" }, { id: "4" }, { id: "5" }] } }),
+    "/api/v2/team/1/task": () => ({ body: many }),
+    "/api/v2/team/2/task": () => ({ body: { tasks: [] } }),
+    "/api/v2/team/3/task": () => ({ body: { tasks: [] } }),
+  });
+  const { home, env } = setupHome();
+  try {
+    const { text } = await run({ ...env, AGENTHUB_SECRET_CLICKUP_TOKEN: TOKEN, AGENTHUB_CLICKUP_API_BASE: d.base });
+    assert.ok(!d.log.some((x) => /team\/[45]\//.test(x.path)), "only 3 workspaces are read");
+    assert.match(text, /Прочитана только первая страница ClickUp \(100 тикетов на запрос\)/);
+    assert.match(text, /Читаются 3 рабочих пространства из 5/);
+  } finally {
+    await d.close();
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("pid liveness without /bin/ps (kill(pid, 0) — works on Windows too)", () => {
@@ -436,7 +461,7 @@ test("page 1.4.0: with agents → due soon → others by status; the tile shows 
     T("r2", { priority: "high", updatedMs: now - 5000 }),
     T("r3"),
   ];
-  const links = new Map([["a1", [{ kind: "night", confidence: "certain", text: "ночь: прогон идёт" }]]]);
+  const links = new Map([["a1", [{ kind: "session", confidence: "likely", sessionId: "00000000-0000-4000-8000-00000000000a", label: "a1", text: "сессия a1: ветка fix/a1" }]]]);
   const r = { tasks, links, fetchedAt: now, mode: "token", rate: null, error: null, oauth: null, denied: null };
   const p = parseOutput(mod.render(r, { nowMs: now, lang: "ru" }));
   assert.equal(p.header[0].title, "ClickUp: 7 тикетов · у агентов 1 · просрочено 1");
@@ -473,6 +498,8 @@ test("page 1.4.0: with agents → due soon → others by status; the tile shows 
 test("sign-in tickets have only a status name: the kind, color and order come from the name", () => {
   const T = (status) => ({ status, statusType: null, statusColor: null });
   assert.deepEqual(["in progress", "review", "blocked", "to do", "Open", "complete", "в работе", "что-то своё"].map((s) => mod.statusKind(T(s))), ["work", "review", "block", "todo", "todo", "done", "work", null]);
+  // whole words: "household", "renewal", "incomplete", "devops" are not statuses of their own
+  assert.deepEqual(["household", "renewal", "incomplete", "devops", "обновить", "на проверке", "готово"].map((s) => mod.statusKind(T(s))), [null, null, null, null, null, "review", "done"]);
   assert.equal(mod.statusHue(T("in progress")), "#5B8DEF");
   assert.equal(mod.statusHue({ ...T("in progress"), statusColor: "#ff00aa" }), "#ff00aa", "ClickUp's own color wins");
   const groups = mod.byStatus([T("review"), T("to do"), T("in progress")].map((t, i) => ({ ...t, id: String(i) })));
