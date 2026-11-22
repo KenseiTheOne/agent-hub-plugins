@@ -266,7 +266,7 @@ test("contract in the index — contract and icon from metadata; no tags, no fie
     assert.equal("icon" in old, false);
     // this repo's official plugins
     const real = buildIndex({ out: out2, generatedAt: "2026-11-04T10:00:00.000Z" }).index;
-    for (const [id, contract] of [["clickup", 3], ["hermes", 2], ["claude-code", 3]]) {
+    for (const [id, contract] of [["clickup", 3], ["hermes", 2], ["claude-code", 3], ["codex", 3]]) {
       const p = real.plugins.find((x) => x.id === id);
       assert.equal(p.contract, contract, id);
       assert.match(p.icon?.symbol || "", /^[a-z0-9.]+$/, id);

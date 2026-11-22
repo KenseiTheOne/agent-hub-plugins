@@ -1,0 +1,55 @@
+{
+  "fetched_at": "2026-11-20T10:00:00.000000Z",
+  "etag": "\"fixture-etag\"",
+  "client_version": "0.159.3",
+  "identity": { "account": "fixture-secret-do-not-print" },
+  "models": [
+    {
+      "slug": "demo-alpha",
+      "display_name": "Demo Alpha",
+      "description": "fixture-secret-do-not-print",
+      "default_reasoning_level": "low",
+      "supported_reasoning_levels": [
+        { "effort": "low", "description": "Fast" },
+        { "effort": "medium", "description": "Balanced" },
+        { "effort": "high", "description": "Deep" },
+        { "effort": "xhigh", "description": "Deeper" },
+        { "effort": "max", "description": "Deepest" },
+        { "effort": "ultra", "description": "With delegation" }
+      ],
+      "visibility": "list",
+      "priority": 1,
+      "supported_in_api": true,
+      "model_messages": { "instructions": "fixture-secret-do-not-print" }
+    },
+    {
+      "slug": "demo-hidden",
+      "display_name": "Demo Hidden",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [{ "effort": "medium", "description": "Balanced" }],
+      "visibility": "hide",
+      "priority": 2,
+      "supported_in_api": true
+    },
+    {
+      "slug": "demo-beta",
+      "display_name": "Demo Beta",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        { "effort": "low", "description": "Fast" },
+        { "effort": "medium", "description": "Balanced" },
+        { "effort": "high", "description": "Deep" }
+      ],
+      "visibility": "list",
+      "priority": 3,
+      "supported_in_api": true
+    },
+    {
+      "slug": "Bad Slug; rm -rf",
+      "display_name": "Not an id",
+      "supported_reasoning_levels": [{ "effort": "low" }],
+      "visibility": "list",
+      "priority": 4
+    }
+  ]
+}

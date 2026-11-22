@@ -17,7 +17,7 @@ contract 2 — CONTRIBUTING.md): `<agenthub.*>` tags in comments, SwiftBar-style
 
 ## Official plugins
 
-`hermes`, `clickup`, `claude-code` are official (the list is `official.json`, edited only by the owner; in the
+`hermes`, `clickup`, `claude-code`, `codex` are official (the list is `official.json`, edited only by the owner; in the
 index — `tier: "official"`). `night-runner` left the registry (09.11): the runner is private, its plugin lives in the
 runner's own repository (`agenthub/night-runner/`) and is installed as **your own plugin** from a local folder
 (`agenthub plugins install --from <folder>` + confirmation in the app; agent-hub README, "Your own plugins"). The

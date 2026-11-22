@@ -3,6 +3,7 @@
   "official": [
     "claude-code",
     "clickup",
+    "codex",
     "hermes"
   ]
 }

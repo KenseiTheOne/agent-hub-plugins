@@ -1,0 +1,16 @@
+# Codex config (synthetic fixture)
+model = "demo-beta"   # picked by hand
+model_reasoning_effort = "medium"
+approval_policy = "on-request"
+notify = [
+  "notify-send",
+  "[not a header]",
+]
+
+# MCP servers
+[mcp_servers.demo]
+command = "demo-mcp"
+env = { DEMO_TOKEN = "fixture-secret-do-not-print" }
+
+[projects."/work/demo"]
+trust_level = "trusted"
