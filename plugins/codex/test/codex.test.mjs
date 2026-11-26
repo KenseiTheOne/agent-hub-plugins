@@ -103,7 +103,7 @@ test("Codex not installed (no ~/.codex) — a \"not installed\" frame, status=un
 test("page: model is a dropdown of listed models (priority order, hidden and invalid ids skipped), effort a segment of the model's levels; ru and en", withHome((home) => {
   let { text, parsed } = run(home, { AGENTHUB_LANG: "en" });
   assert.equal(parsed.status, "ok");
-  assert.match(text, /^Base: Demo Beta · medium \| status=ok tile="Demo Beta · medium" tileLabel=Codex$/m);
+  assert.match(text, /^Base: Demo Beta · medium \| status=ok tile="Demo Beta · medium" tileLabel="Codex model"$/m);
   assert.match(text, /^Model \| select=true\n--Default \(Demo Alpha\) \| action=set-model arg=default\n--Demo Alpha \| action=set-model arg=demo-alpha\n--Demo Beta \| selected=true\nEffort \| segment=true\n/m);
   assert.match(text, /^--default \| action=set-effort arg=default tooltip="the model's default level — medium"\n--low \| action=set-effort arg=low\n--medium \| selected=true\n--high \| action=set-effort arg=high\n/m);
   assert.doesNotMatch(text, /Hidden|Not an id|ultra/);

@@ -88,7 +88,7 @@ written only by the app class (the pinned build) via `PUT /settings/notification
 | `sessions` — waiting for an answer / session questions | `session-waiting`, `approvals-paused` | — |
 | `updates` — hub and plugin updates | `plugin-update`, `plugin-own-updated`, `hub-update`, `hub-update-ready`, `hub-update-installed`, `hub-update-failed` | — |
 | `problems` — plugin failures and warnings | `source-broken`, `plugin-error`, `auth-failed` (and plugin rules with `kind="problems"`, for example quota) | a rule with `kind="problems"` or a key from the table (`auth-failed`) |
-| `other` — everything else from plugins | a key without a rule; events of third-party plugins (except community keys with a `kind="plugin"` rule) | a rule without `kind` and without a match in the table |
+| `other` — everything else from plugins | `awake-low-battery`; a key without a rule; events of third-party plugins (except community keys with a `kind="plugin"` rule) | a rule without `kind` and without a match in the table |
 | `plugin:<id>` — **the plugin's own toggle** | — | rules with `kind="plugin"` (and the deprecated `kind="runs"`/`"night"`; a community plugin's `kind="plugin"` labels too): a line in "Settings" with the plugin name, only while the plugin is installed |
 | `security` — **cannot be turned off** | `app-pin-changed`, `app-pin-path-changed`, `app-restart-stopped`, `hub-update-tag-moved`, `hub-update-suspect` | rules with `kind="security"` (tampering signals) |
 

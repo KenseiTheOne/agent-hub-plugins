@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // <agenthub.title>Codex Настройки</agenthub.title>
 // <agenthub.title lang="en">Codex Settings</agenthub.title>
-// <agenthub.version>1.0.0</agenthub.version>
+// <agenthub.version>1.0.1</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="slider.horizontal.3" color="#10A37F"></agenthub.icon>
 // <agenthub.desc>Настройки Codex CLI для новых сессий: модель и effort (уровень рассуждений) из ~/.codex/config.toml, с выбором из списка моделей Codex</agenthub.desc>
@@ -76,7 +76,7 @@ export function envLang() {
 }
 let LANG = envLang();
 const tr = (ru, en) => (LANG === "en" ? en : ru);
-const TILE_LABEL = "Codex";
+const TILE_LABEL = () => tr("Codex модель", "Codex model");
 
 // ---------- paths ----------
 const codexDir = (home) => join(home, ".codex");
@@ -600,13 +600,13 @@ export function render(r, { lang = envLang() } = {}) {
   LANG = lang === "en" ? "en" : "ru";
   const out = [];
   if (!r.installed) {
-    out.push(line(tr("Codex не установлен", "Codex isn't installed"), { status: "unknown", tile: tr("нет", "none"), tileLabel: TILE_LABEL }));
+    out.push(line(tr("Codex не установлен", "Codex isn't installed"), { status: "unknown", tile: tr("нет", "none"), tileLabel: TILE_LABEL() }));
     out.push("---");
     out.push(line(tr("Плагин показывает настройки Codex CLI, когда он установлен (папка ~/.codex)", "The plugin shows Codex CLI settings once it is installed (the ~/.codex folder)")));
     return `${out.join("\n")}\n`;
   }
   if (r.broken) {
-    out.push(line(tr("Настройки Codex не читаются", "Codex settings unreadable"), { status: "error", tile: tr("сбой", "error"), tileLabel: TILE_LABEL }));
+    out.push(line(tr("Настройки Codex не читаются", "Codex settings unreadable"), { status: "error", tile: tr("сбой", "error"), tileLabel: TILE_LABEL() }));
     out.push("---");
     if (r.broken === "unreadable") out.push(line(tr("Не получается прочитать ~/.codex/config.toml", "Can't read ~/.codex/config.toml")));
     else
@@ -632,7 +632,7 @@ export function render(r, { lang = envLang() } = {}) {
   const effortShort = effortSet ? root.effort.value : root.effort.state === "odd" ? "?" : effDefault || tr("по умолч.", "default");
   const effortLong = effortSet ? root.effort.value : root.effort.state === "odd" ? "?" : effDefault ? tr(`по умолчанию (${effDefault})`, `default (${effDefault})`) : tr("по умолчанию", "default");
 
-  out.push(line(tr(`Базовые: ${modelLong} · ${effortLong}`, `Base: ${modelLong} · ${effortLong}`), { status: "ok", tile: `${modelShort} · ${effortShort}`, tileLabel: TILE_LABEL }));
+  out.push(line(tr(`Базовые: ${modelLong} · ${effortLong}`, `Base: ${modelLong} · ${effortLong}`), { status: "ok", tile: `${modelShort} · ${effortShort}`, tileLabel: TILE_LABEL() }));
   out.push("---");
   out.push(line(tr("Для новых сессий", "For new sessions")));
 

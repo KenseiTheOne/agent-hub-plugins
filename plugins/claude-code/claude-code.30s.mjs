@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // <agenthub.title>Claude Code Настройки</agenthub.title>
 // <agenthub.title lang="en">Claude Code Settings</agenthub.title>
-// <agenthub.version>1.4.2</agenthub.version>
+// <agenthub.version>1.4.3</agenthub.version>
 // <agenthub.contract>3</agenthub.contract>
 // <agenthub.icon symbol="text.alignleft" color="#D97757"></agenthub.icon>
 // <agenthub.desc>Настройки Claude Code для новых сессий (модель, контекст 1 млн, effort, стиль ответов, ultracode) и открытые вкладки: какие не как базовые, и кнопка привести их</agenthub.desc>
@@ -118,7 +118,7 @@ export function envLang() {
 let LANG = envLang();
 const tr = (ru, en) => (LANG === "en" ? en : ru);
 // The popover tile caption: "Claude Code Settings" does not fit the tile (~110 pt, one line)
-const TILE_LABEL = () => tr("Настройки", "Settings");
+const TILE_LABEL = () => tr("Claude модель", "Claude model");
 function ruPlural(n, one, few, many) {
   const m10 = n % 10;
   const m100 = n % 100;
